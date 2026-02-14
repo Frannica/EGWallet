@@ -13,7 +13,7 @@ export default function App() {
     console.log('🚀 App Startup - Production API URL:', config.API_BASE_URL);
     console.log('🚀 App Environment:', __DEV__ ? 'Development' : 'Production');
     console.log('🛡️ Crash protection: ENABLED');
-    console.log('📦 Version: 11'); // Force fingerprint change
+    console.log('📦 Version: 12'); // Force fingerprint change
   }, []);
 
   return (
