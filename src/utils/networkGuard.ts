@@ -1,6 +1,8 @@
 /**
  * Network Guard - Safe API Call Wrapper
  * Prevents app crashes from network errors in financial transactions
+ * 
+ * v11: Force fingerprint cache clear - financial-grade production stability
  */
 
 export interface NetworkGuardConfig {
