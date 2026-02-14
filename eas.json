@@ -21,6 +21,7 @@
     "production": {
       "android": {
         "buildType": "app-bundle",
+        "versionCode": 11,
         "env": {
           "NODE_OPTIONS": "--max-old-space-size=4096",
           "EAS_SKIP_AUTO_FINGERPRINT": "1"
