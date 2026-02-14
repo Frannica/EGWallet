@@ -12,6 +12,8 @@ import BudgetScreen from '../screens/BudgetScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import TransactionHistory from '../screens/TransactionHistory';
 import AboutScreen from '../screens/AboutScreen';
+import QRScannerScreen from '../screens/QRScannerScreen';
+import ContactsScreen from '../screens/ContactsScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -39,6 +41,8 @@ export default function AppNavigator() {
         <Stack.Screen name="Main" component={Tabs} options={{ headerShown: false }} />
         <Stack.Screen name="Transactions" component={TransactionHistory} options={{ title: 'Transactions' }} />
         <Stack.Screen name="About" component={AboutScreen} options={{ title: 'About EGWallet' }} />
+        <Stack.Screen name="QRScanner" component={QRScannerScreen} options={{ title: 'Scan QR Code', headerShown: false }} />
+        <Stack.Screen name="Contacts" component={ContactsScreen} options={{ title: 'Contacts' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

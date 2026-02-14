@@ -36,6 +36,20 @@
         "projectId": "16aa669e-bf87-4a8b-b24b-6b1c79dcc0f7"
       }
     },
-    "owner": "francisco1953"
+    "owner": "francisco1953",
+    "plugins": [
+      "expo-barcode-scanner",
+      "expo-camera",
+      "expo-local-authentication",
+      "expo-notifications",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ]
   }
 }
