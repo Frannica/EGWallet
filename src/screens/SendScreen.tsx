@@ -1,17 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Button, TextInput, Alert, ScrollView } from 'react-native';
+import { View, Text, Button, TextInput, Alert, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
 import { listWallets } from '../api/auth';
 import { sendTransaction } from '../api/transactions';
 import { useNavigation } from '@react-navigation/native';
 import { majorToMinor, decimalsFor } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
+import { useTheme } from '../contexts/ThemeContext';
+import { requireBiometric } from '../utils/BiometricAuth';
+import { getRecentContacts, markContactAsUsed } from '../utils/ContactsManager';
+import { notifyTransactionSent } from '../utils/NotificationService';
 
 const FEE_PERCENTAGE = 0.01; // 1% fee
 
 export default function SendScreen() {
   const auth = useAuth();
   const { isOnline } = useNetworkStatus();
+  const { colors } = useTheme();
   const [wallets, setWallets] = useState<Array<any>>([]);
   const [loading, setLoading] = useState(false);
   const [fromWalletId, setFromWalletId] = useState<string | null>(null);
@@ -19,9 +24,14 @@ export default function SendScreen() {
   const [amount, setAmount] = useState<string>('');
   const [currency, setCurrency] = useState<string>('XAF');
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [showContactPicker, setShowContactPicker] = useState(false);
+  const [recentContacts, setRecentContacts] = useState<any[]>([]);
   const navigation = useNavigation();
 
-  useEffect(() => { loadWallets(); }, [auth.token]);
+  useEffect(() => { 
+    loadWallets();
+    loadRecentContacts();
+  }, [auth.token]);
 
   async function loadWallets() {
     if (!auth.token) return;
@@ -33,6 +43,27 @@ export default function SendScreen() {
     } catch (e) {
       if (__DEV__) console.warn(e);
     } finally { setLoading(false); }
+  }
+
+  async function loadRecentContacts() {
+    const contacts = await getRecentContacts(3);
+    setRecentContacts(contacts);
+  }
+
+  function handleQRScan() {
+    // @ts-ignore
+    navigation.navigate('QRScanner', {
+      title: 'Scan Recipient Wallet',
+      onScan: (data: string) => {
+        setToWalletId(data);
+      },
+    });
+  }
+
+  function handleContactSelect(walletId: string) {
+    setToWalletId(walletId);
+    setShowContactPicker(false);
+    markContactAsUsed(walletId);
   }
 
   async function onSend() {
@@ -47,9 +78,20 @@ export default function SendScreen() {
     // Show confirmation screen instead of sending directly
     setShowConfirmation(true);
   }
+// Require biometric authentication
+    const authenticated = await requireBiometric('send money');
+    if (!authenticated) {
+      Alert.alert('Authentication Required', 'Biometric authentication is required to send money');
+      return;
+    }
 
-  function calculatePreview() {
-    const amt = parseFloat(amount);
+    setLoading(true);
+    try {
+      const res = await sendTransaction(auth.token, fromWalletId, toWalletId, amountMinor, currency);
+      
+      // Send success notification
+      await notifyTransactionSent(amt, currency, toWalletId);
+      
     if (!amt || amt <= 0) return null;
 
     const fee = amt * FEE_PERCENTAGE;
@@ -57,14 +99,14 @@ export default function SendScreen() {
 
     return {
       amount: amt,
-      fee,
-      total,
-      recipientGets: amt, // In real app, apply exchange rate here
-    };
-  }
+      fee,colors.background }}>
+        <View style={{ padding: 16 }}>
+          <Text style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 24, color: colors.text }}>
+            Confirm Transaction
+          </Text>
 
-  async function onSendConfirmed() {
-    if (!auth.token) return Alert.alert('Not authenticated');
+          {/* Transaction Summary */}
+          <View style={{ backgroundColor: colors.cardhenticated');
     if (!fromWalletId) return Alert.alert('Select source wallet');
     const amt = parseFloat(amount);
     if (!amt || amt <= 0) return Alert.alert('Enter valid amount');
@@ -130,14 +172,82 @@ export default function SendScreen() {
               <Button
                 title="Cancel"
                 onPress={() => setShowConfirmation(false)}
-                color="#999"
-              />
+                color="#999", color: colors.text }}>To wallet ID</Text>
+        
+        {/* Recent Contacts Quick Access */}
+        {recentContacts.length > 0 && (
+          <View style={{ marginBottom: 12 }}>
+            <Text style={{ fontSize: 12, color: colors.textSecondary, marginBottom: 4 }}>Recent:</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {recentContacts.map(contact => (
+                <TouchableOpacity
+                  key={contact.id}
+                  style={{ 
+                    backgroundColor: colors.card, 
+                    paddingHorizontal: 12, 
+                    paddingVertical: 6, 
+                    borderRadius: 16,
+                    borderWidth: 1,
+                    borderColor: colors.border
+                  }}
+                  onPress={() => handleContactSelect(contact.walletId)}
+                >
+                  <Text style={{ fontSize: 12, color: colors.text }}>{contact.name}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
-            <View style={{ flex: 1 }}>
-              <Button
-                title={loading ? 'Sending...' : 'Confirm Send'}
-                onPress={onSendConfirmed}
-                disabled={loading}
+          </View>
+        )}
+
+        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+          <TextInput
+            value={toWalletId}
+            onChangeText={setToWalletId}
+            placeholder="Destination wallet id"
+            placeholderTextColor={colors.textSecondary}
+            editable={!loading}
+            style={{ 
+              flex: 1,
+              borderWidth: 1, 
+              borderColor: colors.border, 
+              padding: 8, 
+              borderRadius: 4,
+              color: colors.text,
+              backgroundColor: colors.card
+            }}
+          />
+          <TouchableOpacity
+            style={{
+              backgroundColor: colors.primary,
+              padding: 10,
+              borderRadius: 4,
+              justifyContent: 'center',
+              alignItems: 'center',
+              minWidth: 44,
+            }}
+            onPress={handleQRScan}
+            disabled={loading}
+          >
+            <Text style={{ fontSize: 18 }}>📸</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={{
+              backgroundColor: colors.primary,
+              padding: 10,
+              borderRadius: 4,
+              justifyContent: 'center',
+              alignItems: 'center',
+              minWidth: 44,
+            }}
+            onPress={() => {
+              // @ts-ignore
+              navigation.navigate('Contacts');
+            }}
+            disabled={loading}
+          >
+            <Text style={{ fontSize: 18 }}>👥</Text>
+          </TouchableOpacity>
+        </View       disabled={loading}
                 color="#007AFF"
               />
             </View>
@@ -148,20 +258,20 @@ export default function SendScreen() {
   }
 
   return (
-    <ScrollView style={{ flex: 1 }}>
+    <ScrollView style={{ flex: 1, backgroundColor: colors.background }}>
       <OfflineErrorBanner visible={!isOnline} onRetry={() => loadWallets()} />
       <View style={{ padding: 16 }}>
-        <Text style={{ fontSize: 20, fontWeight: '600', marginBottom: 16 }}>Send Money</Text>
+        <Text style={{ fontSize: 20, fontWeight: '600', marginBottom: 16, color: colors.text }}>Send Money</Text>
 
-        {loading && <Text>Loading wallets...</Text>}
+        {loading && <Text style={{ color: colors.textSecondary }}>Loading wallets...</Text>}
 
-        <Text style={{ marginTop: 12, fontWeight: '600' }}>From wallet</Text>
+        <Text style={{ marginTop: 12, fontWeight: '600', color: colors.text }}>From wallet</Text>
         {wallets.map(w => (
           <Button
             key={w.id}
             title={w.id}
             onPress={() => setFromWalletId(w.id)}
-            color={fromWalletId === w.id ? '#007AFF' : undefined}
+            color={fromWalletId === w.id ? colors.primary : colors.textSecondary}
           />
         ))}
 
@@ -174,26 +284,51 @@ export default function SendScreen() {
           style={{ borderWidth: 1, borderColor: '#ccc', padding: 8, marginBottom: 12, borderRadius: 4 }}
         />
 
-        <Text style={{ fontWeight: '600' }}>Amount</Text>
+        <Text style={{ fontWeight: '600', color: colors.text }}>Amount</Text>
         <TextInput
           value={amount}
           onChangeText={setAmount}
           placeholder="0.00"
+          placeholderTextColor={colors.textSecondary}
           keyboardType="numeric"
           editable={!loading}
-          style={{ borderWidth: 1, borderColor: '#ccc', padding: 8, marginBottom: 12, borderRadius: 4 }}
+          style={{ 
+            borderWidth: 1, 
+            borderColor: colors.border, 
+            padding: 8, 
+            marginBottom: 12, 
+            borderRadius: 4,
+            color: colors.text,
+            backgroundColor: colors.card
+          }}
         />
 
-        <Text style={{ fontWeight: '600' }}>Currency</Text>
+        <Text style={{ fontWeight: '600', color: colors.text }}>Currency</Text>
         <TextInput
           value={currency}
           onChangeText={setCurrency}
+          placeholderTextColor={colors.textSecondary}
           editable={!loading}
-          style={{ borderWidth: 1, borderColor: '#ccc', padding: 8, marginBottom: 12, borderRadius: 4 }}
+          style={{ 
+            borderWidth: 1, 
+            borderColor: colors.border, 
+            padding: 8, 
+            marginBottom: 12, 
+            borderRadius: 4,
+            color: colors.text,
+            backgroundColor: colors.card
+          }}
         />
 
-        <View style={{ backgroundColor: '#f0f7ff', padding: 12, borderRadius: 8, marginBottom: 16, borderLeftWidth: 4, borderLeftColor: '#007AFF' }}>
-          <Text style={{ fontSize: 13, color: '#00539b' }}>
+        <View style={{ 
+          backgroundColor: colors.primary + '20', 
+          padding: 12, 
+          borderRadius: 8, 
+          marginBottom: 16, 
+          borderLeftWidth: 4, 
+          borderLeftColor: colors.primary 
+        }}>
+          <Text style={{ fontSize: 13, color: colors.text }}>
             ℹ️ The receiver will receive this payment in their preferred currency if they have auto-convert enabled, or in the original currency ({currency}) if they prefer multi-currency wallets.
           </Text>
         </View>
@@ -202,7 +337,7 @@ export default function SendScreen() {
           title="Review & Send"
           onPress={onSend}
           disabled={!amount || !toWalletId || loading || !isOnline}
-          color="#007AFF"
+          color={colors.primary}
         />
       </View>
     </ScrollView>

@@ -46,7 +46,7 @@ export async function me(token: string) {
     });
     if (!res.ok) throw new Error('Fetch profile failed');
     return res.json();
-  }, { timeout: 10000, retries: 2 });
+  }, { timeout: 10000, retries: 1 });
 
   if (!result) throw new Error('Failed to fetch profile. Please check your connection.');
   return result;
@@ -59,7 +59,7 @@ export async function listWallets(token: string) {
     });
     if (!res.ok) throw new Error('Fetch wallets failed');
     return res.json();
-  }, { timeout: 10000, retries: 2 });
+  }, { timeout: 10000, retries: 1 });
 
   if (!result) throw new Error('Failed to fetch wallets. Please check your connection.');
   return result;
