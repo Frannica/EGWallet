@@ -32,7 +32,53 @@ export default function TransactionHistory() {
         if (__DEV__) console.warn('Fetch tx failed', e);
       } finally {
         setLoading(false);
-      } flex: 1, backgroundColor: colors.background }}>
+      }
+    })();
+  }, [walletId]);
+
+  useEffect(() => {
+    applyFilters();
+  }, [searchQuery, statusFilter, txs]);
+
+  const applyFilters = () => {
+    let filtered = [...txs];
+
+    // Search filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(
+        (tx) =>
+          tx.id?.toLowerCase().includes(query) ||
+          tx.toWalletId?.toLowerCase().includes(query) ||
+          tx.fromWalletId?.toLowerCase().includes(query) ||
+          tx.memo?.toLowerCase().includes(query) ||
+          tx.amount?.toString().includes(query)
+      );
+    }
+
+    // Status filter
+    if (statusFilter) {
+      filtered = filtered.filter((tx) => tx.status === statusFilter);
+    }
+
+    setFilteredTxs(filtered);
+  };
+
+  const handleGenerateReceipt = async (transaction: any) => {
+    try {
+      await generateAndShareReceipt(transaction, auth.user?.email || 'user@egwallet.com');
+    } catch (e) {
+      Alert.alert('Error', 'Failed to generate receipt');
+    }
+  };
+
+  const clearFilters = () => {
+    setSearchQuery('');
+    setStatusFilter(null);
+  };
+
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={{ padding: 16 }}>
         <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: 12, color: colors.text }}>Transactions</Text>
 
@@ -127,7 +173,7 @@ export default function TransactionHistory() {
 
       <FlatList
         data={filteredTxs}
-        keyExtractor={t => t.id}
+        keyExtractor={(t) => t.id}
         contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 16 }}
         renderItem={({ item }) => (
           <View
@@ -154,69 +200,27 @@ export default function TransactionHistory() {
             </Text>
             {item.wasConverted && item.receivedCurrency !== item.currency && (
               <Text style={{ color: colors.primary, fontSize: 13, marginBottom: 4 }}>
-                → Received: {item.receivedCurrency} {formatCurrency(item.receivedAmount, item.receivedCurrency)} (auto-converted)
+                → Received: {item.receivedCurrency} {formatCurrency(item.receivedAmount, item.receivedCurrency)}{' '}
+                (auto-converted)
               </Text>
             )}
             {!item.wasConverted && item.receivedCurrency && item.receivedCurrency !== item.currency && (
               <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 4 }}>
-                Received: {item.receivedCurrency} {formatCurrency(item.receivedAmount, item.receivedCurrency)} (original currency)
+                Received: {item.receivedCurrency} {formatCurrency(item.receivedAmount, item.receivedCurrency)} (original
+                currency)
               </Text>
             )}
             <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
               {new Date(item.timestamp).toLocaleString()}
             </Text>
             {item.memo ? (
-              <Text style={{ fontSize: 12, color: colors.text, fontStyle: 'italic', marginTop: 4 }}>"{item.memo}"</Text>
+              <Text style={{ fontSize: 12, color: colors.text, fontStyle: 'italic', marginTop: 4 }}>
+                "{item.memo}"
+              </Text>
             ) : null}
           </View>
         )}
-     
-
-    // Status filter
-    if (statusFilter) {
-      filtered = filtered.filter(tx => tx.status === statusFilter);
-    }
-
-    setFilteredTxs(filtered);
-  };
-
-  const handleGenerateReceipt = async (transaction: any) => {
-    try {
-      await generateAndShareReceipt(transaction, auth.user?.email || 'user@egwallet.com');
-    } catch (e) {
-      Alert.alert('Error', 'Failed to generate receipt');
-    }
-  };
-
-  const clearFilters = () => {
-    setSearchQuery('');
-    setStatusFilter(null);
-  };
-
-  return (
-    <View style={{flex:1,padding:16}}>
-      <Text style={{fontSize:18,fontWeight:'600',marginBottom:8}}>Transactions</Text>
-      {loading && <Text>Loading...</Text>}
-      <FlatList data={txs} keyExtractor={t=>t.id} renderItem={({item})=> (
-        <View style={{padding:10,borderBottomWidth:1,borderColor:'#eee'}}>
-          <Text style={{fontWeight:'600'}}>{item.status}</Text>
-          <Text>
-            Sent: {item.currency} {formatCurrency(item.amount, item.currency)}
-          </Text>
-          {item.wasConverted && item.receivedCurrency !== item.currency && (
-            <Text style={{color:'#007AFF',fontSize:13}}>
-              → Received: {item.receivedCurrency} {formatCurrency(item.receivedAmount, item.receivedCurrency)} (auto-converted)
-            </Text>
-          )}
-          {!item.wasConverted && item.receivedCurrency && item.receivedCurrency !== item.currency && (
-            <Text style={{color:'#666',fontSize:13}}>
-              Received: {item.receivedCurrency} {formatCurrency(item.receivedAmount, item.receivedCurrency)} (original currency)
-            </Text>
-          )}
-          <Text style={{color:'#666',fontSize:12}}>{new Date(item.timestamp).toLocaleString()}</Text>
-          {item.memo ? <Text style={{fontSize:12}}>{item.memo}</Text> : null}
-        </View>
-      )} />
+      />
     </View>
   );
 }
