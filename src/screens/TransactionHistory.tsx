@@ -22,7 +22,7 @@ export default function TransactionHistory() {
         const res = await fetchTransactions(auth.token || '', walletId);
         setTxs(res.transactions || []);
       } catch (e) {
-        console.warn('Fetch tx failed', e);
+        if (__DEV__) console.warn('Fetch tx failed', e);
       } finally {
         setLoading(false);
       }
@@ -35,7 +35,20 @@ export default function TransactionHistory() {
       {loading && <Text>Loading...</Text>}
       <FlatList data={txs} keyExtractor={t=>t.id} renderItem={({item})=> (
         <View style={{padding:10,borderBottomWidth:1,borderColor:'#eee'}}>
-          <Text>{item.status} — {item.currency} {formatCurrency(item.amount, item.currency)}</Text>
+          <Text style={{fontWeight:'600'}}>{item.status}</Text>
+          <Text>
+            Sent: {item.currency} {formatCurrency(item.amount, item.currency)}
+          </Text>
+          {item.wasConverted && item.receivedCurrency !== item.currency && (
+            <Text style={{color:'#007AFF',fontSize:13}}>
+              → Received: {item.receivedCurrency} {formatCurrency(item.receivedAmount, item.receivedCurrency)} (auto-converted)
+            </Text>
+          )}
+          {!item.wasConverted && item.receivedCurrency && item.receivedCurrency !== item.currency && (
+            <Text style={{color:'#666',fontSize:13}}>
+              Received: {item.receivedCurrency} {formatCurrency(item.receivedAmount, item.receivedCurrency)} (original currency)
+            </Text>
+          )}
           <Text style={{color:'#666',fontSize:12}}>{new Date(item.timestamp).toLocaleString()}</Text>
           {item.memo ? <Text style={{fontSize:12}}>{item.memo}</Text> : null}
         </View>

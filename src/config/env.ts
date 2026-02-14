@@ -7,7 +7,7 @@ const ENV = {
     LOG_LEVEL: 'debug',
   },
   production: {
-    API_BASE_URL: 'https://api.egwallet.com', // production API URL
+    API_BASE_URL: 'https://eg-wallet-backend-production.up.railway.app',
     LOG_LEVEL: 'error',
   },
 };

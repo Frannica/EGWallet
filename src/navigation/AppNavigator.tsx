@@ -3,6 +3,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createNavigationContainerRef } from '@react-navigation/native';
 import WalletScreen from '../screens/WalletScreen';
 import SendScreen from '../screens/SendScreen';
 import RequestScreen from '../screens/RequestScreen';
@@ -10,9 +11,13 @@ import CardScreen from '../screens/CardScreen';
 import BudgetScreen from '../screens/BudgetScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import TransactionHistory from '../screens/TransactionHistory';
+import AboutScreen from '../screens/AboutScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
+
+// Export navigation ref for error boundary reset
+export const navigationRef = createNavigationContainerRef();
 
 function Tabs() {
   return (
@@ -29,10 +34,11 @@ function Tabs() {
 
 export default function AppNavigator() {
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <Stack.Navigator>
         <Stack.Screen name="Main" component={Tabs} options={{ headerShown: false }} />
         <Stack.Screen name="Transactions" component={TransactionHistory} options={{ title: 'Transactions' }} />
+        <Stack.Screen name="About" component={AboutScreen} options={{ title: 'About EGWallet' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

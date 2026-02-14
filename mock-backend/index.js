@@ -14,11 +14,39 @@ const PORT = process.env.PORT || 4000;
 const currencyDecimals = {
   USD: 2,
   EUR: 2,
+  CNY: 2,
+  CAD: 2,
+  BRL: 2,
+  GBP: 2,
+  JPY: 0,
   NGN: 2,
   XAF: 2,
   GHS: 2,
   ZAR: 2,
   CNY: 2,
+  XOF: 0,
+  KES: 2,
+  TZS: 2,
+  UGX: 0,
+  RWF: 0,
+  ETB: 2,
+  BWP: 2,
+  ZWL: 2,
+  MZN: 2,
+  NAD: 2,
+  LSL: 2,
+  EGP: 2,
+  TND: 3,
+  MAD: 2,
+  LYD: 3,
+  DZD: 2,
+  ERN: 2,
+  AOA: 2,
+  SOS: 2,
+  SDG: 2,
+  GMD: 2,
+  MUR: 2,
+  SCR: 2,
 };
 
 function decimalsFor(currency) {
@@ -46,7 +74,14 @@ function loadDB() {
       transactions: [],
       rates: {
         base: 'USD',
-        values: { USD: 1, EUR: 0.93, NGN: 1540, XAF: 600, GHS: 12, ZAR: 19, CNY: 7 },
+        values: { 
+          USD: 1, EUR: 0.93, CNY: 7, CAD: 1.35, BRL: 5.2, GBP: 0.79, JPY: 145,
+          NGN: 1540, GHS: 12, XAF: 600, XOF: 600, ZAR: 19,
+          KES: 130, TZS: 2650, UGX: 3800, RWF: 1300, ETB: 52,
+          BWP: 14, ZWL: 360, MZN: 65, NAD: 19, LSL: 19,
+          EGP: 50, TND: 3.1, MAD: 10, LYD: 4.8, DZD: 135,
+          ERN: 15, AOA: 835, SOS: 570, SDG: 550, GMD: 65, MUR: 45, SCR: 13
+        },
         updatedAt: Date.now()
       }
     };
@@ -62,6 +97,15 @@ function saveDB(db) {
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Health check endpoints (Railway uses /healthz by default)
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
+app.get('/healthz', (req, res) => {
+  res.status(200).send('OK');
+});
 
 // Helpers
 function findUserByEmail(db, email) {
@@ -90,7 +134,18 @@ app.post('/auth/register', (req, res) => {
 
   const id = uuidv4();
   const passwordHash = bcrypt.hashSync(password, 8);
-  const user = { id, email, region: region || 'US', createdAt: Date.now() };
+  
+  // Auto-detect preferred currency from region
+  const regionToCurrency = { 
+    GQ: 'XAF', NG: 'NGN', GH: 'GHS', ZA: 'ZAR', KE: 'KES', TZ: 'TZS', 
+    UG: 'UGX', RW: 'RWF', ET: 'ETB', EG: 'EGP', TN: 'TND', MA: 'MAD',
+    LY: 'LYD', DZ: 'DZD', AO: 'AOA', ER: 'ERN', SO: 'SOS', SD: 'SDG',
+    GM: 'GMD', MU: 'MUR', SC: 'SCR', BW: 'BWP', ZW: 'ZWL', MZ: 'MZN',
+    NA: 'NAD', LS: 'LSL'
+  };
+  const preferredCurrency = regionToCurrency[region] || 'XAF';
+  
+  const user = { id, email, region: region || 'GQ', preferredCurrency, autoConvertIncoming: true, createdAt: Date.now() };
   db.users.push({ ...user, passwordHash });
 
   // create wallet
@@ -112,7 +167,36 @@ app.post('/auth/login', (req, res) => {
   if (!bcrypt.compareSync(password, u.passwordHash)) return res.status(401).json({ error: 'Invalid credentials' });
 
   const token = jwt.sign({ userId: u.id, email: u.email }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ token, user: { id: u.id, email: u.email, region: u.region } });
+  res.json({ token, user: { id: u.id, email: u.email, region: u.region, preferredCurrency: u.preferredCurrency || 'XAF', autoConvertIncoming: u.autoConvertIncoming !== false } });
+});
+
+app.get('/auth/me', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const user = db.users.find(u => u.id === req.user.userId);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({ id: user.id, email: user.email, preferredCurrency: user.preferredCurrency || 'XAF', autoConvertIncoming: user.autoConvertIncoming !== false });
+});
+
+app.post('/auth/update-currency', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const { preferredCurrency } = req.body;
+  if (!preferredCurrency) return res.status(400).json({ error: 'preferredCurrency required' });
+  const user = db.users.find(u => u.id === req.user.userId);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  user.preferredCurrency = preferredCurrency;
+  saveDB(db);
+  res.json({ success: true, preferredCurrency });
+});
+
+app.post('/auth/update-auto-convert', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const { autoConvertIncoming } = req.body;
+  if (typeof autoConvertIncoming !== 'boolean') return res.status(400).json({ error: 'autoConvertIncoming must be boolean' });
+  const user = db.users.find(u => u.id === req.user.userId);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  user.autoConvertIncoming = autoConvertIncoming;
+  saveDB(db);
+  res.json({ success: true, autoConvertIncoming });
 });
 
 // Wallet endpoints
@@ -191,43 +275,47 @@ app.post('/transactions', authMiddleware, (req, res) => {
     });
   }
   
-  // apply transfer (minor units)
-  fromBalance.amount -= amount;
-  const destBalance = toWallet.balances.find(b=>b.currency===currency);
-  if (destBalance) destBalance.amount += amount; else toWallet.balances.push({ currency, amount });
+  // Get receiver's preferred currency and auto-convert setting
+  const toUser = db.users.find(u => u.id === toWallet.userId);
+  const shouldAutoConvert = toUser?.autoConvertIncoming !== false;
+  const receiverCurrency = shouldAutoConvert ? (toUser?.preferredCurrency || currency) : currency;
   
-  const tx = { id: uuidv4(), fromWalletId, toWalletId, amount, currency, memo: memo||'', status: 'completed', timestamp: Date.now() };
-  db.transactions.push(tx);
-  saveDB(db);
-
-  res.json({ transaction: tx });
-});
-
-  const fromWallet = db.wallets.find(w => w.id === fromWalletId && w.userId === req.user.userId);
-  if (!fromWallet) return res.status(404).json({ error: 'Source wallet not found' });
-  const toWallet = db.wallets.find(w => w.id === toWalletId);
-  if (!toWallet) return res.status(404).json({ error: 'Destination wallet not found' });
-  // find balance entries (amount stored in minor units)
-  const fromBalance = fromWallet.balances.find(b=>b.currency===currency) || { currency, amount: 0 };
-  if (fromBalance.amount < amount) return res.status(400).json({ error: 'Insufficient funds' });
-
-  // enforce max wallet limit (USD equivalent) for destination
-  const rates = db.rates.values;
-  // Convert amount minor -> major then to USD
-  const amountMajor = minorToMajor(amount, currency);
-  const toAmountInUSD = amountMajor / (rates[currency] || 1);
-  const destTotalUSD = toWallet.balances.reduce((s,b)=>{
-    const bMajor = minorToMajor(b.amount, b.currency);
-    return s + (bMajor / (rates[b.currency] || 1));
-  },0) + toAmountInUSD;
-  if (destTotalUSD > (toWallet.maxLimitUSD||250000)) return res.status(400).json({ error: 'Destination wallet would exceed max limit' });
-
-  // apply transfer (minor units)
+  // Deduct from sender in original currency
   fromBalance.amount -= amount;
-  const destBalance = toWallet.balances.find(b=>b.currency===currency);
-  if (destBalance) destBalance.amount += amount; else toWallet.balances.push({ currency, amount });
-
-  const tx = { id: uuidv4(), fromWalletId, toWalletId, amount, currency, memo: memo||'', status: 'completed', timestamp: Date.now() };
+  
+  // Convert to receiver's preferred currency if different AND auto-convert is enabled
+  let receivedAmount = amount;
+  let receivedCurrency = currency;
+  let wasConverted = false;
+  
+  if (shouldAutoConvert && receiverCurrency !== currency) {
+    // Convert: original → USD → receiver's currency
+    const amountMajor = minorToMajor(amount, currency);
+    const amountUSD = amountMajor / (rates[currency] || 1);
+    const amountInReceiverCurrency = amountUSD * (rates[receiverCurrency] || 1);
+    receivedAmount = majorToMinor(amountInReceiverCurrency, receiverCurrency);
+    receivedCurrency = receiverCurrency;
+    wasConverted = true;
+  }
+  
+  // Add to receiver in their preferred currency
+  const destBalance = toWallet.balances.find(b=>b.currency===receivedCurrency);
+  if (destBalance) destBalance.amount += receivedAmount; 
+  else toWallet.balances.push({ currency: receivedCurrency, amount: receivedAmount });
+  
+  const tx = { 
+    id: uuidv4(), 
+    fromWalletId, 
+    toWalletId, 
+    amount, 
+    currency, 
+    receivedAmount, 
+    receivedCurrency,
+    wasConverted,
+    memo: memo||'', 
+    status: 'completed', 
+    timestamp: Date.now() 
+  };
   db.transactions.push(tx);
   saveDB(db);
 
@@ -248,7 +336,10 @@ app.get('/me', authMiddleware, (req, res) => {
   res.json({ id: u.id, email: u.email, region: u.region });
 });
 
-app.listen(PORT, () => {
-  console.log(`EGWallet mock backend running on http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`EGWallet backend running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`JWT_SECRET configured: ${JWT_SECRET ? 'YES' : 'NO'}`);
+  console.log(`Health check endpoints: /health and /healthz`);
 });
 

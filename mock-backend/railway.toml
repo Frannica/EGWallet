@@ -1,0 +1,6 @@
+[build]
+cmd = "npm install"
+
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/health"

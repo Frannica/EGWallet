@@ -1,11 +1,15 @@
 {
   "cli": {
-    "version": ">= 5.0.0"
+    "version": ">= 5.9.0"
   },
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "android": {
+        "gradleCommand": ":app:assembleDebug",
+        "buildType": "apk"
+      }
     },
     "preview": {
       "distribution": "internal",
@@ -14,15 +18,15 @@
       }
     },
     "production": {
-      "distribution": "store"
+      "android": {
+        "buildType": "app-bundle",
+        "env": {
+          "NODE_OPTIONS": "--max-old-space-size=4096"
+        }
+      }
     }
   },
   "submit": {
-    "production": {
-      "android": {
-        "serviceAccountKeyPath": "./service-account-key.json",
-        "track": "closed-testing"
-      }
-    }
+    "production": {}
   }
 }
