@@ -41,15 +41,7 @@
       "expo-barcode-scanner",
       "expo-camera",
       "expo-local-authentication",
-      "expo-notifications",
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "usesCleartextTraffic": true
-          }
-        }
-      ]
+      "expo-notifications"
     ]
   }
 }
