@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { login as apiLogin, register as apiRegister, me as apiMe, listWallets } from '../api/auth';
-import { setUserContext, clearUserContext } from '../utils/sentry';
 
 type AuthState = {
   user: { id: string; email: string; preferredCurrency?: string; autoConvertIncoming?: boolean } | null;
@@ -53,9 +52,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToken(t);
     const profile = await apiMe(t);
     setUser(profile);
-    
-    // Set Sentry user context for crash tracking
-    setUserContext(profile.id, profile.email);
   }
 
   async function signUp(email: string, password: string, region?: string) {
@@ -65,18 +61,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToken(t);
     const profile = await apiMe(t);
     setUser(profile);
-    
-    // Set Sentry user context for crash tracking
-    setUserContext(profile.id, profile.email);
   }
 
   async function signOut() {
     await SecureStore.deleteItemAsync(TOKEN_KEY);
     setToken(null);
     setUser(null);
-    
-    // Clear Sentry user context
-    clearUserContext();
   }
 
   async function updatePreferredCurrency(currency: string) {

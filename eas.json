@@ -1,7 +1,6 @@
 {
   "cli": {
-    "version": ">= 5.9.0",
-    "appVersionSource": "local"
+    "version": ">= 5.9.0"
   },
   "build": {
     "development": {
@@ -22,8 +21,7 @@
       "android": {
         "buildType": "app-bundle",
         "env": {
-          "NODE_OPTIONS": "--max-old-space-size=4096",
-          "EAS_SKIP_AUTO_FINGERPRINT": "1"
+          "NODE_OPTIONS": "--max-old-space-size=4096"
         }
       }
     }

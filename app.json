@@ -23,7 +23,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.francisco1953.egwalletmobile",
-      "versionCode": 12
+      "versionCode": 11
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -41,7 +41,15 @@
       "expo-barcode-scanner",
       "expo-camera",
       "expo-local-authentication",
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ]
   }
 }

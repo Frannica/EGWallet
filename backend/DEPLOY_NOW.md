@@ -31,7 +31,7 @@
 
 4. **Check Root Directory Setting**
    - Settings → Service Settings
-   - If deploying from root repo, set Root Directory to: `mock-backend`
+   - If deploying from root repo, set Root Directory to: `backend`
    - If you created a separate repo for backend, leave empty
 
 5. **Redeploy**

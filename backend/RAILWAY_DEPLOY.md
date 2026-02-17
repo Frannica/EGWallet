@@ -4,7 +4,7 @@
 
 1. **Push code to GitHub**
    ```bash
-   cd mock-backend
+   cd backend
    git add .
    git commit -m "Update backend for Railway"
    git push
@@ -24,8 +24,8 @@
 
 4. **Verify Root Directory**
    - In Settings → "Service Settings"
-   - Set **Root Directory**: `mock-backend` (if deploying from root repo)
-   - OR deploy only the `mock-backend` folder as a separate repo
+   - Set **Root Directory**: `backend` (if deploying from root repo)
+   - OR deploy the backend folder as a separate repo
 
 5. **Redeploy**
    - Go to **Deployments** tab
