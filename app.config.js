@@ -23,7 +23,7 @@ export default ({ config }) => ({
     },
     edgeToEdgeEnabled: true,
     package: "com.francisco1953.egwalletmobile",
-    versionCode: 9
+    versionCode: 10
   },
   web: {
     favicon: "./assets/favicon.png"
