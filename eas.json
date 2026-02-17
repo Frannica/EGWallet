@@ -1,32 +1,11 @@
 {
   "cli": {
-    "version": ">= 5.9.0"
+    "appVersionSource": "remote"
   },
   "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal",
-      "android": {
-        "gradleCommand": ":app:assembleDebug",
-        "buildType": "apk"
-      }
-    },
-    "preview": {
-      "distribution": "internal",
-      "android": {
-        "buildType": "apk"
-      }
-    },
     "production": {
-      "android": {
-        "buildType": "app-bundle",
-        "env": {
-          "NODE_OPTIONS": "--max-old-space-size=4096"
-        }
-      }
+      "developmentClient": false,
+      "distribution": "store"
     }
-  },
-  "submit": {
-    "production": {}
   }
 }
