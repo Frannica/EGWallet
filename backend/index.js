@@ -10,6 +10,23 @@ const DB_FILE = path.join(__dirname, 'db.json');
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
 const PORT = process.env.PORT || 4000;
 
+// Idempotency store: { key: { response, timestamp } }
+// Clean up keys older than 24 hours
+const idempotencyStore = new Map();
+const IDEMPOTENCY_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
+
+function cleanExpiredIdempotencyKeys() {
+  const now = Date.now();
+  for (const [key, value] of idempotencyStore.entries()) {
+    if (now - value.timestamp > IDEMPOTENCY_EXPIRY) {
+      idempotencyStore.delete(key);
+    }
+  }
+}
+
+// Clean expired keys every hour
+setInterval(cleanExpiredIdempotencyKeys, 60 * 60 * 1000);
+
 // Currency decimals map (minor units)
 const currencyDecimals = {
   USD: 2,
@@ -72,6 +89,9 @@ function loadDB() {
       users: [],
       wallets: [],
       transactions: [],
+      paymentRequests: [],
+      virtualCards: [],
+      budgets: [],
       rates: {
         base: 'USD',
         values: { 
@@ -334,6 +354,373 @@ app.get('/me', authMiddleware, (req, res) => {
   const u = db.users.find(x=>x.id===req.user.userId);
   if (!u) return res.status(404).json({ error: 'Not found' });
   res.json({ id: u.id, email: u.email, region: u.region });
+});
+
+// ==================== PAYMENT REQUESTS ====================
+// Create a payment request
+app.post('/payment-requests', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const { walletId, amount, currency, memo, idempotencyKey } = req.body;
+  if (!walletId || typeof amount === 'undefined' || !currency) {
+    return res.status(400).json({ error: 'walletId, amount, and currency required' });
+  }
+  
+  // Check idempotency
+  if (idempotencyKey) {
+    const cached = idempotencyStore.get(idempotencyKey);
+    if (cached) {
+      console.log(`Returning cached response for idempotency key: ${idempotencyKey}`);
+      return res.json(cached.response);
+    }
+  }
+  
+  const wallet = db.wallets.find(w => w.id === walletId && w.userId === req.user.userId);
+  if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+  
+  const request = {
+    id: uuidv4(),
+    requesterId: req.user.userId,
+    walletId,
+    amount,
+    currency,
+    memo: memo || '',
+    status: 'pending', // pending, paid, cancelled
+    createdAt: Date.now(),
+    paidAt: null,
+    paidBy: null,
+    transactionId: null
+  };
+  
+  db.paymentRequests.push(request);
+  saveDB(db);
+  
+  const response = { request };
+  
+  // Store idempotency key
+  if (idempotencyKey) {
+    idempotencyStore.set(idempotencyKey, { response, timestamp: Date.now() });
+  }
+  
+  res.json(response);
+});
+
+// List payment requests (created by user)
+app.get('/payment-requests', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const requests = db.paymentRequests
+    .filter(r => r.requesterId === req.user.userId)
+    .sort((a, b) => b.createdAt - a.createdAt);
+  res.json({ requests });
+});
+
+// Get a single payment request by ID (public - shareable link)
+app.get('/payment-requests/:id', (req, res) => {
+  const db = loadDB();
+  const request = db.paymentRequests.find(r => r.id === req.params.id);
+  if (!request) return res.status(404).json({ error: 'Request not found' });
+  
+  const requester = db.users.find(u => u.id === request.requesterId);
+  res.json({ 
+    request,
+    requesterEmail: requester?.email || 'Unknown'
+  });
+});
+
+// Pay a payment request
+app.post('/payment-requests/:id/pay', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const { fromWalletId } = req.body;
+  if (!fromWalletId) return res.status(400).json({ error: 'fromWalletId required' });
+  
+  const request = db.paymentRequests.find(r => r.id === req.params.id);
+  if (!request) return res.status(404).json({ error: 'Request not found' });
+  if (request.status !== 'pending') return res.status(400).json({ error: 'Request already processed' });
+  
+  const fromWallet = db.wallets.find(w => w.id === fromWalletId && w.userId === req.user.userId);
+  if (!fromWallet) return res.status(404).json({ error: 'Source wallet not found' });
+  
+  const toWallet = db.wallets.find(w => w.id === request.walletId);
+  if (!toWallet) return res.status(404).json({ error: 'Destination wallet not found' });
+  
+  // Check balance
+  const fromBalance = fromWallet.balances.find(b => b.currency === request.currency) || { currency: request.currency, amount: 0 };
+  if (fromBalance.amount < request.amount) return res.status(400).json({ error: 'Insufficient funds' });
+  
+  // Deduct from payer
+  fromBalance.amount -= request.amount;
+  
+  // Add to requester
+  const destBalance = toWallet.balances.find(b => b.currency === request.currency);
+  if (destBalance) destBalance.amount += request.amount;
+  else toWallet.balances.push({ currency: request.currency, amount: request.amount });
+  
+  // Create transaction
+  const tx = {
+    id: uuidv4(),
+    fromWalletId,
+    toWalletId: request.walletId,
+    amount: request.amount,
+    currency: request.currency,
+    receivedAmount: request.amount,
+    receivedCurrency: request.currency,
+    wasConverted: false,
+    memo: `Payment for request: ${request.memo}`,
+    status: 'completed',
+    timestamp: Date.now()
+  };
+  db.transactions.push(tx);
+  
+  // Update request
+  request.status = 'paid';
+  request.paidAt = Date.now();
+  request.paidBy = req.user.userId;
+  request.transactionId = tx.id;
+  
+  saveDB(db);
+  res.json({ request, transaction: tx });
+});
+
+// Cancel a payment request
+app.post('/payment-requests/:id/cancel', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const request = db.paymentRequests.find(r => r.id === req.params.id);
+  if (!request) return res.status(404).json({ error: 'Request not found' });
+  if (request.requesterId !== req.user.userId) return res.status(403).json({ error: 'Unauthorized' });
+  if (request.status !== 'pending') return res.status(400).json({ error: 'Request already processed' });
+  
+  request.status = 'cancelled';
+  saveDB(db);
+  res.json({ request });
+});
+
+// ==================== VIRTUAL CARDS ====================
+// Create virtual card
+app.post('/virtual-cards', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const { walletId, currency, label, idempotencyKey } = req.body;
+  if (!walletId || !currency) return res.status(400).json({ error: 'walletId and currency required' });
+  
+  // Check idempotency
+  if (idempotencyKey) {
+    const cached = idempotencyStore.get(idempotencyKey);
+    if (cached) {
+      console.log(`Returning cached response for idempotency key: ${idempotencyKey}`);
+      return res.json(cached.response);
+    }
+  }
+  
+  const wallet = db.wallets.find(w => w.id === walletId && w.userId === req.user.userId);
+  if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+  
+  // Check card limit (max 5 cards per user)
+  const userCards = (db.virtualCards || []).filter(c => c.userId === req.user.userId && c.status !== 'deleted');
+  if (userCards.length >= 5) return res.status(400).json({ error: 'Maximum 5 cards allowed' });
+  
+  // Generate card details
+  const cardNumber = '4' + Math.floor(Math.random() * 1e15).toString().padStart(15, '0');
+  const cvv = Math.floor(Math.random() * 900 + 100).toString();
+  const now = new Date();
+  const expiryMonth = (now.getMonth() + 1).toString().padStart(2, '0');
+  const expiryYear = (now.getFullYear() + 3).toString().slice(-2);
+  
+  const card = {
+    id: uuidv4(),
+    userId: req.user.userId,
+    walletId,
+    cardNumber,
+    cvv,
+    expiryMonth,
+    expiryYear,
+    currency,
+    label: label || 'Virtual Card',
+    status: 'active', // active, frozen, deleted
+    createdAt: Date.now(),
+    spentToday: 0,
+    dailyLimit: majorToMinor(1000, currency) // $1000 daily limit
+  };
+  
+  if (!db.virtualCards) db.virtualCards = [];
+  db.virtualCards.push(card);
+  saveDB(db);
+  
+  const response = { card };
+  
+  // Store idempotency key
+  if (idempotencyKey) {
+    idempotencyStore.set(idempotencyKey, { response, timestamp: Date.now() });
+  }
+  
+  res.json(response);
+});
+
+// List virtual cards
+app.get('/virtual-cards', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const cards = (db.virtualCards || [])
+    .filter(c => c.userId === req.user.userId && c.status !== 'deleted')
+    .sort((a, b) => b.createdAt - a.createdAt);
+  res.json({ cards });
+});
+
+// Get single card
+app.get('/virtual-cards/:id', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const card = (db.virtualCards || []).find(c => c.id === req.params.id && c.userId === req.user.userId);
+  if (!card) return res.status(404).json({ error: 'Card not found' });
+  res.json({ card });
+});
+
+// Freeze/unfreeze card
+app.post('/virtual-cards/:id/toggle-freeze', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const { idempotencyKey } = req.body;
+  
+  // Check idempotency
+  if (idempotencyKey) {
+    const cached = idempotencyStore.get(idempotencyKey);
+    if (cached) {
+      console.log(`Returning cached response for idempotency key: ${idempotencyKey}`);
+      return res.json(cached.response);
+    }
+  }
+  
+  const card = (db.virtualCards || []).find(c => c.id === req.params.id && c.userId === req.user.userId);
+  if (!card) return res.status(404).json({ error: 'Card not found' });
+  if (card.status === 'deleted') return res.status(400).json({ error: 'Card is deleted' });
+  
+  card.status = card.status === 'active' ? 'frozen' : 'active';
+  saveDB(db);
+  
+  const response = { card };
+  
+  // Store idempotency key
+  if (idempotencyKey) {
+    idempotencyStore.set(idempotencyKey, { response, timestamp: Date.now() });
+  }
+  
+  res.json(response);
+});
+
+// Delete card
+app.delete('/virtual-cards/:id', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const card = (db.virtualCards || []).find(c => c.id === req.params.id && c.userId === req.user.userId);
+  if (!card) return res.status(404).json({ error: 'Card not found' });
+  
+  card.status = 'deleted';
+  saveDB(db);
+  res.json({ success: true });
+});
+
+// ==================== BUDGETS ====================
+// Create or update budget
+app.post('/budgets', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const { walletId, currency, monthlyLimit, categoryLimits, idempotencyKey } = req.body;
+  if (!walletId || !currency || typeof monthlyLimit === 'undefined') {
+    return res.status(400).json({ error: 'walletId, currency, and monthlyLimit required' });
+  }
+  
+  // Check idempotency
+  if (idempotencyKey) {
+    const cached = idempotencyStore.get(idempotencyKey);
+    if (cached) {
+      console.log(`Returning cached response for idempotency key: ${idempotencyKey}`);
+      return res.json(cached.response);
+    }
+  }
+  
+  const wallet = db.wallets.find(w => w.id === walletId && w.userId === req.user.userId);
+  if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+  
+  if (!db.budgets) db.budgets = [];
+  
+  // Check if budget already exists for this wallet+currency
+  let budget = db.budgets.find(b => b.walletId === walletId && b.currency === currency && b.userId === req.user.userId);
+  
+  if (budget) {
+    // Update existing
+    budget.monthlyLimit = monthlyLimit;
+    budget.categoryLimits = categoryLimits || {};
+    budget.updatedAt = Date.now();
+  } else {
+    // Create new
+    budget = {
+      id: uuidv4(),
+      userId: req.user.userId,
+      walletId,
+      currency,
+      monthlyLimit,
+      categoryLimits: categoryLimits || {}, // { 'Food': 500, 'Transport': 200, etc }
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+    db.budgets.push(budget);
+  }
+  
+  saveDB(db);
+  
+  const response = { budget };
+  
+  // Store idempotency key
+  if (idempotencyKey) {
+    idempotencyStore.set(idempotencyKey, { response, timestamp: Date.now() });
+  }
+  
+  res.json(response);
+});
+
+// Get budgets
+app.get('/budgets', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const budgets = (db.budgets || []).filter(b => b.userId === req.user.userId);
+  res.json({ budgets });
+});
+
+// Get budget analytics
+app.get('/budgets/:id/analytics', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const budget = (db.budgets || []).find(b => b.id === req.params.id && b.userId === req.user.userId);
+  if (!budget) return res.status(404).json({ error: 'Budget not found' });
+  
+  // Calculate spending for current month
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).getTime();
+  
+  const monthlyTxs = db.transactions.filter(t => 
+    t.fromWalletId === budget.walletId &&
+    t.currency === budget.currency &&
+    t.timestamp >= monthStart &&
+    t.timestamp <= monthEnd &&
+    t.status === 'completed'
+  );
+  
+  const totalSpent = monthlyTxs.reduce((sum, t) => sum + t.amount, 0);
+  const percentUsed = (minorToMajor(totalSpent, budget.currency) / minorToMajor(budget.monthlyLimit, budget.currency)) * 100;
+  
+  res.json({
+    budget,
+    analytics: {
+      monthlyLimit: budget.monthlyLimit,
+      totalSpent,
+      remaining: Math.max(0, budget.monthlyLimit - totalSpent),
+      percentUsed: Math.min(100, percentUsed),
+      transactionCount: monthlyTxs.length,
+      month: `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}`
+    }
+  });
+});
+
+// Delete budget
+app.delete('/budgets/:id', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const idx = (db.budgets || []).findIndex(b => b.id === req.params.id && b.userId === req.user.userId);
+  if (idx === -1) return res.status(404).json({ error: 'Budget not found' });
+  
+  db.budgets.splice(idx, 1);
+  saveDB(db);
+  res.json({ success: true });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
