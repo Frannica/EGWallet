@@ -3,6 +3,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 import WalletScreen from '../screens/WalletScreen';
 import SendScreen from '../screens/SendScreen';
 import RequestScreen from '../screens/RequestScreen';
@@ -17,7 +18,57 @@ const Stack = createNativeStackNavigator();
 
 function Tabs() {
   return (
-    <Tab.Navigator screenOptions={{ headerShown: true }}>
+    <Tab.Navigator 
+      screenOptions={({ route }) => ({
+        headerShown: true,
+        tabBarIcon: ({ focused, color, size }) => {
+          let iconName: keyof typeof Ionicons.glyphMap;
+
+          if (route.name === 'Wallet') {
+            iconName = focused ? 'wallet' : 'wallet-outline';
+          } else if (route.name === 'Send') {
+            iconName = focused ? 'send' : 'send-outline';
+          } else if (route.name === 'Request') {
+            iconName = focused ? 'download' : 'download-outline';
+          } else if (route.name === 'Card') {
+            iconName = focused ? 'card' : 'card-outline';
+          } else if (route.name === 'Budget') {
+            iconName = focused ? 'pie-chart' : 'pie-chart-outline';
+          } else if (route.name === 'Settings') {
+            iconName = focused ? 'settings' : 'settings-outline';
+          } else {
+            iconName = 'ellipse';
+          }
+
+          return <Ionicons name={iconName} size={size} color={color} />;
+        },
+        tabBarActiveTintColor: '#007AFF',
+        tabBarInactiveTintColor: '#8E8E93',
+        tabBarStyle: {
+          backgroundColor: '#FFFFFF',
+          borderTopWidth: 1,
+          borderTopColor: '#E1E8ED',
+          paddingBottom: 4,
+          paddingTop: 4,
+          height: 60,
+        },
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '600',
+        },
+        headerStyle: {
+          backgroundColor: '#FFFFFF',
+          elevation: 0,
+          shadowOpacity: 0,
+          borderBottomWidth: 1,
+          borderBottomColor: '#E1E8ED',
+        },
+        headerTitleStyle: {
+          fontWeight: '700',
+          fontSize: 18,
+        },
+      })}
+    >
       <Tab.Screen name="Wallet" component={WalletScreen} />
       <Tab.Screen name="Send" component={SendScreen} />
       <Tab.Screen name="Request" component={RequestScreen} />

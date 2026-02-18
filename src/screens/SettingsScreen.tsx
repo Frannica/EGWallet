@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, Button, ScrollView, Alert, TouchableOpacity, Modal, FlatList, Switch } from 'react-native';
+import { View, Text, Button, ScrollView, Alert, TouchableOpacity, Modal, FlatList, Switch, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { useNavigation } from '@react-navigation/native';
 import { KYCDisclosure } from '../components/KYCDisclosure';
@@ -78,55 +79,53 @@ export default function SettingsScreen() {
   };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: '#f5f5f5' }}>
-      <View style={{ padding: 16 }}>
-        <Text style={{ fontSize: 20, fontWeight: '600', marginBottom: 16 }}>Settings</Text>
+    <ScrollView style={styles.container}>
+      <View style={styles.content}>
 
         {/* KYC & Limits Disclosure */}
-        <View style={{ marginBottom: 16 }}>
+        <View style={styles.section}>
           <KYCDisclosure region="GQ" />
         </View>
-        <View style={{ backgroundColor: '#fff', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
-          <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: '#eee' }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#666', marginBottom: 12 }}>
-              ACCOUNT
-            </Text>
-            <Text style={{ color: '#333', marginBottom: 12 }}>
-              Logged in as: {auth.user?.email}
-            </Text>
-            <View style={{ marginTop: 8 }}>
-              <Text style={{ color: '#666', fontSize: 14, marginBottom: 6 }}>
-                Preferred Receiving Currency:
-              </Text>
+        
+        {/* Account Section */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="person-circle" size={24} color="#007AFF" />
+            <Text style={styles.sectionTitle}>ACCOUNT</Text>
+          </View>
+          <View style={styles.cardContent}>
+            <View style={styles.infoRow}>
+              <Ionicons name="mail" size={20} color="#657786" />
+              <Text style={styles.emailText}>{auth.user?.email}</Text>
+            </View>
+            <View style={styles.currencySection}>
+              <Text style={styles.label}>Preferred Receiving Currency:</Text>
               <TouchableOpacity 
                 onPress={() => setShowCurrencyPicker(true)}
-                style={{ 
-                  padding: 12, 
-                  backgroundColor: '#f0f7ff', 
-                  borderRadius: 6,
-                  flexDirection: 'row',
-                  justifyContent: 'space-between',
-                  alignItems: 'center'
-                }}
+                style={styles.currencyButton}
               >
-                <Text style={{ fontSize: 16, fontWeight: '600', color: '#007AFF' }}>
-                  {auth.user?.preferredCurrency || 'XAF'} {getCurrencySymbol(auth.user?.preferredCurrency || 'XAF')}
-                </Text>
-                <Text style={{ color: '#007AFF' }}>Change →</Text>
+                <View style={styles.currencyDisplay}>
+                  <Ionicons name="cash" size={20} color="#007AFF" />
+                  <Text style={styles.currencyText}>
+                    {auth.user?.preferredCurrency || 'XAF'} {getCurrencySymbol(auth.user?.preferredCurrency || 'XAF')}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#007AFF" />
               </TouchableOpacity>
-              <Text style={{ color: '#999', fontSize: 12, marginTop: 4 }}>
+              <Text style={styles.helpText}>
                 All incoming payments will be automatically converted to this currency
               </Text>
             </View>
             
             {/* Auto-Convert Toggle */}
-            <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#eee' }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <View style={{ flex: 1, marginRight: 12 }}>
-                  <Text style={{ color: '#666', fontSize: 14, fontWeight: '600', marginBottom: 4 }}>
-                    Auto-Convert Incoming Payments
-                  </Text>
-                  <Text style={{ color: '#999', fontSize: 12, lineHeight: 16 }}>
+            <View style={styles.toggleSection}>
+              <View style={styles.toggleRow}>
+                <View style={styles.toggleContent}>
+                  <View style={styles.toggleHeader}>
+                    <Ionicons name="swap-horizontal" size={20} color="#007AFF" />
+                    <Text style={styles.toggleTitle}>Auto-Convert Incoming Payments</Text>
+                  </View>
+                  <Text style={styles.toggleDescription}>
                     {auth.user?.autoConvertIncoming !== false 
                       ? `Automatically convert all incoming payments to ${auth.user?.preferredCurrency || 'XAF'}`
                       : 'Receive payments in original currency (multi-currency wallet)'}
@@ -142,58 +141,64 @@ export default function SettingsScreen() {
             </View>
           </View>
 
-          <View style={{ padding: 12 }}>
-            <Button title="Sign Out" onPress={handleSignOut} color="#007AFF" />
-          </View>
+          <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
+            <Ionicons name="log-out" size={20} color="#007AFF" />
+            <Text style={styles.signOutText}>Sign Out</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Privacy & Security Section */}
-        <View style={{ backgroundColor: '#fff', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
-          <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: '#eee' }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#666', marginBottom: 8 }}>
-              PRIVACY & SECURITY
-            </Text>
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="shield-checkmark" size={24} color="#d32f2f" />
+            <Text style={[styles.sectionTitle, { color: '#d32f2f' }]}>PRIVACY & SECURITY</Text>
           </View>
-          <View style={{ padding: 12 }}>
-            <Button title="Delete Account" onPress={handleDeleteAccount} color="#d32f2f" />
-          </View>
+          <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteAccount}>
+            <Ionicons name="trash" size={20} color="#d32f2f" />
+            <Text style={styles.deleteText}>Delete Account</Text>
+          </TouchableOpacity>
         </View>
 
         {/* App Info Section */}
-        <View style={{ backgroundColor: '#fff', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
-          <View style={{ padding: 16 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#666', marginBottom: 12 }}>
-              APP INFORMATION
-            </Text>
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="information-circle" size={24} color="#007AFF" />
+            <Text style={styles.sectionTitle}>APP INFORMATION</Text>
           </View>
-          <View style={{ padding: 12 }}>
-            <Button title="About EGWallet" onPress={handleAbout} color="#007AFF" />
-          </View>
+          <TouchableOpacity style={styles.aboutButton} onPress={handleAbout}>
+            <Ionicons name="help-circle" size={20} color="#007AFF" />
+            <Text style={styles.aboutText}>About EGWallet</Text>
+            <Ionicons name="chevron-forward" size={20} color="#007AFF" />
+          </TouchableOpacity>
         </View>
 
         {/* Support Info */}
-        <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 16, marginBottom: 16 }}>
-          <Text style={{ fontSize: 14, fontWeight: '600', color: '#666', marginBottom: 12 }}>
-            SUPPORT
-          </Text>
-          <Text style={{ color: '#666', fontSize: 14, lineHeight: 20 }}>
-            For technical support, email us at:{' '}
-            <Text style={{ fontWeight: '600', color: '#007AFF' }}>support@egwallet.com</Text>
-          </Text>
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="headset" size={24} color="#007AFF" />
+            <Text style={styles.sectionTitle}>SUPPORT</Text>
+          </View>
+          <View style={styles.supportContent}>
+            <Ionicons name="mail" size={20} color="#657786" />
+            <Text style={styles.supportText}>
+              For technical support, email us at:{' '}
+              <Text style={styles.supportEmail}>support@egwallet.com</Text>
+            </Text>
+          </View>
         </View>
       </View>
 
       {/* Currency Picker Modal */}
       <Modal visible={showCurrencyPicker} transparent animationType="slide">
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
-          <View style={{ backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '70%' }}>
-            <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text style={{ fontSize: 18, fontWeight: '600' }}>Select Preferred Currency</Text>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Preferred Currency</Text>
               <TouchableOpacity onPress={() => setShowCurrencyPicker(false)}>
-                <Text style={{ fontSize: 18, color: '#007AFF' }}>✕</Text>
+                <Ionicons name="close" size={28} color="#007AFF" />
               </TouchableOpacity>
             </View>
-            <Text style={{ padding: 16, paddingBottom: 8, color: '#666', fontSize: 13 }}>
+            <Text style={styles.modalDescription}>
               All incoming payments will be automatically converted to your selected currency
             </Text>
             <FlatList
@@ -202,21 +207,23 @@ export default function SettingsScreen() {
               renderItem={({ item }) => (
                 <TouchableOpacity
                   onPress={() => handleChangeCurrency(item)}
-                  style={{ 
-                    padding: 16, 
-                    borderBottomWidth: 1, 
-                    borderBottomColor: '#f0f0f0',
-                    backgroundColor: auth.user?.preferredCurrency === item ? '#f0f7ff' : '#fff'
-                  }}
+                  style={[
+                    styles.currencyOption,
+                    auth.user?.preferredCurrency === item && styles.currencyOptionSelected
+                  ]}
                 >
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text style={{ fontSize: 16, fontWeight: auth.user?.preferredCurrency === item ? '600' : '400' }}>
+                  <View style={styles.currencyOptionContent}>
+                    <Ionicons name="cash" size={20} color={auth.user?.preferredCurrency === item ? '#007AFF' : '#657786'} />
+                    <Text style={[
+                      styles.currencyOptionText,
+                      auth.user?.preferredCurrency === item && styles.currencyOptionTextSelected
+                    ]}>
                       {item} {getCurrencySymbol(item)}
                     </Text>
-                    {auth.user?.preferredCurrency === item && (
-                      <Text style={{ color: '#007AFF', fontSize: 18 }}>✓</Text>
-                    )}
                   </View>
+                  {auth.user?.preferredCurrency === item && (
+                    <Ionicons name="checkmark" size={24} color="#007AFF" />
+                  )}
                 </TouchableOpacity>
               )}
             />
@@ -226,3 +233,235 @@ export default function SettingsScreen() {
     </ScrollView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F5F7FA',
+  },
+  content: {
+    padding: 16,
+  },
+  section: {
+    marginBottom: 16,
+  },
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEEEEE',
+    gap: 8,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#657786',
+    letterSpacing: 0.5,
+  },
+  cardContent: {
+    padding: 16,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 10,
+  },
+  emailText: {
+    fontSize: 15,
+    color: '#14171A',
+  },
+  currencySection: {
+    marginTop: 8,
+  },
+  label: {
+    fontSize: 14,
+    color: '#657786',
+    marginBottom: 8,
+  },
+  currencyButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#F0F7FF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#007AFF',
+  },
+  currencyDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  currencyText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  helpText: {
+    fontSize: 12,
+    color: '#999999',
+    marginTop: 6,
+    lineHeight: 16,
+  },
+  toggleSection: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#EEEEEE',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  toggleContent: {
+    flex: 1,
+    marginRight: 12,
+  },
+  toggleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+    gap: 8,
+  },
+  toggleTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#14171A',
+  },
+  toggleDescription: {
+    fontSize: 13,
+    color: '#657786',
+    lineHeight: 18,
+  },
+  signOutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 14,
+    margin: 12,
+    borderRadius: 8,
+    backgroundColor: '#F0F7FF',
+    gap: 8,
+  },
+  signOutText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 14,
+    margin: 12,
+    borderRadius: 8,
+    backgroundColor: '#FFEBEE',
+    gap: 8,
+  },
+  deleteText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#d32f2f',
+  },
+  aboutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    margin: 12,
+    borderRadius: 8,
+    backgroundColor: '#F0F7FF',
+    gap: 8,
+  },
+  aboutText: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  supportContent: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: 16,
+    gap: 10,
+  },
+  supportText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#657786',
+    lineHeight: 20,
+  },
+  supportEmail: {
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '70%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEEEEE',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#14171A',
+  },
+  modalDescription: {
+    padding: 16,
+    paddingBottom: 8,
+    fontSize: 13,
+    color: '#657786',
+    lineHeight: 18,
+  },
+  currencyOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5F5F5',
+    backgroundColor: '#FFFFFF',
+  },
+  currencyOptionSelected: {
+    backgroundColor: '#F0F7FF',
+  },
+  currencyOptionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  currencyOptionText: {
+    fontSize: 16,
+    color: '#14171A',
+  },
+  currencyOptionTextSelected: {
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+});

@@ -52,3 +52,210 @@ export async function fetchTransactions(
 
   return res.json();
 }
+
+// Payment Requests
+export async function createPaymentRequest(
+  token: string,
+  walletId: string,
+  amount: number,
+  currency: string,
+  memo?: string
+) {
+  const idempotencyKey = uuidv4();
+  
+  const res = await fetch(`${API_BASE}/payment-requests`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify({ walletId, amount, currency, memo, idempotencyKey }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Create request failed');
+  }
+
+  return res.json();
+}
+
+export async function getPaymentRequests(token: string) {
+  const res = await fetch(`${API_BASE}/payment-requests`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Fetch requests failed');
+  }
+
+  return res.json();
+}
+
+export async function cancelPaymentRequest(token: string, requestId: string) {
+  const res = await fetch(`${API_BASE}/payment-requests/${requestId}/cancel`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({}),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Cancel failed');
+  }
+
+  return res.json();
+}
+
+// Virtual Cards
+export async function createVirtualCard(
+  token: string,
+  walletId: string,
+  currency: string,
+  label?: string
+) {
+  const idempotencyKey = uuidv4();
+  
+  const res = await fetch(`${API_BASE}/virtual-cards`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify({ walletId, currency, label, idempotencyKey }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Create card failed');
+  }
+
+  return res.json();
+}
+
+export async function getVirtualCards(token: string) {
+  const res = await fetch(`${API_BASE}/virtual-cards`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Fetch cards failed');
+  }
+
+  return res.json();
+}
+
+export async function toggleCardFreeze(token: string, cardId: string) {
+  const idempotencyKey = uuidv4();
+  
+  const res = await fetch(`${API_BASE}/virtual-cards/${cardId}/toggle-freeze`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify({ idempotencyKey }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Toggle freeze failed');
+  }
+
+  return res.json();
+}
+
+export async function deleteVirtualCard(token: string, cardId: string) {
+  const res = await fetch(`${API_BASE}/virtual-cards/${cardId}`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Delete card failed');
+  }
+
+  return res.json();
+}
+
+// Budgets
+export async function createBudget(
+  token: string,
+  walletId: string,
+  currency: string,
+  monthlyLimit: number
+) {
+  const idempotencyKey = uuidv4();
+  
+  const res = await fetch(`${API_BASE}/budgets`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify({ walletId, currency, monthlyLimit, idempotencyKey }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Create budget failed');
+  }
+
+  return res.json();
+}
+
+export async function getBudgets(token: string) {
+  const res = await fetch(`${API_BASE}/budgets`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Fetch budgets failed');
+  }
+
+  return res.json();
+}
+
+export async function getBudgetAnalytics(token: string, budgetId: string) {
+  const res = await fetch(`${API_BASE}/budgets/${budgetId}/analytics`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Fetch analytics failed');
+  }
+
+  return res.json();
+}
+
+export async function deleteBudget(token: string, budgetId: string) {
+  const res = await fetch(`${API_BASE}/budgets/${budgetId}`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Delete budget failed');
+  }
+
+  return res.json();
+}

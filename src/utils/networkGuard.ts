@@ -35,7 +35,7 @@ export async function safeApiCall<T>(
   }
 
   if (lastError instanceof Error) {
-    console.warn(lastError.message);
+    if (__DEV__) console.warn(lastError.message);
   }
   return null;
 }
