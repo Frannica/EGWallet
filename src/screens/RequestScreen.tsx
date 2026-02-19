@@ -330,46 +330,46 @@ export default function RequestScreen() {
           </View>
         ) : (
           <View style={styles.form}>
-          <Text style={styles.label}>Amount</Text>
-          <TextInput
-            style={styles.input}
-            value={amount}
-            onChangeText={setAmount}
-            keyboardType="decimal-pad"
-            placeholder="0.00"
-            placeholderTextColor="#999"
-          />
+            <Text style={styles.label}>Amount</Text>
+            <TextInput
+              style={styles.input}
+              value={amount}
+              onChangeText={setAmount}
+              keyboardType="decimal-pad"
+              placeholder="0.00"
+              placeholderTextColor="#999"
+            />
 
-          <Text style={styles.label}>Currency</Text>
-          <View style={styles.currencyPicker}>
-            <Text style={styles.currencyText}>{currency} {getCurrencySymbol(currency)}</Text>
+            <Text style={styles.label}>Currency</Text>
+            <View style={styles.currencyPicker}>
+              <Text style={styles.currencyText}>{currency} {getCurrencySymbol(currency)}</Text>
+            </View>
+
+            <Text style={styles.label}>Memo (Optional)</Text>
+            <TextInput
+              style={[styles.input, styles.memoInput]}
+              value={memo}
+              onChangeText={setMemo}
+              placeholder="What's this for?"
+              placeholderTextColor="#999"
+              multiline
+            />
+
+            <TouchableOpacity
+              style={styles.createButton}
+              onPress={handleCreate}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <>
+                  <Ionicons name="add-circle" size={20} color="#FFFFFF" />
+                  <Text style={styles.createButtonText}>Create Request</Text>
+                </>
+              )}
+            </TouchableOpacity>
           </View>
-
-          <Text style={styles.label}>Memo (Optional)</Text>
-          <TextInput
-            style={[styles.input, styles.memoInput]}
-            value={memo}
-            onChangeText={setMemo}
-            placeholder="What's this for?"
-            placeholderTextColor="#999"
-            multiline
-          />
-
-          <TouchableOpacity
-            style={styles.createButton}
-            onPress={handleCreate}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <>
-                <Ionicons name="add-circle" size={20} color="#FFFFFF" />
-                <Text style={styles.createButtonText}>Create Request</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
         )}
       </ScrollView>
     );
