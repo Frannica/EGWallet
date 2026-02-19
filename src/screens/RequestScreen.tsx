@@ -57,7 +57,8 @@ export default function RequestScreen() {
     if (!isOnline) return;
     
     try {
-      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/employer/linked`, {
+      const { API_BASE } = await import('../api/client');
+      const response = await fetch(`${API_BASE}/employer/linked`, {
         headers: { Authorization: `Bearer ${auth.token}` }
       });
       const data = await response.json();
@@ -99,7 +100,8 @@ export default function RequestScreen() {
               setIsCreating(true);
               setLoading(true);
 
-              const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/employer/payment-request`, {
+              const { API_BASE } = await import('../api/client');
+              const response = await fetch(`${API_BASE}/employer/payment-request`, {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',

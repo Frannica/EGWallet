@@ -37,10 +37,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const t = await SecureStore.getItemAsync(TOKEN_KEY);
         if (t) {
           setToken(t);
-          const profile = await apiMe(t);
-          setUser(profile);
+          try {
+            const profile = await apiMe(t);
+            setUser(profile);
+          } catch (apiError) {
+            // API call failed - clear invalid token
+            if (__DEV__) console.warn('API call failed during restore, clearing token', apiError);
+            await SecureStore.deleteItemAsync(TOKEN_KEY);
+            await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+            setToken(null);
+            setUser(null);
+          }
         }
       } catch (e) {
+        // SecureStore failed - continue without crash
         if (__DEV__) console.warn('Restore token failed', e);
       } finally {
         setLoading(false);

@@ -41,7 +41,8 @@ export default function WalletScreen() {
       // Check for recent payroll transaction
       if (res.wallets && res.wallets.length > 0) {
         const firstWallet = res.wallets[0];
-        const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/transactions?walletId=${firstWallet.id}`, {
+        const { API_BASE } = await import('../api/client');
+        const response = await fetch(`${API_BASE}/transactions?walletId=${firstWallet.id}`, {
           headers: { Authorization: `Bearer ${auth.token}` }
         });
         const txData = await response.json();

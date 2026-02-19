@@ -30,18 +30,37 @@ export const BiometricProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [biometricType, setBiometricType] = useState<string | null>(null);
 
   useEffect(() => {
-    checkBiometricAvailability();
-    loadBiometricSettings();
+    // Wrap in try-catch to prevent crashes
+    (async () => {
+      try {
+        await checkBiometricAvailability();
+        await loadBiometricSettings();
+      } catch (error) {
+        console.warn('BiometricProvider initialization failed:', error);
+        // Continue without biometric - don't crash the app
+        setBiometricAvailable(false);
+        setBiometricEnabled(false);
+        setIsLocked(false);
+      }
+    })();
     
     // Lock app when it goes to background
     const subscription = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'background' && biometricEnabled) {
-        setIsLocked(true);
+      try {
+        if (nextAppState === 'background' && biometricEnabled) {
+          setIsLocked(true);
+        }
+      } catch (error) {
+        console.warn('AppState listener error:', error);
       }
     });
 
     return () => {
-      subscription.remove();
+      try {
+        subscription.remove();
+      } catch (error) {
+        console.warn('Failed to remove AppState listener:', error);
+      }
     };
   }, [biometricEnabled]);
 
