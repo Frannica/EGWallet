@@ -4350,6 +4350,105 @@ app.get('/employer/employees', authMiddleware, (req, res) => {
   res.json({ employees });
 });
 
+// Get linked employers (worker view)
+app.get('/employer/linked', authMiddleware, (req, res) => {
+  const db = loadDB();
+  
+  // Find all employer-employee relationships for this user
+  const relationships = db.employerEmployees.filter(ee => ee.userId === req.user.userId);
+  
+  // Get employer details for each relationship
+  const employers = relationships.map(rel => {
+    const employer = db.employers.find(e => e.id === rel.employerId);
+    if (!employer) return null;
+    
+    return {
+      relationshipId: rel.id,
+      employerId: employer.id,
+      employerName: employer.companyName,
+      verificationStatus: employer.verificationStatus,
+      linkedAt: rel.addedAt
+    };
+  }).filter(e => e !== null);
+  
+  res.json({ employers });
+});
+
+// Create payment request to employer (worker view)
+app.post('/employer/payment-request',
+  authMiddleware,
+  validateInput([
+    body('employerId').isString(),
+    body('amount').isNumeric(),
+    body('currency').isString()
+  ]),
+  (req, res) => {
+    const db = loadDB();
+    const { employerId, amount, currency, memo } = req.body;
+    
+    // Verify worker is linked to this employer
+    const relationship = db.employerEmployees.find(ee => 
+      ee.employerId === employerId && ee.userId === req.user.userId
+    );
+    
+    if (!relationship) {
+      return res.status(403).json({ error: 'Not linked to this employer' });
+    }
+    
+    const employer = db.employers.find(e => e.id === employerId);
+    if (!employer) {
+      return res.status(404).json({ error: 'Employer not found' });
+    }
+    
+    // Get worker's wallet
+    const userWallet = db.wallets.find(w => w.userId === req.user.userId);
+    if (!userWallet) {
+      return res.status(404).json({ error: 'Wallet not found' });
+    }
+    
+    // Create payment request
+    const request = {
+      id: uuidv4(),
+      walletId: userWallet.id,
+      userId: req.user.userId,
+      employerId: employerId,
+      amount: Math.round(amount * 100), // Convert to minor units
+      currency,
+      memo: memo || '',
+      type: 'payroll_request',
+      status: 'pending',
+      createdAt: Date.now(),
+      paidAt: null,
+      payrollMetadata: {
+        employerName: employer.companyName,
+        employerId: employer.id,
+        requestedByWorker: true
+      }
+    };
+    
+    db.paymentRequests.push(request);
+    saveDB(db);
+    
+    logger.info('Employer payment request created', {
+      requestId: request.id,
+      employerId,
+      userId: req.user.userId,
+      amount: request.amount,
+      currency
+    });
+    
+    res.json({ 
+      success: true, 
+      request: {
+        id: request.id,
+        amount: request.amount,
+        currency: request.currency,
+        status: request.status
+      }
+    });
+  }
+);
+
 // Remove employee
 app.post('/employer/remove-employee/:relationshipId',
   authMiddleware,
