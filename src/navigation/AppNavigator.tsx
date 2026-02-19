@@ -12,6 +12,12 @@ import BudgetScreen from '../screens/BudgetScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import TransactionHistory from '../screens/TransactionHistory';
 import AboutScreen from '../screens/AboutScreen';
+import HelpCenterScreen from '../screens/HelpCenterScreen';
+import ReportProblemScreen from '../screens/ReportProblemScreen';
+import TrustedDevicesScreen from '../screens/TrustedDevicesScreen';
+import KYCVerificationScreen from '../screens/KYCVerificationScreen';
+import AIChatScreen from '../screens/AIChatScreen';
+import DisputeTransactionScreen from '../screens/DisputeTransactionScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -86,6 +92,12 @@ export default function AppNavigator() {
         <Stack.Screen name="Main" component={Tabs} options={{ headerShown: false }} />
         <Stack.Screen name="Transactions" component={TransactionHistory} options={{ title: 'Transactions' }} />
         <Stack.Screen name="About" component={AboutScreen} options={{ title: 'About EGWallet' }} />
+        <Stack.Screen name="HelpCenter" component={HelpCenterScreen} options={{ title: 'Help Center' }} />
+        <Stack.Screen name="ReportProblem" component={ReportProblemScreen} options={{ title: 'Report Problem' }} />
+        <Stack.Screen name="TrustedDevices" component={TrustedDevicesScreen} options={{ title: 'Trusted Devices' }} />
+        <Stack.Screen name="KYCVerification" component={KYCVerificationScreen} options={{ title: 'Identity Verification' }} />
+        <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: 'AI Assistant' }} />
+        <Stack.Screen name="DisputeTransaction" component={DisputeTransactionScreen} options={{ title: 'Dispute Transaction' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

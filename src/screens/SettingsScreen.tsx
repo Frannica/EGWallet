@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, Button, ScrollView, Alert, TouchableOpacity, Modal, FlatList, Switch, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
+import { useBiometric } from '../auth/BiometricContext';
 import { useNavigation } from '@react-navigation/native';
 import { KYCDisclosure } from '../components/KYCDisclosure';
 import { getCurrencySymbol } from '../utils/currency';
@@ -14,6 +15,7 @@ const CURRENCIES = [
 
 export default function SettingsScreen() {
   const auth = useAuth();
+  const biometric = useBiometric();
   const navigation = useNavigation();
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
 
@@ -75,6 +77,20 @@ export default function SettingsScreen() {
       }
     } catch (e: any) {
       Alert.alert('Error', e.message || 'Failed to update setting');
+    }
+  };
+
+  const handleToggleBiometric = async (enabled: boolean) => {
+    try {
+      if (enabled) {
+        await biometric.enableBiometric();
+        Alert.alert('Biometric Lock Enabled', 'Your wallet will now be locked when you leave the app.');
+      } else {
+        await biometric.disableBiometric();
+        Alert.alert('Biometric Lock Disabled', 'Your wallet will no longer require biometric authentication.');
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to update biometric settings');
     }
   };
 
@@ -147,12 +163,72 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Identity Verification Section */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="shield-checkmark" size={24} color="#34C759" />
+            <Text style={styles.sectionTitle}>IDENTITY VERIFICATION</Text>
+          </View>
+          
+          <TouchableOpacity 
+            style={styles.supportButton} 
+            onPress={() => (navigation as any).navigate('KYCVerification')}
+          >
+            <Ionicons name="document-text" size={20} color="#007AFF" />
+            <View style={styles.settingTextContainer}>
+              <Text style={styles.supportButtonText}>Verify Your Identity</Text>
+              <Text style={styles.settingSubtitle}>Unlock higher limits and premium features</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#007AFF" />
+          </TouchableOpacity>
+        </View>
+
         {/* Privacy & Security Section */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Ionicons name="shield-checkmark" size={24} color="#d32f2f" />
             <Text style={[styles.sectionTitle, { color: '#d32f2f' }]}>PRIVACY & SECURITY</Text>
           </View>
+          
+          {biometric.biometricAvailable && (
+            <View style={styles.settingRow}>
+              <View style={styles.settingLeft}>
+                <Ionicons 
+                  name={biometric.biometricType === 'face' ? 'scan' : 'finger-print'} 
+                  size={20} 
+                  color="#007AFF" 
+                />
+                <View style={styles.settingTextContainer}>
+                  <Text style={styles.settingTitle}>
+                    {biometric.biometricType === 'face' ? 'Face' : 'Fingerprint'} Lock
+                  </Text>
+                  <Text style={styles.settingSubtitle}>
+                    Require {biometric.biometricType === 'face' ? 'face recognition' : 'fingerprint'} to unlock app
+                  </Text>
+                </View>
+              </View>
+              <Switch
+                value={biometric.biometricEnabled}
+                onValueChange={handleToggleBiometric}
+                trackColor={{ false: '#E1E8ED', true: '#007AFF' }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+          )}
+          
+          <View style={styles.divider} />
+          
+          <TouchableOpacity 
+            style={styles.supportButton} 
+            onPress={() => (navigation as any).navigate('TrustedDevices')}
+          >
+            <Ionicons name="shield" size={20} color="#007AFF" />
+            <Text style={styles.supportButtonText}>Trusted Devices</Text>
+            <Ionicons name="chevron-forward" size={20} color="#007AFF" />
+          </TouchableOpacity>
+
+          <View style={styles.divider} />
+          
           <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteAccount}>
             <Ionicons name="trash" size={20} color="#d32f2f" />
             <Text style={styles.deleteText}>Delete Account</Text>
@@ -178,11 +254,44 @@ export default function SettingsScreen() {
             <Ionicons name="headset" size={24} color="#007AFF" />
             <Text style={styles.sectionTitle}>SUPPORT</Text>
           </View>
+          
+          <TouchableOpacity 
+            style={styles.supportButton} 
+            onPress={() => (navigation as any).navigate('AIChat')}
+          >
+            <Ionicons name="sparkles" size={20} color="#007AFF" />
+            <Text style={styles.supportButtonText}>AI Assistant (Chat)</Text>
+            <Ionicons name="chevron-forward" size={20} color="#007AFF" />
+          </TouchableOpacity>
+
+          <View style={styles.divider} />
+
+          <TouchableOpacity 
+            style={styles.supportButton} 
+            onPress={() => (navigation as any).navigate('HelpCenter')}
+          >
+            <Ionicons name="help-circle" size={20} color="#007AFF" />
+            <Text style={styles.supportButtonText}>Help Center & FAQs</Text>
+            <Ionicons name="chevron-forward" size={20} color="#007AFF" />
+          </TouchableOpacity>
+
+          <View style={styles.divider} />
+
+          <TouchableOpacity 
+            style={styles.supportButton} 
+            onPress={() => (navigation as any).navigate('ReportProblem')}
+          >
+            <Ionicons name="bug" size={20} color="#007AFF" />
+            <Text style={styles.supportButtonText}>Report a Problem</Text>
+            <Ionicons name="chevron-forward" size={20} color="#007AFF" />
+          </TouchableOpacity>
+
+          <View style={styles.divider} />
+
           <View style={styles.supportContent}>
             <Ionicons name="mail" size={20} color="#657786" />
             <Text style={styles.supportText}>
-              For technical support, email us at:{' '}
-              <Text style={styles.supportEmail}>support@egwallet.com</Text>
+              Email: <Text style={styles.supportEmail}>support@egwallet.com</Text>
             </Text>
           </View>
         </View>
@@ -377,6 +486,35 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#d32f2f',
   },
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    marginHorizontal: 12,
+    marginBottom: 8,
+    borderRadius: 8,
+    backgroundColor: '#F0F7FF',
+  },
+  settingLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 12,
+  },
+  settingTextContainer: {
+    flex: 1,
+  },
+  settingTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1C1E21',
+    marginBottom: 4,
+  },
+  settingSubtitle: {
+    fontSize: 13,
+    color: '#657786',
+  },
   aboutButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -391,6 +529,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#007AFF',
+  },
+  supportButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    marginHorizontal: 12,
+    gap: 10,
+  },
+  supportButtonText: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1C1E21',
   },
   supportContent: {
     flexDirection: 'row',
@@ -463,5 +614,10 @@ const styles = StyleSheet.create({
   currencyOptionTextSelected: {
     fontWeight: '600',
     color: '#007AFF',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#E1E8ED',
+    marginHorizontal: 16,
   },
 });

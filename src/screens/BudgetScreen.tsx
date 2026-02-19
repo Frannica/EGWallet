@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import { createBudget, getBudgets, getBudgetAnalytics, deleteBudget } from '../api/transactions';
 import { getCurrencySymbol } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
+import { BudgetCardSkeleton } from '../components/SkeletonLoader';
 
 interface Budget {
   id: string;
@@ -279,8 +280,10 @@ export default function BudgetScreen() {
       </View>
 
       {loading && budgets.length === 0 ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
+        <View style={styles.list}>
+          <BudgetCardSkeleton />
+          <BudgetCardSkeleton />
+          <BudgetCardSkeleton />
         </View>
       ) : budgets.length === 0 ? (
         <View style={styles.emptyContainer}>

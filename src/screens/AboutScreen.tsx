@@ -97,16 +97,20 @@ export default function AboutScreen() {
             <Text style={styles.featureText}>Transaction history</Text>
           </View>
           <View style={styles.featureItem}>
-            <Ionicons name="time" size={20} color="#F57C00" />
-            <Text style={[styles.featureText, { color: '#F57C00' }]}>Request money (Beta)</Text>
+            <Ionicons name="checkmark-circle" size={20} color="#2E7D32" />
+            <Text style={styles.featureText}>Payment requests</Text>
           </View>
           <View style={styles.featureItem}>
-            <Ionicons name="time" size={20} color="#F57C00" />
-            <Text style={[styles.featureText, { color: '#F57C00' }]}>Virtual card (Coming Soon)</Text>
+            <Ionicons name="checkmark-circle" size={20} color="#2E7D32" />
+            <Text style={styles.featureText}>Virtual cards</Text>
+          </View>
+          <View style={styles.featureItem}>
+            <Ionicons name="checkmark-circle" size={20} color="#2E7D32" />
+            <Text style={styles.featureText}>Budget tracking</Text>
           </View>
           <View style={[styles.featureItem, { borderBottomWidth: 0 }]}>
-            <Ionicons name="time" size={20} color="#F57C00" />
-            <Text style={[styles.featureText, { color: '#F57C00' }]}>Budget tracking (Coming Soon)</Text>
+            <Ionicons name="checkmark-circle" size={20} color="#2E7D32" />
+            <Text style={styles.featureText}>Payroll system</Text>
           </View>
         </View>
 

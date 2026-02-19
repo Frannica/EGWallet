@@ -1,0 +1,4 @@
+email,amount,currency,name,memo
+worker1@egwallet.test,350000,XAF,John Doe,February 2026 Payroll
+worker2@egwallet.test,500000,XAF,Maria Garcia,February 2026 Payroll
+worker3@egwallet.test,400000,XAF,Carlos Lopez,February 2026 Payroll

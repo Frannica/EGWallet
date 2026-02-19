@@ -4,10 +4,22 @@
       "id": "33031014-73d0-429a-bdc9-c33663265b90",
       "email": "test1@example.com",
       "region": "US",
+      "role": "individual",
       "createdAt": 1764913501714,
-      "passwordHash": "$2a$08$5DSYaHJv7nC/xv465.Ykh.kur43JTe1IBeSl/LGY4OidGlN.V4g2y"
+      "passwordHash": "$2a$08$5DSYaHJv7nC/xv465.Ykh.kur43JTe1IBeSl/LGY4OidGlN.V4g2y",
+      "kycTier": 1,
+      "kycStatus": "approved",
+      "kycDocuments": {},
+      "kycLimits": {
+        "dailyLimit": 5000,
+        "totalLimit": 50000
+      },
+      "dailySpent": 0,
+      "lastResetDate": "2026-02-18",
+      "linkedEmployers": []
     }
   ],
+  "employers": [],
   "wallets": [
     {
       "id": "2375f213-63b8-4e39-b0c2-88ce6f6ebb2a",
@@ -23,6 +35,12 @@
     }
   ],
   "transactions": [],
+  "payrollBatches": [],
+  "savedContacts": [],
+  "employerEmployees": [],
+  "paymentRequestsRateLimit": {},
+  "qrCodes": [],
+  "auditLog": [],
   "rates": {
     "base": "USD",
     "values": {

@@ -1,20 +1,24 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { formatCurrency } from '../utils/currency';
-import { useRoute, RouteProp } from '@react-navigation/native';
+import { useRoute, RouteProp, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../auth/AuthContext';
 import { fetchTransactions } from '../api/transactions';
 import { Ionicons } from '@expo/vector-icons';
+import { generateAndShareReceipt } from '../utils/receiptGenerator';
+import { TransactionCardSkeleton } from '../components/SkeletonLoader';
 
 type Params = { params: { walletId: string } };
 
 export default function TransactionHistory() {
   const route = useRoute() as RouteProp<Record<string, Params>, string>;
+  const navigation = useNavigation();
   const walletId = (route.params as any)?.walletId;
   const auth = useAuth();
   const [txs, setTxs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [filter, setFilter] = useState<'all' | 'payroll' | 'sent' | 'received'>('all');
 
   async function loadTransactions() {
     if (!walletId) return;
@@ -38,6 +42,18 @@ export default function TransactionHistory() {
   useEffect(() => {
     loadTransactions();
   }, [walletId]);
+
+  // Filter transactions based on selected filter
+  const filteredTxs = txs.filter(tx => {
+    if (filter === 'all') return true;
+    if (filter === 'payroll') return tx.type === 'payroll' || tx.type === 'payroll_request';
+    if (filter === 'sent') return tx.type === 'sent';
+    if (filter === 'received') return tx.type === 'received';
+    return true;
+  });
+
+  // Check if there are any payroll transactions (to show filter)
+  const hasPayrollTxs = txs.some(tx => tx.type === 'payroll' || tx.type === 'payroll_request');
 
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
@@ -84,10 +100,14 @@ export default function TransactionHistory() {
   };
 
   if (loading && txs.length === 0) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Loading transactions...</Text>
+    return ( <View style={styles.container}>
+        <View style={styles.listContent}>
+          <TransactionCardSkeleton />
+          <TransactionCardSkeleton />
+          <TransactionCardSkeleton />
+          <TransactionCardSkeleton />
+          <TransactionCardSkeleton />
+        </View>
       </View>
     );
   }
@@ -95,10 +115,9 @@ export default function TransactionHistory() {
   if (!loading && txs.length === 0) {
     return (
       <View style={styles.emptyContainer}>
-        <Ionicons name="receipt-outline" size={64} color="#AAB8C2" />
         <Text style={styles.emptyTitle}>No Transactions Yet</Text>
         <Text style={styles.emptyText}>
-          When you send or receive money,{'\n'}your transactions will appear here.
+          Your transaction history will appear here once you start sending or receiving money.
         </Text>
       </View>
     );
@@ -106,8 +125,47 @@ export default function TransactionHistory() {
 
   return (
     <View style={styles.container}>
+      {/* Filter Tabs - Only show if there are payroll transactions */}
+      {hasPayrollTxs && (
+        <View style={styles.filterBar}>
+          <TouchableOpacity
+            style={[styles.filterTab, filter === 'all' && styles.filterTabActive]}
+            onPress={() => setFilter('all')}
+          >
+            <Text style={[styles.filterTabText, filter === 'all' && styles.filterTabTextActive]}>
+              All
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterTab, filter === 'payroll' && styles.filterTabActive]}
+            onPress={() => setFilter('payroll')}
+          >
+            <Ionicons name="briefcase" size={16} color={filter === 'payroll' ? '#007AFF' : '#657786'} />
+            <Text style={[styles.filterTabText, filter === 'payroll' && styles.filterTabTextActive]}>
+              Payroll
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterTab, filter === 'sent' && styles.filterTabActive]}
+            onPress={() => setFilter('sent')}
+          >
+            <Text style={[styles.filterTabText, filter === 'sent' && styles.filterTabTextActive]}>
+              Sent
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterTab, filter === 'received' && styles.filterTabActive]}
+            onPress={() => setFilter('received')}
+          >
+            <Text style={[styles.filterTabText, filter === 'received' && styles.filterTabTextActive]}>
+              Received
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      
       <FlatList 
-        data={txs}
+        data={filteredTxs}
         keyExtractor={t => t.id}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#007AFF']} />
@@ -116,22 +174,35 @@ export default function TransactionHistory() {
         renderItem={({item}) => {
           const statusColor = getStatusColor(item.status);
           const statusIcon = getStatusIcon(item.status);
+          const isPayroll = item.type === 'payroll' || item.type === 'payroll_request';
+          const employerName = item.payrollMetadata?.employerName || 'Employer';
           
           return (
             <View style={styles.transactionCard}>
               <View style={styles.transactionHeader}>
-                <View style={[styles.iconContainer, { backgroundColor: `${statusColor}15` }]}>
-                  <Ionicons name={statusIcon as any} size={24} color={statusColor} />
+                <View style={[styles.iconContainer, { backgroundColor: isPayroll ? '#E3F2FD' : `${statusColor}15` }]}>
+                  <Ionicons 
+                    name={isPayroll ? 'briefcase' : statusIcon as any} 
+                    size={24} 
+                    color={isPayroll ? '#1976D2' : statusColor} 
+                  />
                 </View>
                 <View style={styles.transactionContent}>
                   <View style={styles.transactionTop}>
                     <Text style={styles.transactionTitle}>
-                      {item.type === 'received' ? 'Money Received' : 'Money Sent'}
+                      {isPayroll ? `Salary from ${employerName}` : 
+                       item.type === 'received' ? 'Money Received' : 'Money Sent'}
                     </Text>
                     <Text style={[styles.transactionAmount, item.type === 'received' && styles.transactionAmountPositive]}>
-                      {item.type === 'received' ? '+' : '-'}{formatCurrency(item.amount, item.currency)}
+                      {item.type === 'received' || isPayroll ? '+' : '-'}{formatCurrency(item.amount, item.currency)}
                     </Text>
                   </View>
+                  
+                  {isPayroll && item.payrollMetadata?.payPeriod && (
+                    <Text style={styles.payrollPeriod}>
+                      {item.payrollMetadata.payPeriod}
+                    </Text>
+                  )}
                   
                   <View style={styles.transactionDetails}>
                     <View style={styles.statusBadge}>
@@ -155,6 +226,39 @@ export default function TransactionHistory() {
                     <Text style={styles.memoText} numberOfLines={1}>
                       {item.memo}
                     </Text>
+                  )}
+                  
+                  {/* Action Buttons */}
+                  {item.status === 'completed' && (
+                    <View style={styles.actionButtons}>
+                      <TouchableOpacity
+                        style={styles.receiptButton}
+                        onPress={() => generateAndShareReceipt(item, auth.user?.email || 'user@egwallet.com')}
+                      >
+                        <Ionicons name="document-text" size={16} color="#007AFF" />
+                        <Text style={styles.receiptButtonText}>Receipt</Text>
+                      </TouchableOpacity>
+                      
+                      {isPayroll && (
+                        <TouchableOpacity
+                          style={styles.fraudButton}
+                          onPress={() => (navigation as any).navigate('ReportFraud', { transactionId: item.id })}
+                        >
+                          <Ionicons name="shield-checkmark" size={16} color="#FF3B30" />
+                          <Text style={styles.fraudButtonText}>Report</Text>
+                        </TouchableOpacity>
+                      )}
+                      
+                      {!isPayroll && (
+                        <TouchableOpacity
+                          style={styles.disputeButton}
+                          onPress={() => (navigation as any).navigate('DisputeTransaction')}
+                        >
+                          <Ionicons name="alert-circle" size={16} color="#FF9500" />
+                          <Text style={styles.disputeButtonText}>Dispute</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
                   )}
                 </View>
               </View>
@@ -289,5 +393,94 @@ const styles = StyleSheet.create({
     color: '#657786',
     marginTop: 4,
     fontStyle: 'italic',
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    marginTop: 12,
+    gap: 8,
+  },
+  receiptButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#F0F7FF',
+    borderRadius: 8,
+    gap: 6,
+  },
+  receiptButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  disputeButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#FFF8E6',
+    borderRadius: 8,
+    gap: 6,
+  },
+  disputeButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FF9500',
+  },
+  filterBar: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E1E8ED',
+    gap: 8,
+  },
+  filterTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    backgroundColor: '#F5F8FA',
+    gap: 4,
+  },
+  filterTabActive: {
+    backgroundColor: '#E3F2FD',
+  },
+  filterTabText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#657786',
+  },
+  filterTabTextActive: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  payrollPeriod: {
+    fontSize: 13,
+    color: '#1976D2',
+    marginBottom: 4,
+    fontWeight: '500',
+  },
+  fraudButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#FFEBEE',
+    borderRadius: 8,
+    gap: 6,
+  },
+  fraudButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FF3B30',
   },
 });

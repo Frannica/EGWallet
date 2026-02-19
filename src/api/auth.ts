@@ -3,12 +3,12 @@ import { safeApiCall } from '../utils/networkGuard';
 
 export type User = { id: string; email: string; region?: string };
 
-export async function register(email: string, password: string, region?: string) {
+export async function register(email: string, password: string, region?: string, deviceInfo?: any) {
   const result = await safeApiCall(async () => {
     const res = await fetch(`${API_BASE}/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, region })
+      body: JSON.stringify({ email, password, region, deviceInfo })
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -21,12 +21,12 @@ export async function register(email: string, password: string, region?: string)
   return result;
 }
 
-export async function login(email: string, password: string) {
+export async function login(email: string, password: string, deviceInfo?: any) {
   const result = await safeApiCall(async () => {
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
+      body: JSON.stringify({ email, password, deviceInfo })
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));

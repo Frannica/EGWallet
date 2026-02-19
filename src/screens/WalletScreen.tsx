@@ -6,6 +6,7 @@ import { fetchRates, Rates } from '../api/client';
 import { formatCurrency, convert } from '../utils/currency';
 import { useNavigation } from '@react-navigation/native';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
+import { Ionicons } from '@expo/vector-icons';
 
 type Balance = { currency: string; amount: number };
 
@@ -18,6 +19,7 @@ export default function WalletScreen() {
   const [rates, setRates] = useState<Rates | null>(null);
   const [preferredCurrency, setPreferredCurrency] = useState<string>('XAF');
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
+  const [recentPayroll, setRecentPayroll] = useState<any>(null);
   const navigation = useNavigation();
 
   async function loadRates() {
@@ -35,6 +37,20 @@ export default function WalletScreen() {
     try {
       const res = await listWallets(auth.token);
       setWallets(res.wallets || []);
+      
+      // Check for recent payroll transaction
+      if (res.wallets && res.wallets.length > 0) {
+        const firstWallet = res.wallets[0];
+        const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/transactions?walletId=${firstWallet.id}`, {
+          headers: { Authorization: `Bearer ${auth.token}` }
+        });
+        const txData = await response.json();
+        const payrollTx = txData.transactions?.find((tx: any) => 
+          (tx.type === 'payroll' || tx.type === 'payroll_request') && 
+          tx.status === 'completed'
+        );
+        setRecentPayroll(payrollTx || null);
+      }
     } catch (e) {
       if (__DEV__) console.warn('Load wallets failed', e);
     } finally {
@@ -107,6 +123,34 @@ export default function WalletScreen() {
           ))}
         </ScrollView>
       </View>
+
+      {/* Recent Payroll Banner */}
+      {recentPayroll && (
+        <TouchableOpacity 
+          style={styles.payrollBanner}
+          onPress={() => (navigation as any).navigate('TransactionHistory', { 
+            walletId: wallets[0]?.id 
+          })}
+        >
+          <View style={styles.payrollIcon}>
+            <Ionicons name="briefcase" size={24} color="#1976D2" />
+          </View>
+          <View style={styles.payrollContent}>
+            <Text style={styles.payrollTitle}>
+              💰 Salary Received
+            </Text>
+            <Text style={styles.payrollSubtitle}>
+              {formatCurrency(recentPayroll.amount, recentPayroll.currency)} from {recentPayroll.payrollMetadata?.employerName || 'Employer'}
+            </Text>
+            {recentPayroll.payrollMetadata?.payPeriod && (
+              <Text style={styles.payrollPeriod}>
+                {recentPayroll.payrollMetadata.payPeriod}
+              </Text>
+            )}
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#1976D2" />
+        </TouchableOpacity>
+      )}
 
       {/* Wallets List */}
       {loading && wallets.length === 0 ? (
@@ -398,5 +442,45 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#007AFF',
   },
-});
-
+  payrollBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E3F2FD',
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  payrollIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  payrollContent: {
+    flex: 1,
+  },
+  payrollTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1976D2',
+    marginBottom: 4,
+  },
+  payrollSubtitle: {
+    fontSize: 14,
+    color: '#424242',
+    marginBottom: 2,
+  },
+  payrollPeriod: {
+    fontSize: 12,
+    color: '#616161',
+    fontStyle: 'italic',
+  },

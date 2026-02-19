@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { createVirtualCard, getVirtualCards, toggleCardFreeze, deleteVirtualCard } from '../api/transactions';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
+import { CardSkeleton } from '../components/SkeletonLoader';
 
 interface VirtualCard {
   id: string;
@@ -224,8 +225,10 @@ export default function CardScreen() {
       </View>
 
       {loading && cards.length === 0 ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
+        <View style={styles.cardsList}>
+          <CardSkeleton />
+          <CardSkeleton />
+          <CardSkeleton />
         </View>
       ) : cards.length === 0 ? (
         <View style={styles.emptyContainer}>

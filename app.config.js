@@ -1,6 +1,6 @@
 export default ({ config }) => ({
   ...config,
-  name: "EGWalletSimple",
+  name: "EGWallet",
   slug: "EGWalletSimple",
   version: "1.0.0",
   orientation: "portrait",
@@ -23,7 +23,7 @@ export default ({ config }) => ({
     },
     edgeToEdgeEnabled: true,
     package: "com.francisco1953.egwalletmobile",
-    versionCode: 12
+    versionCode: 11
   },
   web: {
     favicon: "./assets/favicon.png"
@@ -38,6 +38,6 @@ export default ({ config }) => ({
   },
   owner: "francisco1953",
   plugins: [
-    "expo-font"
+    "expo-notifications"
   ]
 });

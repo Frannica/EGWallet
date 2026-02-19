@@ -161,7 +161,24 @@ export function logError(context: string, error: ApiError) {
     console.error(`[${context}] ${error.type}: ${error.message}`, error.originalError);
   }
   
-  // TODO: Send to crash reporting service (Sentry, Firebase Crashlytics, etc.)
-  // Example:
-  // Sentry.captureException(error.originalError, { extra: { context, apiError: error } });
+  // Send to Sentry in production
+  if (!__DEV__) {
+    try {
+      const Sentry = require('@sentry/react-native');
+      Sentry.captureException(error.originalError || new Error(error.message), {
+        level: error.type === 'network' || error.type === 'timeout' ? 'warning' : 'error',
+        extra: {
+          context,
+          errorType: error.type,
+          apiError: {
+            message: error.message,
+            statusCode: error.statusCode,
+            type: error.type,
+          },
+        },
+      });
+    } catch (e) {
+      console.warn('Failed to send error to Sentry:', e);
+    }
+  }
 }

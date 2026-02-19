@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
+import { Alert } from 'react-native';
 import { login as apiLogin, register as apiRegister, me as apiMe, listWallets } from '../api/auth';
+import { getDeviceFingerprint, getDeviceDisplayName, getDeviceType } from '../utils/deviceInfo';
 
 type AuthState = {
   user: { id: string; email: string; preferredCurrency?: string; autoConvertIncoming?: boolean } | null;
@@ -16,6 +18,7 @@ type AuthState = {
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
 const TOKEN_KEY = 'egwallet_token';
+const REFRESH_TOKEN_KEY = 'egwallet_refresh_token';
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
@@ -46,25 +49,76 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   async function signIn(email: string, password: string) {
-    const res = await apiLogin(email, password);
+    // Gather device information
+    const deviceInfo = {
+      fingerprint: await getDeviceFingerprint(),
+      name: getDeviceDisplayName(),
+      type: getDeviceType(),
+    };
+    
+    const res = await apiLogin(email, password, deviceInfo);
+    
+    // Check if this is a new device
+    if (res.newDevice) {
+      Alert.alert(
+        'New Device Detected',
+        `This is the first time you're signing in from "${res.deviceName || 'this device'}". If this wasn't you, please change your password immediately.`,
+        [
+          { text: 'I Trust This Device', style: 'default' },
+          { text: 'Review Security', style: 'cancel', onPress: () => {
+            Alert.alert('Security Tips', 'Go to Settings > Privacy & Security to review your trusted devices and enable biometric authentication.');
+          }}
+        ]
+      );
+    }
+    
     const t = res.token;
+    const rt = res.refreshToken;
     await SecureStore.setItemAsync(TOKEN_KEY, t);
+    if (rt) await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, rt);
     setToken(t);
     const profile = await apiMe(t);
     setUser(profile);
   }
 
   async function signUp(email: string, password: string, region?: string) {
-    const res = await apiRegister(email, password, region);
+    // Gather device information
+    const deviceInfo = {
+      fingerprint: await getDeviceFingerprint(),
+      name: getDeviceDisplayName(),
+      type: getDeviceType(),
+    };
+    
+    const res = await apiRegister(email, password, region, deviceInfo);
     const t = res.token;
+    const rt = res.refreshToken;
     await SecureStore.setItemAsync(TOKEN_KEY, t);
+    if (rt) await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, rt);
     setToken(t);
     const profile = await apiMe(t);
     setUser(profile);
   }
 
   async function signOut() {
+    // Revoke refresh token on backend
+    try {
+      const rt = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+      if (rt && token) {
+        await fetch(`${require('../config/env').default.API_BASE_URL}/auth/logout`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({ refreshToken: rt }),
+        });
+      }
+    } catch (e) {
+      console.warn('Logout revoke failed:', e);
+    }
+    
     await SecureStore.deleteItemAsync(TOKEN_KEY);
+    await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
     setToken(null);
     setUser(null);
   }

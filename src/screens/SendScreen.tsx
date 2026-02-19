@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, Alert, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Alert, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Modal } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { listWallets } from '../api/auth';
 import { sendTransaction } from '../api/transactions';
@@ -19,6 +20,8 @@ export default function SendScreen() {
   const [amount, setAmount] = useState<string>('');
   const [currency, setCurrency] = useState<string>('XAF');
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [scamAcknowledged, setScamAcknowledged] = useState(false);
+  const [showScamTips, setShowScamTips] = useState(false);
   const navigation = useNavigation();
 
   useEffect(() => { loadWallets(); }, [auth.token]);
@@ -42,6 +45,7 @@ export default function SendScreen() {
     if (!amt || amt <= 0) return Alert.alert('Error', 'Enter valid amount');
     if (!toWalletId.trim()) return Alert.alert('Error', 'Enter destination wallet ID');
     
+    setScamAcknowledged(false); // Reset checkbox for new confirmation
     setShowConfirmation(true);
   }
 
@@ -60,6 +64,23 @@ export default function SendScreen() {
     };
   }
 
+  function isHighAmount(): boolean {
+    const amt = parseFloat(amount);
+    if (!amt) return false;
+    // High amount thresholds (in major currency units)
+    const thresholds: Record<string, number> = {
+      USD: 500,
+      EUR: 500,
+      GBP: 400,
+      XAF: 300000,
+      NGN: 200000,
+      GHS: 3000,
+      ZAR: 8000,
+      KES: 50000,
+    };
+    return amt >= (thresholds[currency] || 500);
+  }
+
   async function onSendConfirmed() {
     if (!auth.token) return Alert.alert('Error', 'Not authenticated');
     if (!fromWalletId) return Alert.alert('Error', 'Select source wallet');
@@ -67,6 +88,11 @@ export default function SendScreen() {
     if (!amt || amt <= 0) return Alert.alert('Error', 'Enter valid amount');
     const amountMinor = majorToMinor(amt, currency);
     if (!toWalletId) return Alert.alert('Error', 'Enter destination wallet ID');
+    
+    // Check scam acknowledgement for high amounts
+    if (isHighAmount() && !scamAcknowledged) {
+      return Alert.alert('Acknowledgement Required', 'Please confirm you understand the scam warning before sending.');
+    }
 
     setLoading(true);
     try {
@@ -87,10 +113,96 @@ export default function SendScreen() {
   const preview = calculatePreview();
   const CURRENCIES = ['XAF', 'USD', 'EUR', 'GBP', 'NGN', 'GHS', 'ZAR', 'KES'];
 
+  // Scam Tips Modal
+  const ScamTipsModal = () => (
+    <Modal
+      visible={showScamTips}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setShowScamTips(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>🚨 Scam Warning Signs</Text>
+            <TouchableOpacity onPress={() => setShowScamTips(false)}>
+              <Ionicons name="close" size={24} color="#14171A" />
+            </TouchableOpacity>
+          </View>
+          
+          <ScrollView style={styles.modalScroll}>
+            <View style={styles.tipItem}>
+              <Ionicons name="alert-circle" size={24} color="#D32F2F" />
+              <View style={styles.tipContent}>
+                <Text style={styles.tipTitle}>Pressure to send money quickly</Text>
+                <Text style={styles.tipText}>Scammers create urgency. Take your time to verify.</Text>
+              </View>
+            </View>
+            
+            <View style={styles.tipItem}>
+              <Ionicons name="heart-dislike" size={24} color="#D32F2F" />
+              <View style={styles.tipContent}>
+                <Text style={styles.tipTitle}>Romance or friendship scams</Text>
+                <Text style={styles.tipText}>Never send money to people you met online and haven't met in person.</Text>
+              </View>
+            </View>
+            
+            <View style={styles.tipItem}>
+              <Ionicons name="trophy" size={24} color="#D32F2F" />
+              <View style={styles.tipContent}>
+                <Text style={styles.tipTitle}>"You won!" messages</Text>
+                <Text style={styles.tipText}>Legitimate prizes don't require upfront payment or fees.</Text>
+              </View>
+            </View>
+            
+            <View style={styles.tipItem}>
+              <Ionicons name="shield-checkmark" size={24} color="#D32F2F" />
+              <View style={styles.tipContent}>
+                <Text style={styles.tipTitle}>Impersonation scams</Text>
+                <Text style={styles.tipText}>Verify identities through official channels, not links they provide.</Text>
+              </View>
+            </View>
+            
+            <View style={styles.tipItem}>
+              <Ionicons name="card" size={24} color="#D32F2F" />
+              <View style={styles.tipContent}>
+                <Text style={styles.tipTitle}>Investment opportunities</Text>
+                <Text style={styles.tipText}>Be wary of guaranteed high returns or "insider" opportunities.</Text>
+              </View>
+            </View>
+            
+            <View style={styles.tipItem}>
+              <Ionicons name="hand-left" size={24} color="#D32F2F" />
+              <View style={styles.tipContent}>
+                <Text style={styles.tipTitle}>Charity scams</Text>
+                <Text style={styles.tipText}>Verify charities through official databases before donating.</Text>
+              </View>
+            </View>
+            
+            <View style={styles.safetyBox}>
+              <Ionicons name="checkmark-circle" size={24} color="#2E7D32" />
+              <Text style={styles.safetyText}>
+                <Text style={styles.safetyBold}>Stay Safe:</Text> Only send money to people you know and trust personally. When in doubt, stop and verify.
+              </Text>
+            </View>
+          </ScrollView>
+          
+          <TouchableOpacity 
+            style={styles.modalCloseButton} 
+            onPress={() => setShowScamTips(false)}
+          >
+            <Text style={styles.modalCloseText}>Got it</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
   // Confirmation screen
   if (showConfirmation && preview) {
     return (
       <View style={styles.container}>
+        <ScamTipsModal />
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.confirmHeader}>
             <Text style={styles.confirmTitle}>Review Transaction</Text>
@@ -137,6 +249,42 @@ export default function SendScreen() {
             </Text>
           </View>
 
+          {/* Scam Warning */}
+          <View style={styles.scamWarning}>
+            <View style={styles.scamWarningHeader}>
+              <Ionicons name="warning" size={20} color="#D32F2F" />
+              <Text style={styles.scamWarningTitle}>Scam warning</Text>
+            </View>
+            <Text style={styles.scamWarningText}>
+              Don't send money to charities, people you met online, or anyone you don't personally know. If someone is pressuring you, stop and verify first.
+            </Text>
+            <TouchableOpacity 
+              style={styles.learnMoreButton}
+              onPress={() => setShowScamTips(true)}
+            >
+              <Text style={styles.learnMoreText}>Learn scam signs</Text>
+              <Ionicons name="chevron-forward" size={16} color="#007AFF" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Scam Acknowledgement Checkbox */}
+          {isHighAmount() && (
+            <TouchableOpacity 
+              style={styles.checkboxContainer}
+              onPress={() => setScamAcknowledged(!scamAcknowledged)}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.checkbox, scamAcknowledged && styles.checkboxChecked]}>
+                {scamAcknowledged && (
+                  <Ionicons name="checkmark" size={16} color="#FFFFFF" />
+                )}
+              </View>
+              <Text style={styles.checkboxLabel}>
+                I understand. I'm sending to someone I trust.
+              </Text>
+            </TouchableOpacity>
+          )}
+
           <View style={styles.buttonContainer}>
             <TouchableOpacity 
               style={[styles.button, styles.cancelButton]} 
@@ -146,9 +294,13 @@ export default function SendScreen() {
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity 
-              style={[styles.button, styles.confirmButton]} 
+              style={[
+                styles.button, 
+                styles.confirmButton,
+                (loading || (isHighAmount() && !scamAcknowledged)) && styles.confirmButtonDisabled
+              ]} 
               onPress={onSendConfirmed}
-              disabled={loading}
+              disabled={loading || (isHighAmount() && !scamAcknowledged)}
             >
               {loading ? (
                 <ActivityIndicator color="#FFFFFF" />
@@ -165,6 +317,7 @@ export default function SendScreen() {
   return (
     <View style={styles.container}>
       <OfflineErrorBanner visible={!isOnline} onRetry={() => loadWallets()} />
+      <ScamTipsModal />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
           <Text style={styles.title}>Send Money</Text>
@@ -257,6 +410,17 @@ export default function SendScreen() {
             <View style={styles.infoBox}>
               <Text style={styles.infoText}>
                 ℹ️ A 1% transaction fee will be applied to this transfer.
+              </Text>
+            </View>
+
+            {/* Scam Warning Banner on Send Screen */}
+            <View style={styles.scamBanner}>
+              <View style={styles.scamBannerHeader}>
+                <Ionicons name="shield-checkmark" size={18} color="#D32F2F" />
+                <Text style={styles.scamBannerTitle}>Scam warning</Text>
+              </View>
+              <Text style={styles.scamBannerText}>
+                Only send to people you know and trust.
               </Text>
             </View>
 
@@ -580,6 +744,183 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   confirmButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  confirmButtonDisabled: {
+    backgroundColor: '#AAB8C2',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  // Scam Warning Styles
+  scamBanner: {
+    backgroundColor: '#FFF3E0',
+    padding: 12,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF6F00',
+    marginBottom: 16,
+  },
+  scamBannerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  scamBannerTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#E65100',
+  },
+  scamBannerText: {
+    fontSize: 12,
+    color: '#E65100',
+    lineHeight: 16,
+  },
+  scamWarning: {
+    backgroundColor: '#FFEBEE',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#EF5350',
+    marginBottom: 16,
+  },
+  scamWarningHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  scamWarningTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#C62828',
+  },
+  scamWarningText: {
+    fontSize: 14,
+    color: '#C62828',
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  learnMoreButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  learnMoreText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  checkboxContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#007AFF',
+    marginBottom: 16,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#AAB8C2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  checkboxChecked: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  checkboxLabel: {
+    flex: 1,
+    fontSize: 14,
+    color: '#14171A',
+    fontWeight: '500',
+  },
+  // Scam Tips Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '80%',
+    paddingBottom: 32,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E1E8ED',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#14171A',
+  },
+  modalScroll: {
+    padding: 20,
+  },
+  tipItem: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 20,
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5F8FA',
+  },
+  tipContent: {
+    flex: 1,
+  },
+  tipTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#14171A',
+    marginBottom: 4,
+  },
+  tipText: {
+    fontSize: 14,
+    color: '#657786',
+    lineHeight: 20,
+  },
+  safetyBox: {
+    flexDirection: 'row',
+    gap: 12,
+    backgroundColor: '#E8F5E9',
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 8,
+  },
+  safetyText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#2E7D32',
+    lineHeight: 20,
+  },
+  safetyBold: {
+    fontWeight: '700',
+  },
+  modalCloseButton: {
+    backgroundColor: '#007AFF',
+    marginHorizontal: 20,
+    marginTop: 16,
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  modalCloseText: {
     fontSize: 16,
     fontWeight: 'bold',
     color: '#FFFFFF',

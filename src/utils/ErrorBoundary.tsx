@@ -29,7 +29,22 @@ export class ErrorBoundary extends React.Component<Props, State> {
     if (__DEV__) {
       console.error('ErrorBoundary caught:', error, errorInfo);
     }
-    // TODO: Send to crash reporting service (e.g., Sentry, Firebase) in production
+    
+    // Send to Sentry in production
+    if (!__DEV__) {
+      try {
+        const Sentry = require('@sentry/react-native');
+        Sentry.captureException(error, {
+          contexts: {
+            react: {
+              componentStack: errorInfo.componentStack,
+            },
+          },
+        });
+      } catch (e) {
+        console.warn('Failed to send error to Sentry:', e);
+      }
+    }
   }
 
   handleReset = () => {

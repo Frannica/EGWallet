@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "EGWalletSimple",
+    "name": "EGWallet",
     "slug": "EGWalletSimple",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -23,7 +23,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.francisco1953.egwalletmobile",
-      "versionCode": 11
+      "versionCode": 13
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -38,18 +38,7 @@
     },
     "owner": "francisco1953",
     "plugins": [
-      "expo-barcode-scanner",
-      "expo-camera",
-      "expo-local-authentication",
-      "expo-notifications",
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "usesCleartextTraffic": true
-          }
-        }
-      ]
+      "expo-notifications"
     ]
   }
 }

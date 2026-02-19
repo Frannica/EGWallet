@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import { createPaymentRequest, getPaymentRequests, cancelPaymentRequest } from '../api/transactions';
 import { getCurrencySymbol } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
+import { PaymentRequestCardSkeleton } from '../components/SkeletonLoader';
 
 interface PaymentRequest {
   id: string;
@@ -23,6 +24,9 @@ export default function RequestScreen() {
   const [requests, setRequests] = useState<PaymentRequest[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [activeTab, setActiveTab] = useState<'contact' | 'employer'>('contact');
+  const [linkedEmployers, setLinkedEmployers] = useState<any[]>([]);
+  const [selectedEmployer, setSelectedEmployer] = useState<any>(null);
   
   // Form state
   const [amount, setAmount] = useState('');
@@ -31,6 +35,7 @@ export default function RequestScreen() {
 
   useEffect(() => {
     loadRequests();
+    loadLinkedEmployers();
   }, []);
 
   const loadRequests = async () => {
@@ -45,7 +50,91 @@ export default function RequestScreen() {
       Alert.alert('Error', 'Failed to load payment requests. Please try again.');
     } finally {
       setLoading(false);
+    
+
+  const loadLinkedEmployers = async () => {
+    if (!isOnline) return;
+    
+    try {
+      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/employer/linked`, {
+        headers: { Authorization: `Bearer ${auth.token}` }
+      });
+      const data = await response.json();
+      setLinkedEmployers(data.employers || []);
+    } catch (error) {
+      if (__DEV__) console.log('Load employers error:', error);
     }
+  };
+
+  const handleEmployerRequest = async () => {
+    if (!selectedEmployer) {
+      Alert.alert('Error', 'Please select an employer');
+      return;
+    }
+
+    if (!amount || parseFloat(amount) <= 0) {
+      Alert.alert('Error', 'Please enter a valid amount');
+      return;
+    }
+
+    if (!isOnline) {
+      Alert.alert('Offline', 'You need an internet connection to request payments');
+      return;
+    }
+
+    if (isCreating) return;
+
+    const amountValue = parseFloat(amount);
+
+    Alert.alert(
+      'Request from Employer',
+      `Request ${getCurrencySymbol(currency)}${amountValue.toFixed(2)} ${currency} from ${selectedEmployer.employerName}?${memo ? `\n\nNote: ${memo}` : ''}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send Request',
+          onPress: async () => {
+            try {
+              setIsCreating(true);
+              setLoading(true);
+
+              const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/employer/payment-request`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${auth.token}`
+                },
+                body: JSON.stringify({
+                  employerId: selectedEmployer.employerId,
+                  amount: amountValue,
+                  currency,
+                  memo
+                })
+              });
+
+              const data = await response.json();
+
+              if (!response.ok) {
+                throw new Error(data.error || 'Failed to send request');
+              }
+
+              Alert.alert('Success', 'Payment request sent to employer!');
+              setAmount('');
+              setMemo('');
+              setSelectedEmployer(null);
+              setShowCreateForm(false);
+              loadRequests();
+            } catch (error: any) {
+              Alert.alert('Error', error.message || 'Failed to send request');
+            } finally {
+              setLoading(false);
+              setIsCreating(false);
+            }
+          }
+        }
+      ]
+    );
+  };}
   };
 
   const handleCreate = async () => {
@@ -149,9 +238,98 @@ export default function RequestScreen() {
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
 
-        <Text style={styles.title}>Create Payment Request</Text>
+        <Text style={styles.title}>
+          {activeTab === 'employer' ? 'Request from Employer' : 'Create Payment Request'}
+        </Text>
 
-        <View style={styles.form}>
+        {activeTab === 'employer' ? (
+          <View style={styles.form}>
+            <Text style={styles.label}>Select Employer</Text>
+            {linkedEmployers.length === 0 ? (
+              <View style={styles.noEmployersContainer}>
+                <Ionicons name="briefcase-outline" size={48} color="#CCCCCC" />
+                <Text style={styles.noEmployersText}>No linked employers</Text>
+                <Text style={styles.noEmployersSubtext}>
+                  You need to be linked to an employer to request payments
+                </Text>
+              </View>
+            ) : (
+              <>
+                {linkedEmployers.map((emp: any) => (
+                  <TouchableOpacity
+                    key={emp.employerId}
+                    style={[
+                      styles.employerCard,
+                      selectedEmployer?.employerId === emp.employerId && styles.employerCardSelected
+                    ]}
+                    onPress={() => setSelectedEmployer(emp)}
+                  >
+                    <View style={styles.employerInfo}>
+                      <Ionicons 
+                        name="briefcase" 
+                        size={24} 
+                        color={selectedEmployer?.employerId === emp.employerId ? '#007AFF' : '#657786'} 
+                      />
+                      <View style={{ flex: 1, marginLeft: 12 }}>
+                        <Text style={styles.employerName}>{emp.employerName}</Text>
+                        {emp.verified && (
+                          <View style={styles.verifiedBadge}>
+                            <Ionicons name="checkmark-circle" size={14} color="#2E7D32" />
+                            <Text style={styles.verifiedText}>Verified</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                    {selectedEmployer?.employerId === emp.employerId && (
+                      <Ionicons name="checkmark-circle" size={24} color="#007AFF" />
+                    )}
+                  </TouchableOpacity>
+                ))}
+
+                <Text style={styles.label}>Amount</Text>
+                <TextInput
+                  style={styles.input}
+                  value={amount}
+                  onChangeText={setAmount}
+                  keyboardType="decimal-pad"
+                  placeholder="0.00"
+                  placeholderTextColor="#999"
+                />
+
+                <Text style={styles.label}>Currency</Text>
+                <View style={styles.currencyPicker}>
+                  <Text style={styles.currencyText}>{currency} {getCurrencySymbol(currency)}</Text>
+                </View>
+
+                <Text style={styles.label}>Note (Optional)</Text>
+                <TextInput
+                  style={[styles.input, styles.memoInput]}
+                  value={memo}
+                  onChangeText={setMemo}
+                  placeholder="Payment for January salary"
+                  placeholderTextColor="#999"
+                  multiline
+                />
+
+                <TouchableOpacity
+                  style={styles.createButton}
+                  onPress={handleEmployerRequest}
+                  disabled={loading || !selectedEmployer}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Ionicons name="send" size={20} color="#FFFFFF" />
+                      <Text style={styles.createButtonText}>Send Request</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        ) : (
+          <View style={styles.form}>
           <Text style={styles.label}>Amount</Text>
           <TextInput
             style={styles.input}
@@ -192,6 +370,7 @@ export default function RequestScreen() {
             )}
           </TouchableOpacity>
         </View>
+        )}
       </ScrollView>
     );
   }
@@ -200,7 +379,7 @@ export default function RequestScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <OfflineErrorBanner />
       <View style={styles.header}>
-        <Text style={styles.title}>Payment Requests</Text>
+        <Text style={styles.title}>Request</Text>
         <TouchableOpacity
           style={styles.addButton}
           onPress={() => setShowCreateForm(true)}
@@ -209,9 +388,27 @@ export default function RequestScreen() {
         </TouchableOpacity>
       </View>
 
-      {loading && requests.length === 0 ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
+      {/* Tabs */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'contact' && styles.tabActive]}
+          onPress={() => setActiveTab('contact')}
+        >
+          <Text style={[styles.tabText, activeTab === 'contact' && styles.tabTextActive]}>
+            Request from Contact
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'employer' && styles.tabActive]}
+          onPress={() => setActiveTab('employer')}
+        >
+          <Text style={[styles.tabText, activeTab === 'employer' && styles.tabTextActive]}>
+            Request from Employer
+          </Text>
+        <View style={styles.list}>
+          <PaymentRequestCardSkeleton />
+          <PaymentRequestCardSkeleton />
+          <PaymentRequestCardSkeleton />
         </View>
       ) : requests.length === 0 ? (
         <View style={styles.emptyContainer}>
@@ -480,5 +677,88 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  tabActive: {
+    backgroundColor: '#007AFF',
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#657786',
+  },
+  tabTextActive: {
+    color: '#FFFFFF',
+  },
+  employerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F5F7FA',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  employerCardSelected: {
+    borderColor: '#007AFF',
+    backgroundColor: '#E8F5FE',
+  },
+  employerInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  employerName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#14171A',
+  },
+  verifiedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    gap: 4,
+  },
+  verifiedText: {
+    fontSize: 12,
+    color: '#2E7D32',
+    fontWeight: '500',
+  },
+  noEmployersContainer: {
+    alignItems: 'center',
+    paddingVertical: 48,
+  },
+  noEmployersText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#14171A',
+    marginTop: 12,
+  },
+  noEmployersSubtext: {
+    fontSize: 14,
+    color: '#657786',
+    marginTop: 8,
+    textAlign: 'center',
+    paddingHorizontal: 24,
   },
 });
