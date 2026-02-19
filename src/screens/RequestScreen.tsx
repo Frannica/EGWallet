@@ -50,7 +50,8 @@ export default function RequestScreen() {
       Alert.alert('Error', 'Failed to load payment requests. Please try again.');
     } finally {
       setLoading(false);
-    
+    }
+  };
 
   const loadLinkedEmployers = async () => {
     if (!isOnline) return;
@@ -134,7 +135,6 @@ export default function RequestScreen() {
         }
       ]
     );
-  };}
   };
 
   const handleCreate = async () => {
@@ -377,7 +377,7 @@ export default function RequestScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <OfflineErrorBanner />
+      <OfflineErrorBanner visible={!isOnline} onRetry={loadRequests} />
       <View style={styles.header}>
         <Text style={styles.title}>Request</Text>
         <TouchableOpacity
@@ -405,6 +405,11 @@ export default function RequestScreen() {
           <Text style={[styles.tabText, activeTab === 'employer' && styles.tabTextActive]}>
             Request from Employer
           </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Request List */}
+      {loading ? (
         <View style={styles.list}>
           <PaymentRequestCardSkeleton />
           <PaymentRequestCardSkeleton />

@@ -214,7 +214,7 @@ export default function CardScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <OfflineErrorBanner />
+      <OfflineErrorBanner visible={!isOnline} onRetry={() => {}} />
       <View style={styles.header}>
         <Text style={styles.title}>Virtual Cards</Text>
         {cards.length < 5 && (

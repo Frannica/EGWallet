@@ -484,3 +484,4 @@ const styles = StyleSheet.create({
     color: '#616161',
     fontStyle: 'italic',
   },
+});

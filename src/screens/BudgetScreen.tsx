@@ -271,7 +271,7 @@ export default function BudgetScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <OfflineErrorBanner />
+      <OfflineErrorBanner visible={!isOnline} onRetry={() => {}} />
       <View style={styles.header}>
         <Text style={styles.title}>Budgets</Text>
         <TouchableOpacity style={styles.addButton} onPress={() => setShowCreateForm(true)}>
