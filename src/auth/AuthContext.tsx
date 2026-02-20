@@ -59,45 +59,87 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   async function signIn(email: string, password: string) {
-    // Gather device information
-    const deviceInfo = {
-      fingerprint: await getDeviceFingerprint(),
-      name: getDeviceDisplayName(),
-      type: getDeviceType(),
-    };
-    
-    const res = await apiLogin(email, password, deviceInfo);
-    
-    // Check if this is a new device
-    if (res.newDevice) {
-      Alert.alert(
-        'New Device Detected',
-        `This is the first time you're signing in from "${res.deviceName || 'this device'}". If this wasn't you, please change your password immediately.`,
-        [
-          { text: 'I Trust This Device', style: 'default' },
-          { text: 'Review Security', style: 'cancel', onPress: () => {
-            Alert.alert('Security Tips', 'Go to Settings > Privacy & Security to review your trusted devices and enable biometric authentication.');
-          }}
-        ]
-      );
+    try {
+      // Gather device information with fallback
+      let deviceInfo;
+      try {
+        deviceInfo = {
+          fingerprint: await getDeviceFingerprint(),
+          name: getDeviceDisplayName(),
+          type: getDeviceType(),
+        };
+      } catch (deviceError) {
+        // Fallback if device info fails
+        if (__DEV__) console.warn('Device info failed, using fallback', deviceError);
+        deviceInfo = {
+          fingerprint: 'unknown_' + Date.now(),
+          name: 'Unknown Device',
+          type: 'Mobile',
+        };
+      }
+      
+      const res = await apiLogin(email, password, deviceInfo);
+      
+      // Check if this is a new device
+      if (res.newDevice) {
+        Alert.alert(
+          'New Device Detected',
+          `This is the first time you're signing in from "${res.deviceName || 'this device'}". If this wasn't you, please change your password immediately.`,
+          [
+            { text: 'I Trust This Device', style: 'default' },
+            { text: 'Review Security', style: 'cancel', onPress: () => {
+              Alert.alert('Security Tips', 'Go to Settings > Privacy & Security to review your trusted devices and enable biometric authentication.');
+            }}
+          ]
+        );
+      }
+      
+      const t = res.token;
+      const rt = res.refreshToken;
+      await SecureStore.setItemAsync(TOKEN_KEY, t);
+      if (rt) await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, rt);
+      setToken(t);
+      
+      try {
+        const profile = await apiMe(t);
+        setUser(profile);
+      } catch (profileError) {
+        // Token saved but profile fetch failed - still allow login
+        if (__DEV__) console.warn('Profile fetch failed after login', profileError);
+        setUser({ id: res.userId || 'unknown', email });
+      }
+    } catch (error: any) {
+      // Clear any partial state
+      setToken(null);
+      setUser(null);
+      
+      // Re-throw with better error message
+      if (error.message?.includes('connection') || error.message?.includes('network')) {
+        throw new Error('Network error. Please check your internet connection.');
+      }
+      throw error;
     }
-    
-    const t = res.token;
-    const rt = res.refreshToken;
-    await SecureStore.setItemAsync(TOKEN_KEY, t);
-    if (rt) await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, rt);
-    setToken(t);
-    const profile = await apiMe(t);
-    setUser(profile);
   }
 
   async function signUp(email: string, password: string, region?: string) {
-    // Gather device information
-    const deviceInfo = {
-      fingerprint: await getDeviceFingerprint(),
-      name: getDeviceDisplayName(),
-      type: getDeviceType(),
-    };
+    try {
+      // Gather device information with fallback
+      let deviceInfo;
+      try {
+        deviceInfo = {
+          fingerprint: await getDeviceFingerprint(),
+          name: getDeviceDisplayName(),
+          type: getDeviceType(),
+        };
+      } catch (deviceError) {
+        // Fallback if device info fails
+        if (__DEV__) console.warn('Device info failed, using fallback', deviceError);
+        deviceInfo = {
+          fingerprint: 'unknown_' + Date.now(),
+          name: 'Unknown Device',
+          type: 'Mobile',
+        };
+      }
     
     const res = await apiRegister(email, password, region, deviceInfo);
     const t = res.token;
@@ -105,9 +147,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await SecureStore.setItemAsync(TOKEN_KEY, t);
     if (rt) await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, rt);
     setToken(t);
-    const profile = await apiMe(t);
-    setUser(profile);
+    
+    try {
+      const profile = await apiMe(t);
+      setUser(profile);
+    } catch (profileError) {
+      // Token saved but profile fetch failed - still allow signup
+      if (__DEV__) console.warn('Profile fetch failed after signup', profileError);
+      setUser({ id: res.userId || 'unknown', email });
+    }
+  } catch (error: any) {
+    // Clear any partial state
+    setToken(null);
+    setUser(null);
+    
+    // Re-throw with better error message
+    if (error.message?.includes('connection') || error.message?.includes('network')) {
+      throw new Error('Network error. Please check your internet connection.');
+    }
+    throw error;
   }
+}
 
   async function signOut() {
     // Revoke refresh token on backend

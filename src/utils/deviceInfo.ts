@@ -8,10 +8,14 @@ const DEVICE_ID_KEY = 'secure_device_id';
  * Generate a unique device fingerprint based on device characteristics
  */
 export async function getDeviceFingerprint(): Promise<string> {
-  // Try to get stored device ID first
-  const storedId = await SecureStore.getItemAsync(DEVICE_ID_KEY);
-  if (storedId) {
-    return storedId;
+  try {
+    // Try to get stored device ID first
+    const storedId = await SecureStore.getItemAsync(DEVICE_ID_KEY);
+    if (storedId) {
+      return storedId;
+    }
+  } catch (error) {
+    if (__DEV__) console.warn('SecureStore read failed, generating new fingerprint', error);
   }
 
   // Generate new device ID
@@ -29,8 +33,12 @@ export async function getDeviceFingerprint(): Promise<string> {
   // Create a fingerprint string
   const fingerprint = `${deviceInfo.platform}_${deviceInfo.manufacturer}_${deviceInfo.modelId}_${deviceInfo.random}`;
   
-  // Store for future use
-  await SecureStore.setItemAsync(DEVICE_ID_KEY, fingerprint);
+  // Try to store for future use (don't fail if this fails)
+  try {
+    await SecureStore.setItemAsync(DEVICE_ID_KEY, fingerprint);
+  } catch (error) {
+    if (__DEV__) console.warn('SecureStore write failed, fingerprint not cached', error);
+  }
   
   return fingerprint;
 }
