@@ -4,6 +4,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
+import { View, Text } from 'react-native';
 import WalletScreen from '../screens/WalletScreen';
 import SendScreen from '../screens/SendScreen';
 import RequestScreen from '../screens/RequestScreen';
@@ -86,19 +87,39 @@ function Tabs() {
 }
 
 export default function AppNavigator() {
-  return (
-    <NavigationContainer>
-      <Stack.Navigator>
-        <Stack.Screen name="Main" component={Tabs} options={{ headerShown: false }} />
-        <Stack.Screen name="Transactions" component={TransactionHistory} options={{ title: 'Transactions' }} />
-        <Stack.Screen name="About" component={AboutScreen} options={{ title: 'About EGWallet' }} />
-        <Stack.Screen name="HelpCenter" component={HelpCenterScreen} options={{ title: 'Help Center' }} />
-        <Stack.Screen name="ReportProblem" component={ReportProblemScreen} options={{ title: 'Report Problem' }} />
-        <Stack.Screen name="TrustedDevices" component={TrustedDevicesScreen} options={{ title: 'Trusted Devices' }} />
-        <Stack.Screen name="KYCVerification" component={KYCVerificationScreen} options={{ title: 'Identity Verification' }} />
-        <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: 'AI Assistant' }} />
-        <Stack.Screen name="DisputeTransaction" component={DisputeTransactionScreen} options={{ title: 'Dispute Transaction' }} />
-      </Stack.Navigator>
-    </NavigationContainer>
-  );
+  try {
+    return (
+      <NavigationContainer
+        fallback={
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <Text>Loading...</Text>
+          </View>
+        }
+      >
+        <Stack.Navigator screenOptions={{ headerShown: true }}>
+          <Stack.Screen name="Main" component={Tabs} options={{ headerShown: false }} />
+          <Stack.Screen name="Transactions" component={TransactionHistory} options={{ title: 'Transactions' }} />
+          <Stack.Screen name="About" component={AboutScreen} options={{ title: 'About EGWallet' }} />
+          <Stack.Screen name="HelpCenter" component={HelpCenterScreen} options={{ title: 'Help Center' }} />
+          <Stack.Screen name="ReportProblem" component={ReportProblemScreen} options={{ title: 'Report Problem' }} />
+          <Stack.Screen name="TrustedDevices" component={TrustedDevicesScreen} options={{ title: 'Trusted Devices' }} />
+          <Stack.Screen name="KYCVerification" component={KYCVerificationScreen} options={{ title: 'Identity Verification' }} />
+          <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: 'AI Assistant' }} />
+          <Stack.Screen name="DisputeTransaction" component={DisputeTransactionScreen} options={{ title: 'Dispute Transaction' }} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    );
+  } catch (error) {
+    console.error('AppNavigator render error:', error);
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#d32f2f', marginBottom: 12 }}>
+          ⚠️ Navigation Error
+        </Text>
+        <Text style={{ fontSize: 14, color: '#666', textAlign: 'center' }}>
+          Failed to initialize navigation. Please restart the app.
+        </Text>
+      </View>
+    );
+  }
 }
