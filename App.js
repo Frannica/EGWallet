@@ -70,6 +70,18 @@ export default function App() {
     );
   }
 
+  // 🔍 Detect which component is undefined BEFORE React renders
+  const assertDefined = (v, name) => {
+    if (!v) throw new Error(`${name} is undefined (bad import/export)`);
+  };
+
+  // Check all imported components
+  assertDefined(ErrorBoundary, "ErrorBoundary");
+  assertDefined(BiometricProvider, "BiometricProvider");
+  assertDefined(AuthProvider, "AuthProvider");
+  assertDefined(AppNavigator, "AppNavigator");
+  assertDefined(BiometricLock, "BiometricLock");
+
   return (
     <ErrorBoundary>
       <BiometricProvider>
