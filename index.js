@@ -51,9 +51,6 @@ try {
   );
 }
 
-// Wrap app in Sentry error boundary
-const AppWithSentry = Sentry.wrap(App);
-
 // Global error handler for unhandled promises
 const previousHandler = global.ErrorUtils?.getGlobalHandler?.();
 global.ErrorUtils?.setGlobalHandler((error, isFatal) => {
@@ -64,7 +61,9 @@ global.ErrorUtils?.setGlobalHandler((error, isFatal) => {
   }
 });
 
-// registerRootComponent calls AppRegistry.registerComponent('main', () => App);
+// Register app directly - Sentry.wrap() was causing FeedbackWidgetProvider crash
+// Errors are still captured via Sentry.init() and global error handler
+registerRootComponent(App);
 // It also ensures that whether you load the app in Expo Go or in a native build,
 // the environment is set up appropriately
 registerRootComponent(AppWithSentry);
