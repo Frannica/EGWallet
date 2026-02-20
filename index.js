@@ -11,6 +11,7 @@ try {
     debug: __DEV__, // Debug logging in dev mode
     tracesSampleRate: __DEV__ ? 1.0 : 0.2, // 100% in dev, 20% in prod
     environment: __DEV__ ? 'development' : 'production',
+    integrations: [], // DISABLE all auto-integrations to prevent FeedbackWidgetProvider
     beforeSend(event, hint) {
       // Filter out sensitive data
       if (event.request?.headers) {
