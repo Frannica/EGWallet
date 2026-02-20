@@ -61,9 +61,5 @@ global.ErrorUtils?.setGlobalHandler((error, isFatal) => {
   }
 });
 
-// Register app directly - Sentry.wrap() was causing FeedbackWidgetProvider crash
-// Errors are still captured via Sentry.init() and global error handler
+// Register app directly without Sentry.wrap() - no FeedbackWidgetProvider
 registerRootComponent(App);
-// It also ensures that whether you load the app in Expo Go or in a native build,
-// the environment is set up appropriately
-registerRootComponent(AppWithSentry);
