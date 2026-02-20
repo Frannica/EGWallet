@@ -7,7 +7,7 @@ import App from './App';
 // Only in production builds
 if (!__DEV__) {
   Sentry.init({
-    dsn: 'https://your-sentry-dsn@sentry.io/your-project-id', // TODO: Replace with actual Sentry DSN
+    dsn: 'https://caf7f778c635edd2bf44516e7ceced97@o4510916303454208.ingest.us.sentry.io/4510916317806592',
     enableInExpoDevelopment: false,
     debug: false,
     tracesSampleRate: 0.2, // 20% of transactions for performance monitoring
