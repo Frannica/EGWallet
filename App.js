@@ -3,9 +3,13 @@ import { View, Text, ActivityIndicator } from 'react-native';
 import { AuthProvider } from './src/auth/AuthContext';
 import { BiometricProvider, useBiometric } from './src/auth/BiometricContext';
 import AppNavigator from './src/navigation/AppNavigator';
-import ErrorBoundary from './src/utils/ErrorBoundary';
 import BiometricLock from './src/components/BiometricLock';
 import config from './src/config/env';
+
+// Temporary ErrorBoundary (pass-through) to fix crash
+function ErrorBoundary({ children }) {
+  return children;
+}
 
 function AppContent() {
   const { isLocked } = useBiometric();
