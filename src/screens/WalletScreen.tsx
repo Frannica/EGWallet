@@ -32,10 +32,15 @@ export default function WalletScreen() {
   }
 
   async function loadWallets() {
-    if (!auth.token) return;
+    if (!auth.token) {
+      console.warn('No auth token available');
+      return;
+    }
     setLoading(true);
     try {
+      console.log('Fetching wallets...');
       const res = await listWallets(auth.token);
+      console.log('Wallets response:', res);
       setWallets(res.wallets || []);
       
       // Check for recent payroll transaction
@@ -53,6 +58,7 @@ export default function WalletScreen() {
         setRecentPayroll(payrollTx || null);
       }
     } catch (e) {
+      console.error('Load wallets failed:', e);
       if (__DEV__) console.warn('Load wallets failed', e);
     } finally {
       setLoading(false);
