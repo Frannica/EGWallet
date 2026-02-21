@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIn
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { createVirtualCard, getVirtualCards, toggleCardFreeze, deleteVirtualCard } from '../api/transactions';
+import { listWallets } from '../api/auth';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { CardSkeleton } from '../components/SkeletonLoader';
 
@@ -24,10 +25,22 @@ export default function CardScreen() {
   const [cards, setCards] = useState<VirtualCard[]>([]);
   const [selectedCard, setSelectedCard] = useState<VirtualCard | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [wallets, setWallets] = useState<any[]>([]);
 
   useEffect(() => {
     loadCards();
+    loadWallets();
   }, []);
+
+  const loadWallets = async () => {
+    if (!auth.token) return;
+    try {
+      const res = await listWallets(auth.token);
+      setWallets(res.wallets || []);
+    } catch (e) {
+      if (__DEV__) console.warn('Failed to load wallets', e);
+    }
+  };
 
   const loadCards = async () => {
     if (!isOnline) return;
@@ -52,7 +65,6 @@ export default function CardScreen() {
 
     if (isCreating) return; // Prevent duplicates
 
-    const wallets = auth.wallets || [];
     if (wallets.length === 0) {
       Alert.alert('Error', 'No wallet found');
       return;

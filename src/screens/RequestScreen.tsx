@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Alert,
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { createPaymentRequest, getPaymentRequests, cancelPaymentRequest } from '../api/transactions';
+import { listWallets } from '../api/auth';
 import { getCurrencySymbol } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { PaymentRequestCardSkeleton } from '../components/SkeletonLoader';
@@ -29,6 +30,7 @@ export default function RequestScreen() {
   const [activeTab, setActiveTab] = useState<'contact' | 'employer'>('contact');
   const [linkedEmployers, setLinkedEmployers] = useState<any[]>([]);
   const [selectedEmployer, setSelectedEmployer] = useState<any>(null);
+  const [wallets, setWallets] = useState<any[]>([]);
   
   // Form state
   const [amount, setAmount] = useState('');
@@ -38,7 +40,18 @@ export default function RequestScreen() {
   useEffect(() => {
     loadRequests();
     loadLinkedEmployers();
+    loadWallets();
   }, []);
+
+  const loadWallets = async () => {
+    if (!auth.token) return;
+    try {
+      const res = await listWallets(auth.token);
+      setWallets(res.wallets || []);
+    } catch (e) {
+      if (__DEV__) console.warn('Failed to load wallets', e);
+    }
+  };
 
   const loadRequests = async () => {
     if (!isOnline) return;
@@ -125,6 +138,7 @@ export default function RequestScreen() {
 
               // Navigate to QR Payment screen
               const batchId = `PAY-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+              // @ts-ignore - Navigation params
               navigation.navigate('QRPayment', {
                 employerId: selectedEmployer.employerId,
                 employerName: selectedEmployer.employerName,
@@ -178,7 +192,6 @@ export default function RequestScreen() {
             try {
               setIsCreating(true);
               setLoading(true);
-              const wallets = auth.wallets || [];
               if (wallets.length === 0) {
                 Alert.alert('Error', 'No wallet found');
                 return;

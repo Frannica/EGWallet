@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Alert,
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { createBudget, getBudgets, getBudgetAnalytics, deleteBudget } from '../api/transactions';
+import { listWallets } from '../api/auth';
 import { getCurrencySymbol } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { BudgetCardSkeleton } from '../components/SkeletonLoader';
@@ -32,6 +33,7 @@ export default function BudgetScreen() {
   const [analytics, setAnalytics] = useState<BudgetAnalytics | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [wallets, setWallets] = useState<any[]>([]);
   
   // Form state
   const [amount, setAmount] = useState('');
@@ -39,6 +41,7 @@ export default function BudgetScreen() {
 
   useEffect(() => {
     loadBudgets();
+    loadWallets();
   }, []);
 
   useEffect(() => {
@@ -46,6 +49,16 @@ export default function BudgetScreen() {
       loadAnalytics(selectedBudget.id);
     }
   }, [selectedBudget]);
+
+  const loadWallets = async () => {
+    if (!auth.token) return;
+    try {
+      const res = await listWallets(auth.token);
+      setWallets(res.wallets || []);
+    } catch (e) {
+      if (__DEV__) console.warn('Failed to load wallets', e);
+    }
+  };
 
   const loadBudgets = async () => {
     if (!isOnline) return;
@@ -104,7 +117,6 @@ export default function BudgetScreen() {
             try {
               setIsCreating(true);
               setLoading(true);
-              const wallets = auth.wallets || [];
               if (wallets.length === 0) {
                 Alert.alert('Error', 'No wallet found');
                 return;

@@ -284,7 +284,7 @@ export default function QRPaymentScreen() {
             paymentState === 'processing' && styles.confirmButtonDisabled
           ]}
           onPress={handleConfirmPayment}
-          disabled={paymentState === 'processing' || paymentState === 'success'}
+          disabled={paymentState !== 'idle'}
         >
           {paymentState === 'processing' ? (
             <ActivityIndicator color="#FFFFFF" />
