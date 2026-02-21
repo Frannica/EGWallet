@@ -103,7 +103,10 @@ export default function WalletScreen() {
       >
         <View style={styles.headerTop}>
           <Text style={styles.appTitle}>EGWallet</Text>
-          <TouchableOpacity style={styles.notificationButton}>
+          <TouchableOpacity 
+            style={styles.notificationButton}
+            onPress={() => (navigation as any).navigate('Settings')}
+          >
             <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
@@ -142,19 +145,32 @@ export default function WalletScreen() {
         <View style={styles.tabsContainer}>
           <TouchableOpacity 
             style={[styles.tab, selectedTab === 'all' && styles.tabActive]}
-            onPress={() => setSelectedTab('all')}
+            onPress={() => {
+              setSelectedTab('all');
+              if (wallets.length > 0) {
+                (navigation as any).navigate('Transactions', { walletId: wallets[0].id });
+              }
+            }}
           >
             <Text style={[styles.tabText, selectedTab === 'all' && styles.tabTextActive]}>All</Text>
           </TouchableOpacity>
           <TouchableOpacity 
             style={[styles.tab, selectedTab === 'payroll' && styles.tabActive]}
-            onPress={() => setSelectedTab('payroll')}
+            onPress={() => {
+              setSelectedTab('payroll');
+              if (wallets.length > 0) {
+                (navigation as any).navigate('Transactions', { walletId: wallets[0].id, filter: 'payroll' });
+              }
+            }}
           >
             <Text style={[styles.tabText, selectedTab === 'payroll' && styles.tabTextActive]}>Payroll</Text>
           </TouchableOpacity>
           <TouchableOpacity 
             style={[styles.tab, selectedTab === 'transfers' && styles.tabActive]}
-            onPress={() => setSelectedTab('transfers')}
+            onPress={() => {
+              setSelectedTab('transfers');
+              (navigation as any).navigate('Send');
+            }}
           >
             <Text style={[styles.tabText, selectedTab === 'transfers' && styles.tabTextActive]}>Transfers</Text>
           </TouchableOpacity>
@@ -185,11 +201,12 @@ export default function WalletScreen() {
       )}
 
       {/* Recent Payroll Banner */}
-      {recentPayroll && (
+      {recentPayroll && wallets.length > 0 && (
         <TouchableOpacity 
           style={styles.payrollBanner}
-          onPress={() => (navigation as any).navigate('TransactionHistory', { 
-            walletId: wallets[0]?.id 
+          onPress={() => (navigation as any).navigate('Transactions', { 
+            walletId: wallets[0].id,
+            filter: 'payroll'
           })}
         >
           <View style={styles.payrollIconContainer}>
@@ -214,7 +231,13 @@ export default function WalletScreen() {
           <Text style={styles.loadingText}>Loading your wallet...</Text>
         </View>
       ) : wallets.length === 0 ? (
-        <View style={styles.emptyState}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.emptyState}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#1976D2']} />
+          }
+        >
           <View style={styles.emptyIconContainer}>
             <Ionicons name="wallet-outline" size={64} color="#90CAF9" />
           </View>
@@ -222,7 +245,7 @@ export default function WalletScreen() {
           <Text style={styles.emptyText}>
             Pull down to refresh or contact support{'\n'}to set up your wallet.
           </Text>
-        </View>
+        </ScrollView>
       ) : (
         <ScrollView
           style={styles.scrollView}
@@ -237,7 +260,11 @@ export default function WalletScreen() {
           {/* Transaction Cards - Modern Design */}
           <TouchableOpacity 
             style={styles.transactionCard}
-            onPress={() => navigation.navigate('Transactions' as any, { walletId: wallets[0]?.id } as any)}
+            onPress={() => {
+              if (wallets.length > 0) {
+                (navigation as any).navigate('Transactions', { walletId: wallets[0].id });
+              }
+            }}
           >
             <View style={[styles.transactionIconContainer, {backgroundColor: '#E3F2FD'}]}>
               <Ionicons name="briefcase" size={22} color="#1976D2" />
@@ -251,7 +278,7 @@ export default function WalletScreen() {
             <View style={styles.transactionRight}>
               <Text style={styles.transactionAmountGreen}>
                 {formatCurrency(
-                  rates ? convert(totalUsdValue(wallets[0]), 'USD', preferredCurrency, rates) : 0,
+                  rates && wallets[0] ? convert(totalUsdValue(wallets[0]), 'USD', preferredCurrency, rates) : 0,
                   preferredCurrency
                 )}
               </Text>
@@ -482,7 +509,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   emptyState: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 48,
