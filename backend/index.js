@@ -1285,7 +1285,23 @@ app.get('/wallets/:id/balance', authMiddleware, (req, res) => {
 // List wallets for authenticated user
 app.get('/wallets', authMiddleware, (req, res) => {
   const db = loadDB();
-  const wallets = db.wallets.filter(w => w.userId === req.user.userId);
+  let wallets = db.wallets.filter(w => w.userId === req.user.userId);
+  
+  // Auto-create wallet if user has none (backward compatibility fix)
+  if (wallets.length === 0) {
+    const wallet = { 
+      id: uuidv4(), 
+      userId: req.user.userId, 
+      balances: [{ currency: 'USD', amount: 0 }], 
+      createdAt: Date.now(), 
+      maxLimitUSD: 250000 
+    };
+    db.wallets.push(wallet);
+    saveDB(db);
+    wallets = [wallet];
+    logger.info('Auto-created missing wallet for user', { userId: req.user.userId });
+  }
+  
   res.json({ wallets });
 });
 
