@@ -5,11 +5,7 @@ import { BiometricProvider, useBiometric } from './src/auth/BiometricContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import BiometricLock from './src/components/BiometricLock';
 import config from './src/config/env';
-
-// Temporary ErrorBoundary (pass-through) to fix crash
-function ErrorBoundary({ children }) {
-  return children;
-}
+import { ErrorBoundary } from './src/utils/ErrorBoundary';
 
 function AppContent() {
   const { isLocked } = useBiometric();

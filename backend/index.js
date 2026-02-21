@@ -1413,6 +1413,57 @@ app.post('/transactions', authMiddleware, (req, res) => {
   res.json({ transaction: tx });
 });
 
+// Withdrawals to bank/mobile money
+app.post('/withdrawals', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const { fromWalletId, amount, currency, method, bankName, accountNumber, accountName } = req.body;
+  
+  if (!fromWalletId || typeof amount === 'undefined' || !currency || !method || !bankName || !accountNumber || !accountName) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  
+  const wallet = db.wallets.find(w => w.id === fromWalletId && w.userId === req.user.userId);
+  if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+  
+  const balance = wallet.balances.find(b => b.currency === currency);
+  if (!balance || balance.amount < amount) {
+    return res.status(400).json({ error: 'Insufficient funds' });
+  }
+  
+  // Deduct from wallet
+  balance.amount -= amount;
+  
+  // Create withdrawal transaction
+  const withdrawal = {
+    id: uuidv4(),
+    type: 'withdrawal',
+    walletId: fromWalletId,
+    amount,
+    currency,
+    method, // 'bank' or 'mobile'
+    bankName,
+    accountNumber,
+    accountName,
+    status: 'pending', // pending, completed, failed
+    timestamp: Date.now(),
+    estimatedArrival: Date.now() + (3 * 24 * 60 * 60 * 1000) // 3 days
+  };
+  
+  if (!db.withdrawals) db.withdrawals = [];
+  db.withdrawals.push(withdrawal);
+  saveDB(db);
+  
+  logger.info('Withdrawal created', {
+    userId: req.user.userId,
+    withdrawalId: withdrawal.id,
+    amount,
+    currency,
+    method
+  });
+  
+  res.json({ withdrawal });
+});
+
 // Rates
 app.get('/rates', (req, res) => {
   const db = loadDB();
@@ -4461,6 +4512,118 @@ app.post('/employer/payment-request',
         currency: request.currency,
         status: request.status
       }
+    });
+  }
+);
+
+// Confirm payroll payment (with idempotency protection)
+app.post('/payroll/confirm-payment',
+  authMiddleware,
+  (req, res) => {
+    const db = loadDB();
+    const { employerId, batchId, amount, currency } = req.body;
+    
+    // Validate required fields
+    if (!employerId || !batchId || !amount || !currency) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: employerId, batchId, amount, currency' 
+      });
+    }
+    
+    // Idempotency check - prevent duplicate payments
+    const idempotencyKey = req.headers['idempotency-key'];
+    if (idempotencyKey) {
+      const existingPayment = db.transactions.find(
+        t => t.metadata?.idempotencyKey === idempotencyKey
+      );
+      
+      if (existingPayment) {
+        logger.info('Idempotent payment request - returning existing transaction', {
+          transactionId: existingPayment.id,
+          idempotencyKey,
+          userId: req.user.userId
+        });
+        
+        return res.json({ 
+          success: true, 
+          transaction: existingPayment,
+          isIdempotent: true 
+        });
+      }
+    }
+    
+    // Find employer
+    const employer = db.employers.find(e => e.id === employerId);
+    if (!employer) {
+      return res.status(404).json({ error: 'Employer not found' });
+    }
+    
+    // Find user relationship with employer
+    const relationship = db.employerEmployees.find(
+      ee => ee.employerId === employerId && ee.workerId === req.user.userId
+    );
+    
+    if (!relationship) {
+      logger.warn('Unauthorized payroll confirmation attempt', {
+        employerId,
+        userId: req.user.userId
+      });
+      return res.status(403).json({ 
+        error: 'Not authorized to receive payments from this employer' 
+      });
+    }
+    
+    // Find user's wallet for this currency
+    const wallet = db.wallets.find(
+      w => w.userId === req.user.userId && w.currency === currency
+    );
+    
+    if (!wallet) {
+      return res.status(404).json({ 
+        error: `No ${currency} wallet found` 
+      });
+    }
+    
+    // Create transaction
+    const transaction = {
+      id: `txn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      type: 'payroll',
+      fromWalletId: null, // Payroll from employer (external)
+      toWalletId: wallet.id,
+      amount,
+      currency,
+      status: 'completed',
+      createdAt: new Date().toISOString(),
+      metadata: {
+        employerId,
+        employerName: employer.employerName,
+        batchId,
+        verified: employer.verified,
+        idempotencyKey: idempotencyKey || `auto_${Date.now()}`
+      }
+    };
+    
+    // Update wallet balance
+    wallet.balance.amount += amount;
+    wallet.balance.lastUpdated = new Date().toISOString();
+    
+    db.transactions.push(transaction);
+    saveDB(db);
+    
+    logger.info('Payroll payment confirmed', {
+      transactionId: transaction.id,
+      userId: req.user.userId,
+      employerId,
+      amount,
+      currency,
+      batchId,
+      idempotencyKey
+    });
+    
+    res.json({ 
+      success: true, 
+      transaction,
+      isIdempotent: false
     });
   }
 );

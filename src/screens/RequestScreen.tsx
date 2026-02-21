@@ -6,6 +6,7 @@ import { createPaymentRequest, getPaymentRequests, cancelPaymentRequest } from '
 import { getCurrencySymbol } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { PaymentRequestCardSkeleton } from '../components/SkeletonLoader';
+import { useNavigation } from '@react-navigation/native';
 
 interface PaymentRequest {
   id: string;
@@ -19,6 +20,7 @@ interface PaymentRequest {
 
 export default function RequestScreen() {
   const auth = useAuth();
+  const navigation = useNavigation();
   const { isOnline } = useNetworkStatus();
   const [loading, setLoading] = useState(false);
   const [requests, setRequests] = useState<PaymentRequest[]>([]);
@@ -121,12 +123,22 @@ export default function RequestScreen() {
                 throw new Error(data.error || 'Failed to send request');
               }
 
-              Alert.alert('Success', 'Payment request sent to employer!');
+              // Navigate to QR Payment screen
+              const batchId = `PAY-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+              navigation.navigate('QRPayment', {
+                employerId: selectedEmployer.employerId,
+                employerName: selectedEmployer.employerName,
+                amount: amountValue,
+                currency,
+                batchId,
+                verified: selectedEmployer.verified,
+                requestId: data.request?.id || null
+              });
+
               setAmount('');
               setMemo('');
               setSelectedEmployer(null);
               setShowCreateForm(false);
-              loadRequests();
             } catch (error: any) {
               Alert.alert('Error', error.message || 'Failed to send request');
             } finally {

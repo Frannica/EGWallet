@@ -15,6 +15,7 @@ export default function SendScreen() {
   const { isOnline } = useNetworkStatus();
   const [wallets, setWallets] = useState<Array<any>>([]);
   const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'transfer' | 'withdraw'>('transfer');
   const [fromWalletId, setFromWalletId] = useState<string | null>(null);
   const [toWalletId, setToWalletId] = useState<string>('');
   const [amount, setAmount] = useState<string>('');
@@ -22,6 +23,13 @@ export default function SendScreen() {
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [scamAcknowledged, setScamAcknowledged] = useState(false);
   const [showScamTips, setShowScamTips] = useState(false);
+  
+  // Withdrawal fields
+  const [bankName, setBankName] = useState<string>('');
+  const [accountNumber, setAccountNumber] = useState<string>('');
+  const [accountName, setAccountName] = useState<string>('');
+  const [withdrawalMethod, setWithdrawalMethod] = useState<'bank' | 'mobile'>('bank');
+  
   const navigation = useNavigation();
 
   useEffect(() => { loadWallets(); }, [auth.token]);
@@ -43,10 +51,63 @@ export default function SendScreen() {
     if (!fromWalletId) return Alert.alert('Error', 'Select source wallet');
     const amt = parseFloat(amount);
     if (!amt || amt <= 0) return Alert.alert('Error', 'Enter valid amount');
-    if (!toWalletId.trim()) return Alert.alert('Error', 'Enter destination wallet ID');
+    
+    if (activeTab === 'transfer') {
+      if (!toWalletId.trim()) return Alert.alert('Error', 'Enter destination wallet ID');
+    } else {
+      // Withdrawal validation
+      if (!bankName.trim()) return Alert.alert('Error', 'Enter bank name');
+      if (!accountNumber.trim()) return Alert.alert('Error', 'Enter account number');
+      if (!accountName.trim()) return Alert.alert('Error', 'Enter account holder name');
+    }
     
     setScamAcknowledged(false); // Reset checkbox for new confirmation
     setShowConfirmation(true);
+  }
+  
+  async function onWithdrawConfirmed() {
+    if (!auth.token || !fromWalletId) return;
+    
+    const amt = parseFloat(amount);
+    const amountMinor = majorToMinor(amt, currency);
+    
+    setLoading(true);
+    try {
+      const { API_BASE } = await import('../api/client');
+      const response = await fetch(`${API_BASE}/withdrawals`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${auth.token}`,
+        },
+        body: JSON.stringify({
+          fromWalletId,
+          amount: amountMinor,
+          currency,
+          method: withdrawalMethod,
+          bankName,
+          accountNumber,
+          accountName,
+        }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Withdrawal failed');
+      }
+      
+      Alert.alert('Success', 'Withdrawal request submitted! Funds will arrive within 1-3 business days.');
+      loadWallets();
+      setAmount('');
+      setBankName('');
+      setAccountNumber('');
+      setAccountName('');
+      setShowConfirmation(false);
+    } catch (e: any) {
+      Alert.alert('Withdrawal Failed', e.message || String(e));
+    } finally {
+      setLoading(false);
+    }
   }
 
   function calculatePreview() {
@@ -205,7 +266,7 @@ export default function SendScreen() {
         <ScamTipsModal />
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.confirmHeader}>
-            <Text style={styles.confirmTitle}>Review Transaction</Text>
+            <Text style={styles.confirmTitle}>{activeTab === 'transfer' ? 'Review Transaction' : 'Review Withdrawal'}</Text>
             <Text style={styles.confirmSubtitle}>Please confirm the details below</Text>
           </View>
 
@@ -214,10 +275,27 @@ export default function SendScreen() {
               <Text style={styles.summaryLabel}>From Wallet</Text>
               <Text style={styles.summaryValue}>{fromWalletId?.substring(0, 12)}...</Text>
             </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>To Wallet</Text>
-              <Text style={styles.summaryValue}>{toWalletId.substring(0, 12)}...</Text>
-            </View>
+            {activeTab === 'transfer' ? (
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>To Wallet</Text>
+                <Text style={styles.summaryValue}>{toWalletId.substring(0, 12)}...</Text>
+              </View>
+            ) : (
+              <>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>{withdrawalMethod === 'bank' ? 'Bank' : 'Mobile Operator'}</Text>
+                  <Text style={styles.summaryValue}>{bankName}</Text>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>{withdrawalMethod === 'bank' ? 'Account' : 'Phone'}</Text>
+                  <Text style={styles.summaryValue}>{accountNumber}</Text>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Name</Text>
+                  <Text style={styles.summaryValue}>{accountName}</Text>
+                </View>
+              </>
+            )}
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Currency</Text>
               <Text style={styles.summaryValueBold}>{currency}</Text>
@@ -299,7 +377,7 @@ export default function SendScreen() {
                 styles.confirmButton,
                 (loading || (isHighAmount() && !scamAcknowledged)) && styles.confirmButtonDisabled
               ]} 
-              onPress={onSendConfirmed}
+              onPress={activeTab === 'transfer' ? onSendConfirmed : onWithdrawConfirmed}
               disabled={loading || (isHighAmount() && !scamAcknowledged)}
             >
               {loading ? (
@@ -321,7 +399,25 @@ export default function SendScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
           <Text style={styles.title}>Send Money</Text>
-          <Text style={styles.subtitle}>Transfer funds to another wallet</Text>
+          <Text style={styles.subtitle}>{activeTab === 'transfer' ? 'Transfer funds to another wallet' : 'Withdraw to your bank account'}</Text>
+        </View>
+
+        {/* Tab Switcher */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'transfer' && styles.tabActive]}
+            onPress={() => setActiveTab('transfer')}
+          >
+            <Ionicons name="send" size={18} color={activeTab === 'transfer' ? '#007AFF' : '#657786'} />
+            <Text style={[styles.tabText, activeTab === 'transfer' && styles.tabTextActive]}>Transfer</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'withdraw' && styles.tabActive]}
+            onPress={() => setActiveTab('withdraw')}
+          >
+            <Ionicons name="cash-outline" size={18} color={activeTab === 'withdraw' ? '#007AFF' : '#657786'} />
+            <Text style={[styles.tabText, activeTab === 'withdraw' && styles.tabTextActive]}>Withdraw</Text>
+          </TouchableOpacity>
         </View>
 
         {loading && wallets.length === 0 ? (
@@ -360,17 +456,80 @@ export default function SendScreen() {
               )}
             </View>
 
-            <View style={styles.section}>
-              <Text style={styles.label}>To Wallet ID</Text>
-              <TextInput
-                value={toWalletId}
-                onChangeText={setToWalletId}
-                placeholder="Enter destination wallet ID"
-                placeholderTextColor="#AAB8C2"
-                editable={!loading}
-                style={styles.input}
-              />
-            </View>
+            {activeTab === 'transfer' ? (
+              <>
+                <View style={styles.section}>
+                  <Text style={styles.label}>To Wallet ID</Text>
+                  <TextInput
+                    value={toWalletId}
+                    onChangeText={setToWalletId}
+                    placeholder="Enter destination wallet ID"
+                    placeholderTextColor="#AAB8C2"
+                    editable={!loading}
+                    style={styles.input}
+                  />
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.section}>
+                  <Text style={styles.label}>Withdrawal Method</Text>
+                  <View style={styles.methodSelector}>
+                    <TouchableOpacity
+                      style={[styles.methodOption, withdrawalMethod === 'bank' && styles.methodOptionActive]}
+                      onPress={() => setWithdrawalMethod('bank')}
+                    >
+                      <Ionicons name="business" size={20} color={withdrawalMethod === 'bank' ? '#007AFF' : '#657786'} />
+                      <Text style={[styles.methodText, withdrawalMethod === 'bank' && styles.methodTextActive]}>Bank</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.methodOption, withdrawalMethod === 'mobile' && styles.methodOptionActive]}
+                      onPress={() => setWithdrawalMethod('mobile')}
+                    >
+                      <Ionicons name="phone-portrait" size={20} color={withdrawalMethod === 'mobile' ? '#007AFF' : '#657786'} />
+                      <Text style={[styles.methodText, withdrawalMethod === 'mobile' && styles.methodTextActive]}>Mobile Money</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={styles.section}>
+                  <Text style={styles.label}>{withdrawalMethod === 'bank' ? 'Bank Name' : 'Mobile Operator'}</Text>
+                  <TextInput
+                    value={bankName}
+                    onChangeText={setBankName}
+                    placeholder={withdrawalMethod === 'bank' ? 'Enter bank name' : 'e.g., MTN, Orange'}
+                    placeholderTextColor="#AAB8C2"
+                    editable={!loading}
+                    style={styles.input}
+                  />
+                </View>
+
+                <View style={styles.section}>
+                  <Text style={styles.label}>{withdrawalMethod === 'bank' ? 'Account Number' : 'Phone Number'}</Text>
+                  <TextInput
+                    value={accountNumber}
+                    onChangeText={setAccountNumber}
+                    placeholder={withdrawalMethod === 'bank' ? 'Enter account number' : 'Enter mobile number'}
+                    placeholderTextColor="#AAB8C2"
+                    keyboardType={withdrawalMethod === 'mobile' ? 'phone-pad' : 'default'}
+                    editable={!loading}
+                    style={styles.input}
+                  />
+                </View>
+
+                <View style={styles.section}>
+                  <Text style={styles.label}>Account Holder Name</Text>
+                  <TextInput
+                    value={accountName}
+                    onChangeText={setAccountName}
+                    placeholder="Full name as on account"
+                    placeholderTextColor="#AAB8C2"
+                    editable={!loading}
+                    style={styles.input}
+                  />
+                </View>
+              </>
+            )}
 
             <View style={styles.section}>
               <Text style={styles.label}>Amount</Text>
@@ -425,11 +584,28 @@ export default function SendScreen() {
             </View>
 
             <TouchableOpacity
-              style={[styles.sendButton, (!amount || !toWalletId || loading || !isOnline) && styles.sendButtonDisabled]}
+              style={[
+                styles.sendButton, 
+                (
+                  !amount || 
+                  loading || 
+                  !isOnline || 
+                  (activeTab === 'transfer' && !toWalletId) ||
+                  (activeTab === 'withdraw' && (!bankName || !accountNumber || !accountName))
+                ) && styles.sendButtonDisabled
+              ]}
               onPress={onSend}
-              disabled={!amount || !toWalletId || loading || !isOnline}
+              disabled={
+                !amount || 
+                loading || 
+                !isOnline || 
+                (activeTab === 'transfer' && !toWalletId) ||
+                (activeTab === 'withdraw' && (!bankName || !accountNumber || !accountName))
+              }
             >
-              <Text style={styles.sendButtonText}>Review Transaction</Text>
+              <Text style={styles.sendButtonText}>
+                {activeTab === 'transfer' ? 'Review Transaction' : 'Review Withdrawal'}
+              </Text>
             </TouchableOpacity>
           </>
         )}
@@ -458,6 +634,63 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
     color: '#657786',
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    padding: 4,
+    marginBottom: 24,
+    gap: 4,
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    gap: 6,
+  },
+  tabActive: {
+    backgroundColor: '#E8F5FE',
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#657786',
+  },
+  tabTextActive: {
+    color: '#007AFF',
+  },
+  methodSelector: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  methodOption: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#E1E8ED',
+    gap: 8,
+  },
+  methodOptionActive: {
+    borderColor: '#007AFF',
+    backgroundColor: '#E8F5FE',
+  },
+  methodText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#657786',
+  },
+  methodTextActive: {
+    color: '#007AFF',
   },
   loadingContainer: {
     alignItems: 'center',

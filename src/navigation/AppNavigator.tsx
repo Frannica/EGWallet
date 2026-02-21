@@ -19,6 +19,7 @@ import TrustedDevicesScreen from '../screens/TrustedDevicesScreen';
 import KYCVerificationScreen from '../screens/KYCVerificationScreen';
 import AIChatScreen from '../screens/AIChatScreen';
 import DisputeTransactionScreen from '../screens/DisputeTransactionScreen';
+import QRPaymentScreen from '../screens/QRPaymentScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -106,6 +107,7 @@ export default function AppNavigator() {
           <Stack.Screen name="KYCVerification" component={KYCVerificationScreen} options={{ title: 'Identity Verification' }} />
           <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: 'AI Assistant' }} />
           <Stack.Screen name="DisputeTransaction" component={DisputeTransactionScreen} options={{ title: 'Dispute Transaction' }} />
+          <Stack.Screen name="QRPayment" component={QRPaymentScreen} options={{ title: 'QR Payment' }} />
         </Stack.Navigator>
       </NavigationContainer>
     );
