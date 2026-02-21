@@ -75,12 +75,14 @@ export default function App() {
   }
 
   return (
-    <ErrorBoundary>
-      <BiometricProvider>
-        <AuthProvider>
-          <AppContent />
-        </AuthProvider>
-      </BiometricProvider>
-    </ErrorBoundary>
+    <React.StrictMode>
+      <ErrorBoundary>
+        <BiometricProvider>
+          <AuthProvider>
+            <AppContent />
+          </AuthProvider>
+        </BiometricProvider>
+      </ErrorBoundary>
+    </React.StrictMode>
   );
 }
