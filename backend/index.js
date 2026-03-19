@@ -5,6 +5,7 @@ const path = require('path');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
@@ -13,6 +14,70 @@ const winston = require('winston');
 const { body, validationResult } = require('express-validator');
 const multer = require('multer');
 const { parse } = require('csv-parse/sync');
+
+// Stripe — only initialise when secret key is present
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || null;
+const stripeClient = STRIPE_SECRET_KEY ? require('stripe')(STRIPE_SECRET_KEY) : null;
+if (!stripeClient) {
+  console.warn('[Stripe] STRIPE_SECRET_KEY not set — deposit endpoints will run in test/demo mode');
+}
+
+// ==================== FIREBASE ADMIN SDK ====================
+// Initialise once; all modules import { firebaseAdmin, firebaseAuth, firestore } from here.
+// Priority order for credentials:
+//   1. FIREBASE_SERVICE_ACCOUNT_JSON env var  (Railway / production — paste the whole JSON)
+//   2. GOOGLE_APPLICATION_CREDENTIALS env var (standard GCP path)
+//   3. ../service-account-key.json next to the project root (local dev)
+
+let firebaseAdmin = null;
+let firebaseAuth  = null;
+let firestore     = null;
+let firebaseProjectId = null;
+
+(function initFirebase() {
+  try {
+    const admin = require('firebase-admin');
+
+    let credential;
+
+    let sa;
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+      // Production: full JSON passed as a single env var string
+      sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+    } else {
+      // Local dev: resolve path relative to this file's directory
+      const saPath =
+        process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+        path.resolve(__dirname, '..', 'service-account-key.json');
+
+      if (!fs.existsSync(saPath)) {
+        console.warn(`[Firebase] service-account-key.json not found at ${saPath}. Firebase disabled.`);
+        return;
+      }
+      sa = JSON.parse(fs.readFileSync(saPath, 'utf8'));
+    }
+    credential = admin.credential.cert(sa);
+    firebaseProjectId = sa.project_id || null;
+
+    if (!admin.apps.length) {
+      admin.initializeApp({
+        credential,
+        // Realtime Database is optional — supply FIREBASE_DATABASE_URL to enable it
+        ...(process.env.FIREBASE_DATABASE_URL && { databaseURL: process.env.FIREBASE_DATABASE_URL }),
+      });
+    }
+
+    firebaseAdmin = admin;
+    firebaseAuth  = admin.auth();
+    firestore     = admin.firestore();
+
+    console.log(`✅ Firebase Admin SDK initialised (project: ${firebaseProjectId})`);
+  } catch (err) {
+    console.warn('[Firebase] Initialisation failed:', err.message);
+    console.warn('[Firebase] The backend will continue without Firebase. ' +
+      'Set FIREBASE_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS to enable it.');
+  }
+})();
 
 // Environment Configuration
 const DB_FILE = process.env.DB_FILE_PATH || path.join(__dirname, 'db.json');
@@ -40,6 +105,10 @@ if (NODE_ENV === 'production') {
   }
   if (!FRESHDESK_DOMAIN || !FRESHDESK_API_KEY) {
     console.warn('⚠️  WARNING: Freshdesk not configured. Tickets will be stored locally only.');
+  }
+  if (!process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    console.warn('⚠️  WARNING: FIREBASE_SERVICE_ACCOUNT_JSON is not set. Firebase Auth and Firestore will be unavailable.');
+    console.warn('   Set this variable on Railway: paste the entire contents of service-account-key.json as its value.');
   }
 }
 
@@ -831,7 +900,23 @@ function majorToMinor(amountMajor, currency) {
 function loadDB() {
   try {
     const raw = fs.readFileSync(DB_FILE, 'utf8');
-    return JSON.parse(raw);
+    const db = JSON.parse(raw);
+    // Migration: ensure all required collections exist (handles older db.json files)
+    if (!db.paymentRequests) db.paymentRequests = [];
+    if (!db.virtualCards) db.virtualCards = [];
+    if (!db.budgets) db.budgets = [];
+    if (!db.devices) db.devices = [];
+    if (!db.supportTickets) db.supportTickets = [];
+    if (!db.fraudAlerts) db.fraudAlerts = [];
+    if (!db.savedContacts) db.savedContacts = [];
+    if (!db.qrCodes) db.qrCodes = [];
+    if (!db.refreshTokens) db.refreshTokens = [];
+    if (!db.auditLog) db.auditLog = [];
+    if (!db.employers) db.employers = [];
+    if (!db.employerEmployees) db.employerEmployees = [];
+    if (!db.payrollBatches) db.payrollBatches = [];
+    if (!db.demoIntents) db.demoIntents = [];
+    return db;
   } catch (e) {
     const initial = {
       users: [],
@@ -1009,6 +1094,50 @@ app.get('/healthz', (req, res) => {
   res.status(200).send('OK');
 });
 
+// Firebase connectivity health check
+app.get('/firebase/health', async (req, res) => {
+  if (!firebaseAdmin) {
+    return res.status(503).json({
+      status: 'unavailable',
+      message: 'Firebase Admin SDK is not initialized. Check server logs for credential errors.',
+    });
+  }
+
+  const services = {};
+
+  // Test Firebase Auth
+  try {
+    await firebaseAuth.listUsers(1);
+    services.auth = 'ok';
+  } catch (err) {
+    services.auth = err.code === 'auth/configuration-not-found' || err.message.includes('Identity Toolkit API')
+      ? 'disabled — enable Firebase Authentication in the Firebase Console'
+      : `error: ${err.message}`;
+  }
+
+  // Test Firestore
+  if (firestore) {
+    try {
+      await firestore.collection('_health').limit(1).get();
+      services.firestore = 'ok';
+    } catch (err) {
+      services.firestore = err.message.includes('Cloud Firestore API has not been used') || err.message.includes('PERMISSION_DENIED')
+        ? 'disabled — enable Cloud Firestore in the Firebase Console'
+        : `error: ${err.message}`;
+    }
+  } else {
+    services.firestore = 'not initialized';
+  }
+
+  const allOk = Object.values(services).every(v => v === 'ok');
+  res.status(allOk ? 200 : 207).json({
+    status: allOk ? 'ok' : 'partial',
+    firebase: 'connected',
+    project: firebaseProjectId,
+    services,
+  });
+});
+
 // ==================== AUTHENTICATION MIDDLEWARE ====================
 
 function findUserByEmail(db, email) {
@@ -1122,7 +1251,7 @@ app.post('/auth/register',
 
   saveDB(db);
 
-  const token = jwt.sign({ userId: id, email, type: 'access' }, JWT_SECRET, { expiresIn: '15m' });
+  const token = jwt.sign({ userId: id, email, type: 'access' }, JWT_SECRET, { expiresIn: '7d' });
   const refreshToken = jwt.sign({ userId: id, email, type: 'refresh' }, JWT_SECRET, { expiresIn: '30d' });
   
   // Store refresh token in db
@@ -1186,7 +1315,7 @@ app.post('/auth/login',
     }
   }
 
-  const token = jwt.sign({ userId: u.id, email: u.email, type: 'access' }, JWT_SECRET, { expiresIn: process.env.JWT_EXPIRY || '15m' });
+  const token = jwt.sign({ userId: u.id, email: u.email, type: 'access' }, JWT_SECRET, { expiresIn: process.env.JWT_EXPIRY || '7d' });
   const refreshToken = jwt.sign({ userId: u.id, email: u.email, type: 'refresh' }, JWT_SECRET, { expiresIn: process.env.REFRESH_TOKEN_EXPIRY || '30d' });
   
   logger.info('User logged in', { userId: u.id, newDevice: isNewDevice, ip: req.clientIP });
@@ -1233,7 +1362,7 @@ app.post('/auth/refresh', (req, res) => {
     }
     
     // Issue new access token
-    const newToken = jwt.sign({ userId: payload.userId, email: payload.email, type: 'access' }, JWT_SECRET, { expiresIn: '15m' });
+    const newToken = jwt.sign({ userId: payload.userId, email: payload.email, type: 'access' }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token: newToken });
   } catch (e) {
     return res.status(401).json({ error: 'Invalid or expired refresh token' });
@@ -1309,8 +1438,34 @@ app.get('/wallets/:id/transactions', authMiddleware, (req, res) => {
   const db = loadDB();
   const wallet = db.wallets.find(w => w.id === req.params.id && w.userId === req.user.userId);
   if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
-  const txs = db.transactions.filter(t => t.fromWalletId === wallet.id || t.toWalletId === wallet.id).sort((a,b)=>b.timestamp-a.timestamp);
+  const txs = db.transactions
+    .filter(t => t.fromWalletId === wallet.id || t.toWalletId === wallet.id)
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .map(t => ({
+      ...t,
+      // direction: 'out' = money left this wallet, 'in' = money arrived
+      direction: t.fromWalletId === wallet.id ? 'out' : 'in',
+      // type: keep existing explicit types (payroll, qr_payment, withdrawal…),
+      // derive 'sent'/'received' for plain transfers that have no type set
+      type: t.type || (t.fromWalletId === wallet.id ? 'sent' : 'received')
+    }));
   res.json({ transactions: txs });
+});
+
+// Get all transactions for authenticated user (across all their wallets)
+app.get('/transactions', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const userWallets = db.wallets.filter(w => w.userId === req.user.userId);
+  const walletIds = new Set(userWallets.map(w => w.id));
+  const txs = db.transactions
+    .filter(t => walletIds.has(t.fromWalletId) || walletIds.has(t.toWalletId))
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .map(t => ({
+      ...t,
+      direction: walletIds.has(t.fromWalletId) ? 'out' : 'in',
+      type: t.type || (walletIds.has(t.fromWalletId) ? 'sent' : 'received')
+    }));
+  res.json(txs);
 });
 
 // Send money (simple internal transfer between wallets by walletId)
@@ -1469,6 +1624,146 @@ app.get('/rates', (req, res) => {
   const db = loadDB();
   res.json(db.rates);
 });
+
+// ==================== DEPOSIT / TOP-UP ENDPOINTS ====================
+
+// Step 1: Create a Stripe PaymentIntent (or demo intent if Stripe not configured)
+// Returns clientSecret for use with @stripe/stripe-react-native PaymentSheet
+app.post('/deposits/create-intent', authMiddleware,
+  validateInput([
+    body('amount').isInt({ min: 100 }),   // amount in minor units, min 1 USD
+    body('currency').isString().isLength({ min: 3, max: 5 }),
+    body('walletId').isString(),
+  ]),
+  async (req, res) => {
+    const db = loadDB();
+    const { amount, currency, walletId } = req.body;
+    const user = db.users.find(u => u.id === req.user.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const wallet = db.wallets.find(w => w.id === walletId && w.userId === req.user.userId);
+    if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+
+    if (stripeClient) {
+      // Real Stripe PaymentIntent
+      try {
+        const intent = await stripeClient.paymentIntents.create({
+          amount: Math.round(amount),
+          currency: currency.toLowerCase(),
+          metadata: { userId: req.user.userId, walletId },
+          automatic_payment_methods: { enabled: true },
+        });
+        logger.info('Stripe PaymentIntent created', { intentId: intent.id, userId: req.user.userId, amount, currency });
+        return res.json({
+          clientSecret: intent.client_secret,
+          intentId: intent.id,
+          publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
+          mode: 'stripe',
+        });
+      } catch (err) {
+        logger.error('Stripe PaymentIntent failed', { error: err.message, userId: req.user.userId });
+        return res.status(500).json({ error: 'Payment provider error', message: err.message });
+      }
+    }
+
+    // Demo / test mode — no Stripe key configured
+    // Create a fake intent ID so the confirmation step can credit the wallet
+    const demoIntentId = `demo_intent_${uuidv4()}`;
+    if (!db.demoIntents) db.demoIntents = [];
+    db.demoIntents.push({
+      id: demoIntentId,
+      userId: req.user.userId,
+      walletId,
+      amount,
+      currency,
+      status: 'pending',
+      createdAt: Date.now(),
+    });
+    saveDB(db);
+    logger.info('Demo deposit intent created', { intentId: demoIntentId, userId: req.user.userId, amount, currency });
+    return res.json({
+      clientSecret: `${demoIntentId}_secret`,
+      intentId: demoIntentId,
+      publishableKey: null,
+      mode: 'demo',
+    });
+  }
+);
+
+// Step 2: Confirm deposit — credit wallet after successful payment
+// Called by frontend after PaymentSheet succeeds (or immediately in demo mode)
+app.post('/deposits/confirm', authMiddleware,
+  validateInput([
+    body('intentId').isString(),
+    body('walletId').isString(),
+  ]),
+  async (req, res) => {
+    const db = loadDB();
+    const { intentId, walletId } = req.body;
+    const user = db.users.find(u => u.id === req.user.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const wallet = db.wallets.find(w => w.id === walletId && w.userId === req.user.userId);
+    if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+
+    let amount, currency;
+
+    if (stripeClient && !intentId.startsWith('demo_intent_')) {
+      // Verify real Stripe PaymentIntent status
+      try {
+        const intent = await stripeClient.paymentIntents.retrieve(intentId);
+        if (intent.status !== 'succeeded') {
+          return res.status(400).json({ error: `Payment not completed. Status: ${intent.status}` });
+        }
+        if (intent.metadata.walletId !== walletId || intent.metadata.userId !== req.user.userId) {
+          return res.status(403).json({ error: 'Intent mismatch' });
+        }
+        amount = intent.amount;
+        currency = intent.currency.toUpperCase();
+      } catch (err) {
+        return res.status(500).json({ error: 'Failed to verify payment', message: err.message });
+      }
+    } else {
+      // Demo mode — look up pending intent
+      if (!db.demoIntents) return res.status(400).json({ error: 'No demo intent found' });
+      const demo = db.demoIntents.find(d => d.id === intentId && d.userId === req.user.userId && d.walletId === walletId);
+      if (!demo) return res.status(404).json({ error: 'Demo intent not found or already used' });
+      if (demo.status !== 'pending') return res.status(400).json({ error: 'Intent already used' });
+      amount = demo.amount;
+      currency = demo.currency;
+      demo.status = 'used';
+    }
+
+    // Credit wallet
+    let balance = wallet.balances.find(b => b.currency === currency);
+    if (!balance) {
+      balance = { currency, amount: 0 };
+      wallet.balances.push(balance);
+    }
+    balance.amount += amount;
+
+    // Record transaction
+    const tx = {
+      id: uuidv4(),
+      type: 'deposit',
+      fromWalletId: null,
+      toWalletId: walletId,
+      amount,
+      currency,
+      receivedAmount: amount,
+      receivedCurrency: currency,
+      wasConverted: false,
+      status: 'completed',
+      timestamp: Date.now(),
+      memo: `Deposit via ${intentId.startsWith('demo_intent_') ? 'Demo Mode' : 'Stripe'}`,
+      direction: 'in',
+      stripeIntentId: intentId,
+    };
+    db.transactions.push(tx);
+    saveDB(db);
+
+    logger.info('Deposit confirmed', { intentId, userId: req.user.userId, walletId, amount, currency });
+    return res.json({ success: true, transaction: tx, newBalance: balance.amount, currency });
+  }
+);
 
 // Basic user info
 app.get('/me', authMiddleware, (req, res) => {
@@ -4412,9 +4707,34 @@ app.get('/employer/employees', authMiddleware, (req, res) => {
     return res.status(404).json({ error: 'Employer account not found' });
   }
   
-  const employees = db.employerEmployees.filter(ee => ee.employerId === employer.id);
-  
+  const employees = db.employerEmployees
+    .filter(ee => ee.employerId === employer.id)
+    .map(ee => {
+      const wallet = db.wallets.find(w => w.userId === ee.workerId && w.type !== 'employer_funding');
+      return { ...ee, walletId: wallet?.id };
+    });
+
   res.json({ employees });
+});
+
+// Fund employer wallet (demo/test endpoint — adds funds for payroll testing)
+app.post('/employer/fund-wallet', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const employer = db.employers.find(e => e.userId === req.user.userId);
+  if (!employer) return res.status(404).json({ error: 'Employer account not found' });
+  const fundingWallet = db.wallets.find(w => w.id === employer.fundingWalletId);
+  if (!fundingWallet) return res.status(500).json({ error: 'Funding wallet not found' });
+  const { amount = 1000000, currency = 'XAF' } = req.body;
+  const addAmount = typeof amount === 'number' ? amount : 1000000;
+  let balance = fundingWallet.balances.find(b => b.currency === currency);
+  if (!balance) {
+    balance = { currency, amount: 0 };
+    fundingWallet.balances.push(balance);
+  }
+  balance.amount += addAmount;
+  saveDB(db);
+  logger.info('Employer funding wallet topped up', { employerId: employer.id, addAmount, currency });
+  res.json({ success: true, balance: { currency: balance.currency, amount: balance.amount } });
 });
 
 // Get linked employers (worker view)
