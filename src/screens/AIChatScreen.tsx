@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Keyboard
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
+import { useNetworkStatus } from '../utils/OfflineError';
 
 type Message = {
   id: string;
@@ -52,6 +53,7 @@ type QuickAction = {
 
 export default function AIChatScreen() {
   const auth = useAuth();
+  const { isOnline } = useNetworkStatus();
   const [messages, setMessages] = useState<Message[]>([{
     id: '1',
     text: 'Hello! I\'m your EGWallet AI assistant. How can I help you today?',
@@ -116,22 +118,34 @@ export default function AIChatScreen() {
     setIsTyping(true);
 
     try {
-      // Call AI backend
-      const response = await fetch(`${API_BASE}/ai/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${auth.token}`,
-        },
-        body: JSON.stringify({
-          message: text.trim(),
-          conversationHistory: messages.slice(-5), // Last 5 messages for context
-          structuredData: structuredData || null,
-          language: language, // Send selected language
-        }),
-      });
+      // Skip API when offline — show demo response instantly
+      if (!isOnline) throw new Error('Offline — demo mode');
 
-      if (response.ok) {
+      // Call AI backend with 2-second timeout — demo mode fires instantly on any failure
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+
+      let response: Response | null = null;
+      try {
+        response = await fetch(`${API_BASE}/ai/chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${auth.token}`,
+          },
+          body: JSON.stringify({
+            message: text.trim(),
+            conversationHistory: messages.slice(-5),
+            structuredData: structuredData || null,
+            language: language,
+          }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      if (response && response.ok) {
         const data = await response.json();
         
         const aiMessage: Message = {
@@ -140,28 +154,67 @@ export default function AIChatScreen() {
           sender: 'ai',
           timestamp: Date.now(),
           suggestions: data.suggestions,
-          ticketCreated: data.ticketCreated, // Include ticket info if created
-          needsMoreInfo: data.needsMoreInfo, // Structured data collection
-          recentTransactions: data.recentTransactions, // For fraud cases
-          fraudQuestions: data.fraudQuestions, // For fraud investigation
+          ticketCreated: data.ticketCreated,
+          needsMoreInfo: data.needsMoreInfo,
+          recentTransactions: data.recentTransactions,
+          fraudQuestions: data.fraudQuestions,
         };
 
         setMessages(prev => [...prev, aiMessage]);
         
-        // Show structured data form if AI requests it
         if (data.needsMoreInfo) {
           setStructuredDataForm(data.needsMoreInfo);
         }
       } else {
-        throw new Error('AI response failed');
+        throw new Error('AI unavailable');
       }
-    } catch (error) {
-      // Fallback response if AI fails
+    } catch (error: any) {
+      // Smart demo fallback with canned responses when AI is unavailable
+      const msg = text.trim().toLowerCase();
+      let fallbackText = '';
+      let fallbackSuggestions: string[] | undefined;
+
+      if (msg.includes('send') || msg.includes('transfer')) {
+        fallbackText = 'To send money, tap the **Pay** tab at the bottom, then select **Send Money**. Enter the recipient\'s wallet ID, amount, and currency. You can also send even if your wallet balance is zero — just add a debit or credit card when prompted.';
+        fallbackSuggestions = ['How do I receive money?', 'What currencies are supported?'];
+      } else if (msg.includes('receiv') || msg.includes('request')) {
+        fallbackText = 'To request money, tap **Pay → Request Money**. Enter the amount, share your wallet ID or QR code with the sender. Funds arrive instantly once sent.';
+        fallbackSuggestions = ['How do I send money?', 'How do I create a QR code?'];
+      } else if (msg.includes('card') || msg.includes('virtual')) {
+        fallbackText = 'You can create up to 5 virtual cards in the **Card** tab. Virtual cards can be used for online payments and subscriptions. You can freeze/unfreeze them anytime.';
+        fallbackSuggestions = ['How do I freeze a card?', 'What is the card limit?'];
+      } else if (msg.includes('balance') || msg.includes('wallet')) {
+        fallbackText = 'Your wallet balance is shown on the **Wallet** home screen. Pull down to refresh your balance. You can hold multiple currencies in the same wallet.';
+        fallbackSuggestions = ['How do I add money?', 'How do I send money?'];
+      } else if (msg.includes('deposit') || msg.includes('add money') || msg.includes('top up')) {
+        fallbackText = 'To add money, tap **Add Money** on the Wallet screen. You can deposit using a debit card, credit card, or bank transfer. Deposits are processed instantly in demo mode.';
+        fallbackSuggestions = ['What are the deposit limits?', 'How do I send money?'];
+      } else if (msg.includes('kyc') || msg.includes('verify') || msg.includes('identity')) {
+        fallbackText = 'KYC verification is required to unlock higher limits. Go to **Settings → Verify Identity** and upload a valid ID. Verification typically takes 1–2 business days.';
+        fallbackSuggestions = ['What are the transaction limits?', 'How do I contact support?'];
+      } else if (msg.includes('fee') || msg.includes('charge') || msg.includes('cost')) {
+        fallbackText = 'EGWallet charges a 1% fee on transfers. Deposits and withdrawals may have separate fees depending on the payment method. There are no monthly fees.';
+        fallbackSuggestions = ['How do I send money?', 'What currencies are supported?'];
+      } else if (msg.includes('currency') || msg.includes('currencies') || msg.includes('xaf') || msg.includes('fx')) {
+        fallbackText = 'EGWallet supports 12+ currencies: XAF, USD, EUR, GBP, NGN, GHS, ZAR, KES, INR, CNY, JPY, BRL. You can set your preferred receiving currency in **Settings**.';
+        fallbackSuggestions = ['How do I change my currency?', 'How do I send money?'];
+      } else if (msg.includes('report') || msg.includes('problem') || msg.includes('issue') || msg.includes('dispute')) {
+        fallbackText = 'To report a problem or dispute a transaction, go to **Transaction History** and tap **Dispute** next to the transaction. You can also reach us at support@egwallet.com.';
+        fallbackSuggestions = ['How do I contact support?', 'How do I freeze my card?'];
+      } else if (msg.includes('support') || msg.includes('help') || msg.includes('contact')) {
+        fallbackText = 'Our support team is available 24/7. Email us at **support@egwallet.com** or visit the Help Center in Settings. Average response time is under 2 hours.';
+        fallbackSuggestions = ['How do I send money?', 'Report a problem'];
+      } else {
+        fallbackText = 'I\'m your EGWallet assistant. I can help with sending money, managing cards, checking balances, and resolving issues. What would you like to do?';
+        fallbackSuggestions = ['Send money', 'Check balance', 'Create virtual card', 'Contact support'];
+      }
+
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: 'I\'m having trouble processing your request right now. Please try again or contact support at support@egwallet.com',
+        text: fallbackText,
         sender: 'ai',
         timestamp: Date.now(),
+        suggestions: fallbackSuggestions,
       };
       setMessages(prev => [...prev, errorMessage]);
     } finally {
@@ -289,7 +342,10 @@ export default function AIChatScreen() {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.headerTitle}>AI Assistant</Text>
-            <Text style={styles.headerSubtitle}>Powered by EGWallet AI</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+              <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: '#22C55E' }} />
+              <Text style={styles.headerSubtitle}>Available 24/7</Text>
+            </View>
           </View>
           <TouchableOpacity
             style={styles.languageButton}

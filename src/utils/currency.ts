@@ -11,6 +11,7 @@ export const currencyDecimals: Record<string, number> = {
   BRL: 2, // Brazilian Real
   GBP: 2, // British Pound
   JPY: 0, // Japanese Yen (no decimal places)
+  INR: 2, // Indian Rupee
   
   // West African currencies
   NGN: 2, // Nigerian Naira
@@ -88,6 +89,7 @@ export const currencySymbols: Record<string, string> = {
   GMD: 'D',
   MUR: '₨',
   SCR: '₨',
+  INR: '₹',
 };
 
 export function decimalsFor(currency: string) {

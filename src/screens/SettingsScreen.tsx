@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
-import { View, Text, Button, ScrollView, Alert, TouchableOpacity, Modal, FlatList, Switch, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, Button, ScrollView, Alert, TouchableOpacity, Modal, FlatList, Switch, StyleSheet, TextInput } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { useBiometric } from '../auth/BiometricContext';
@@ -10,7 +12,7 @@ import { getCurrencySymbol } from '../utils/currency';
 const CURRENCIES = [
   'XAF', 'NGN', 'GHS', 'ZAR', 'KES', 'TZS', 'UGX', 'RWF', 'ETB', 'EGP',
   'TND', 'MAD', 'LYD', 'DZD', 'AOA', 'ERN', 'SOS', 'SDG', 'GMD', 'MUR',
-  'SCR', 'BWP', 'ZWL', 'MZN', 'NAD', 'LSL', 'XOF', 'USD', 'EUR', 'GBP', 'JPY', 'CAD', 'BRL', 'CNY'
+  'SCR', 'BWP', 'ZWL', 'MZN', 'NAD', 'LSL', 'XOF', 'USD', 'EUR', 'GBP', 'JPY', 'CNY', 'INR', 'BRL', 'CAD'
 ];
 
 export default function SettingsScreen() {
@@ -18,8 +20,29 @@ export default function SettingsScreen() {
   const biometric = useBiometric();
   const navigation = useNavigation();
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
+  const [username, setUsername] = useState('');
+  const [usernameInput, setUsernameInput] = useState('');
+  const [showUsernameModal, setShowUsernameModal] = useState(false);
+  const [appLock, setAppLock] = useState(false);
+  const [faceId, setFaceId] = useState(false);
+  const [trustedDevice, setTrustedDevice] = useState(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem('@egwallet:username').then(v => { if (v) setUsername(v); });
+  }, []);
+
+  const saveUsername = async () => {
+    const clean = usernameInput.trim();
+    console.log('[Settings] Save Username pressed:', clean);
+    if (!clean) return;
+    await AsyncStorage.setItem('@egwallet:username', clean);
+    setUsername(clean);
+    setShowUsernameModal(false);
+    Alert.alert('Username Set', `Your handle is now @${clean}. Others can send you money using @${clean}.`);
+  };
 
   const handleSignOut = async () => {
+    console.log('[Settings] Sign Out pressed');
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -33,6 +56,7 @@ export default function SettingsScreen() {
   };
 
   const handleDeleteAccount = async () => {
+    console.log('[Settings] Delete Account pressed');
     Alert.alert(
       'Delete Account',
       'Are you sure you want to delete your account? This action cannot be undone. All your data will be permanently deleted.',
@@ -58,6 +82,7 @@ export default function SettingsScreen() {
   };
 
   const handleChangeCurrency = async (currency: string) => {
+    console.log('[Settings] Preferred currency changed to:', currency);
     try {
       await auth.updatePreferredCurrency(currency);
       setShowCurrencyPicker(false);
@@ -68,6 +93,7 @@ export default function SettingsScreen() {
   };
 
   const handleToggleAutoConvert = async (enabled: boolean) => {
+    console.log('[Settings] Auto-convert toggled:', enabled);
     try {
       await auth.updateAutoConvert(enabled);
       if (enabled) {
@@ -81,6 +107,7 @@ export default function SettingsScreen() {
   };
 
   const handleToggleBiometric = async (enabled: boolean) => {
+    console.log('[Settings] Biometric lock toggled:', enabled);
     try {
       if (enabled) {
         await biometric.enableBiometric();
@@ -95,6 +122,7 @@ export default function SettingsScreen() {
   };
 
   return (
+    <LinearGradient colors={['#C5DFF8', '#DEEEFF', '#EBF4FE', '#F5F9FF', '#FFFFFF']} style={{ flex: 1 }}>
     <ScrollView style={styles.container}>
       <View style={styles.content}>
 
@@ -114,6 +142,18 @@ export default function SettingsScreen() {
               <Ionicons name="mail" size={20} color="#657786" />
               <Text style={styles.emailText}>{auth.user?.email}</Text>
             </View>
+            <TouchableOpacity
+              style={styles.usernameRow}
+              onPress={() => { setUsernameInput(username); setShowUsernameModal(true); }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="at-circle-outline" size={20} color="#1565C0" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.usernameLabel}>Username</Text>
+                <Text style={styles.usernameValue}>{username ? `@${username}` : 'Tap to set your @handle'}</Text>
+              </View>
+              <Ionicons name="create-outline" size={16} color="#9BAEC8" />
+            </TouchableOpacity>
             <View style={styles.currencySection}>
               <Text style={styles.label}>Preferred Receiving Currency:</Text>
               <TouchableOpacity 
@@ -235,6 +275,70 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Security Mode */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="lock-closed" size={24} color="#1565C0" />
+            <Text style={styles.sectionTitle}>SECURITY MODE</Text>
+          </View>
+          <View style={styles.settingRow}>
+            <View style={styles.settingLeft}>
+              <Ionicons name="lock-closed" size={20} color="#1565C0" />
+              <View style={styles.settingTextContainer}>
+                <Text style={styles.settingTitle}>App Lock</Text>
+                <Text style={styles.settingSubtitle}>Require authentication to open app</Text>
+              </View>
+            </View>
+            <Switch value={appLock} onValueChange={setAppLock} trackColor={{ false: '#E1E8ED', true: '#007AFF' }} thumbColor="#FFFFFF" />
+          </View>
+          <View style={styles.divider} />
+          <View style={styles.settingRow}>
+            <View style={styles.settingLeft}>
+              <Ionicons name="scan" size={20} color="#1565C0" />
+              <View style={styles.settingTextContainer}>
+                <Text style={styles.settingTitle}>Face ID / Biometric</Text>
+                <Text style={styles.settingSubtitle}>Unlock with face or fingerprint</Text>
+              </View>
+            </View>
+            <Switch
+              value={faceId}
+              onValueChange={(v) => { setFaceId(v); if (v) setAppLock(true); }}
+              trackColor={{ false: '#E1E8ED', true: '#007AFF' }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+          <View style={styles.divider} />
+          <View style={styles.settingRow}>
+            <View style={styles.settingLeft}>
+              <Ionicons name="shield-checkmark" size={20} color="#1565C0" />
+              <View style={styles.settingTextContainer}>
+                <Text style={styles.settingTitle}>Remember This Device</Text>
+                <Text style={styles.settingSubtitle}>Skip auth on trusted devices</Text>
+              </View>
+            </View>
+            <Switch value={trustedDevice} onValueChange={setTrustedDevice} trackColor={{ false: '#E1E8ED', true: '#007AFF' }} thumbColor="#FFFFFF" />
+          </View>
+        </View>
+
+        {/* Business Section */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="business" size={24} color="#007AFF" />
+            <Text style={styles.sectionTitle}>BUSINESS</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.supportButton}
+            onPress={() => (navigation as any).navigate('EmployerDashboard')}
+          >
+            <Ionicons name="people" size={20} color="#007AFF" />
+            <View style={styles.settingTextContainer}>
+              <Text style={styles.supportButtonText}>Employer Dashboard</Text>
+              <Text style={styles.settingSubtitle}>Payroll, employees &amp; bulk payments</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#007AFF" />
+          </TouchableOpacity>
+        </View>
+
         {/* App Info Section */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
@@ -297,6 +401,37 @@ export default function SettingsScreen() {
         </View>
       </View>
 
+      {/* Username Modal */}
+      <Modal visible={showUsernameModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.usernameModal}>
+            <Text style={styles.usernameModalTitle}>Set Username</Text>
+            <Text style={styles.usernameModalSub}>Others can send you money using @{usernameInput || 'yourhandle'}</Text>
+            <View style={styles.usernameInputRow}>
+              <Text style={styles.atSign}>@</Text>
+              <TextInput
+                style={styles.usernameInput}
+                value={usernameInput}
+                onChangeText={t => setUsernameInput(t.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase())}
+                placeholder="yourhandle"
+                autoCapitalize="none"
+                maxLength={20}
+                placeholderTextColor="#9BAEC8"
+                autoFocus
+              />
+            </View>
+            <View style={styles.usernameModalBtns}>
+              <TouchableOpacity style={styles.umCancelBtn} onPress={() => setShowUsernameModal(false)}>
+                <Text style={styles.umCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.umSaveBtn} onPress={saveUsername}>
+                <Text style={styles.umSaveText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* Currency Picker Modal */}
       <Modal visible={showCurrencyPicker} transparent animationType="slide">
         <View style={styles.modalOverlay}>
@@ -340,13 +475,14 @@ export default function SettingsScreen() {
         </View>
       </Modal>
     </ScrollView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F7FA',
+    backgroundColor: 'transparent',
   },
   content: {
     padding: 16,
@@ -355,28 +491,30 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.84)',
+    borderRadius: 18,
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    borderWidth: 1,
+    borderColor: 'rgba(21,101,192,0.12)',
+    shadowColor: '#1565C0',
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowRadius: 14,
+    elevation: 5,
   },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#EEEEEE',
+    borderBottomColor: 'rgba(21,101,192,0.1)',
     gap: 8,
   },
   sectionTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#657786',
-    letterSpacing: 0.5,
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#0A3D7C',
+    letterSpacing: 1.2,
   },
   cardContent: {
     padding: 16,
@@ -404,10 +542,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 12,
-    backgroundColor: '#F0F7FF',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#007AFF',
+    backgroundColor: 'rgba(21,101,192,0.07)',
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: 'rgba(21,101,192,0.3)',
   },
   currencyDisplay: {
     flexDirection: 'row',
@@ -416,14 +554,103 @@ const styles = StyleSheet.create({
   },
   currencyText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#007AFF',
+    fontWeight: '700',
+    color: '#1565C0',
   },
   helpText: {
     fontSize: 12,
     color: '#999999',
     marginTop: 6,
     lineHeight: 16,
+  },
+  usernameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(21,101,192,0.1)',
+    marginTop: 4,
+  },
+  usernameLabel: {
+    fontSize: 11,
+    color: '#9BAEC8',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  usernameValue: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1565C0',
+    marginTop: 1,
+  },
+  usernameModal: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 24,
+    width: '88%',
+    alignSelf: 'center',
+  },
+  usernameModalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#0D1B2E',
+    marginBottom: 6,
+  },
+  usernameModalSub: {
+    fontSize: 13,
+    color: '#657786',
+    marginBottom: 20,
+  },
+  usernameInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#1565C0',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    marginBottom: 20,
+  },
+  atSign: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#1565C0',
+    marginRight: 6,
+  },
+  usernameInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#0D1B2E',
+    paddingVertical: 12,
+  },
+  usernameModalBtns: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  umCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#F0F4F9',
+    alignItems: 'center',
+  },
+  umCancelText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#657786',
+  },
+  umSaveBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#1565C0',
+    alignItems: 'center',
+  },
+  umSaveText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
   },
   toggleSection: {
     marginTop: 16,
@@ -462,14 +689,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 14,
     margin: 12,
-    borderRadius: 8,
-    backgroundColor: '#F0F7FF',
+    borderRadius: 12,
+    backgroundColor: 'rgba(21,101,192,0.08)',
     gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(21,101,192,0.2)',
   },
   signOutText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#007AFF',
+    fontWeight: '700',
+    color: '#1565C0',
   },
   deleteButton: {
     flexDirection: 'row',
@@ -520,15 +749,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 14,
     margin: 12,
-    borderRadius: 8,
-    backgroundColor: '#F0F7FF',
+    borderRadius: 12,
+    backgroundColor: 'rgba(21,101,192,0.06)',
     gap: 8,
   },
   aboutText: {
     flex: 1,
     fontSize: 16,
     fontWeight: '600',
-    color: '#007AFF',
+    color: '#1565C0',
   },
   supportButton: {
     flexDirection: 'row',
@@ -556,8 +785,8 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   supportEmail: {
-    fontWeight: '600',
-    color: '#007AFF',
+    fontWeight: '700',
+    color: '#1565C0',
   },
   modalOverlay: {
     flex: 1,
@@ -600,7 +829,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   currencyOptionSelected: {
-    backgroundColor: '#F0F7FF',
+    backgroundColor: 'rgba(21,101,192,0.08)',
   },
   currencyOptionContent: {
     flexDirection: 'row',
@@ -612,8 +841,8 @@ const styles = StyleSheet.create({
     color: '#14171A',
   },
   currencyOptionTextSelected: {
-    fontWeight: '600',
-    color: '#007AFF',
+    fontWeight: '700',
+    color: '#1565C0',
   },
   divider: {
     height: 1,

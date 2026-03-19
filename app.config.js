@@ -38,6 +38,10 @@ export default ({ config }) => ({
   },
   owner: "francisco1953",
   plugins: [
-    "expo-notifications"
+    "expo-notifications",
+    ["@sentry/react-native/expo", {
+      "organization": "egwallet",
+      "project": "egwallet-mobile"
+    }]
   ]
 });

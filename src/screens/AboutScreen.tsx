@@ -70,7 +70,9 @@ export default function AboutScreen() {
           <View style={[styles.infoItem, { borderBottomWidth: 0 }]}>
             <Ionicons name="link" size={20} color="#657786" />
             <Text style={styles.infoLabel}>API:</Text>
-            <Text style={[styles.infoValue, { fontSize: 11 }]} numberOfLines={1}>{apiUrl}</Text>
+            <Text style={[styles.infoValue, { fontSize: 11 }]} numberOfLines={1}>
+              {__DEV__ ? apiUrl : 'app.egwallet.com'}
+            </Text>
           </View>
         </View>
 

@@ -46,7 +46,7 @@ export async function me(token: string) {
     });
     if (!res.ok) throw new Error('Fetch profile failed');
     return res.json();
-  }, { timeout: 10000, retries: 1 });
+  }, { timeout: 20000, retries: 2 });
 
   if (!result) throw new Error('Failed to fetch profile. Please check your connection.');
   return result;
@@ -57,10 +57,13 @@ export async function listWallets(token: string) {
     const res = await fetch(`${API_BASE}/wallets`, { 
       headers: { Authorization: `Bearer ${token}` } 
     });
-    if (!res.ok) throw new Error('Fetch wallets failed');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Fetch wallets failed');
+    }
     return res.json();
-  }, { timeout: 10000, retries: 1 });
+  }, { timeout: 20000, retries: 2 });
 
-  if (!result) throw new Error('Failed to fetch wallets. Please check your connection.');
+  if (!result) throw new Error('Could not reach the server. Check that your computer and phone are on the same Wi-Fi.');
   return result;
 }

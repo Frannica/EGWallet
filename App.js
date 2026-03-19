@@ -52,11 +52,11 @@ export default function App() {
             ⚠️ Startup Error
           </Text>
           <Text style={{ fontSize: 14, color: '#666', textAlign: 'center' }}>
-            {initError.message || 'Failed to initialize app'}
+            {initError?.message || 'Failed to initialize app'}
           </Text>
           {__DEV__ && (
             <Text style={{ fontSize: 12, color: '#999', marginTop: 12, fontFamily: 'monospace' }}>
-              {initError.stack}
+              {initError?.stack}
             </Text>
           )}
         </View>

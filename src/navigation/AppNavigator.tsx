@@ -4,8 +4,11 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { View, Text } from 'react-native';
+import { View, Text, ActivityIndicator } from 'react-native';
+import { useAuth } from '../auth/AuthContext';
+import AuthScreen from '../screens/AuthScreen';
 import WalletScreen from '../screens/WalletScreen';
+import PayScreen from '../screens/PayScreen';
 import SendScreen from '../screens/SendScreen';
 import RequestScreen from '../screens/RequestScreen';
 import CardScreen from '../screens/CardScreen';
@@ -20,6 +23,10 @@ import KYCVerificationScreen from '../screens/KYCVerificationScreen';
 import AIChatScreen from '../screens/AIChatScreen';
 import DisputeTransactionScreen from '../screens/DisputeTransactionScreen';
 import QRPaymentScreen from '../screens/QRPaymentScreen';
+import EmployerDashboardScreen from '../screens/EmployerDashboardScreen';
+import DepositScreen from '../screens/DepositScreen';
+import ReceiptScreen from '../screens/ReceiptScreen';
+import { ToastProvider } from '../utils/toast';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -34,10 +41,8 @@ function Tabs() {
 
           if (route.name === 'Wallet') {
             iconName = focused ? 'wallet' : 'wallet-outline';
-          } else if (route.name === 'Send') {
-            iconName = focused ? 'send' : 'send-outline';
-          } else if (route.name === 'Request') {
-            iconName = focused ? 'download' : 'download-outline';
+          } else if (route.name === 'Pay') {
+            iconName = focused ? 'swap-horizontal' : 'swap-horizontal-outline';
           } else if (route.name === 'Card') {
             iconName = focused ? 'card' : 'card-outline';
           } else if (route.name === 'Budget') {
@@ -50,36 +55,40 @@ function Tabs() {
 
           return <Ionicons name={iconName} size={size} color={color} />;
         },
-        tabBarActiveTintColor: '#007AFF',
-        tabBarInactiveTintColor: '#8E8E93',
+        tabBarActiveTintColor: '#1565C0',
+        tabBarInactiveTintColor: '#9BAEC8',
         tabBarStyle: {
           backgroundColor: '#FFFFFF',
-          borderTopWidth: 1,
-          borderTopColor: '#E1E8ED',
-          paddingBottom: 4,
-          paddingTop: 4,
-          height: 60,
+          borderTopWidth: 0,
+          paddingBottom: 10,
+          paddingTop: 8,
+          height: 72,
+          shadowColor: '#1565C0',
+          shadowOffset: { width: 0, height: -4 },
+          shadowOpacity: 0.08,
+          shadowRadius: 16,
+          elevation: 20,
         },
         tabBarLabelStyle: {
           fontSize: 11,
-          fontWeight: '600',
+          fontWeight: '700',
+          letterSpacing: 0.2,
         },
         headerStyle: {
           backgroundColor: '#FFFFFF',
           elevation: 0,
           shadowOpacity: 0,
-          borderBottomWidth: 1,
-          borderBottomColor: '#E1E8ED',
         },
         headerTitleStyle: {
-          fontWeight: '700',
+          fontWeight: '800',
           fontSize: 18,
+          color: '#0D1B2E',
+          letterSpacing: -0.3,
         },
       })}
     >
       <Tab.Screen name="Wallet" component={WalletScreen} />
-      <Tab.Screen name="Send" component={SendScreen} />
-      <Tab.Screen name="Request" component={RequestScreen} />
+      <Tab.Screen name="Pay" component={PayScreen} options={{ title: 'Pay & Receive' }} />
       <Tab.Screen name="Card" component={CardScreen} />
       <Tab.Screen name="Budget" component={BudgetScreen} />
       <Tab.Screen name="Settings" component={SettingsScreen} />
@@ -88,8 +97,20 @@ function Tabs() {
 }
 
 export default function AppNavigator() {
+  const auth = useAuth();
+
+  // Show spinner while restoring token from SecureStore
+  if (auth.loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
+        <ActivityIndicator size="large" color="#1565C0" />
+      </View>
+    );
+  }
+
   try {
     return (
+      <ToastProvider>
       <NavigationContainer
         fallback={
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -98,18 +119,32 @@ export default function AppNavigator() {
         }
       >
         <Stack.Navigator screenOptions={{ headerShown: true }}>
-          <Stack.Screen name="Main" component={Tabs} options={{ headerShown: false }} />
-          <Stack.Screen name="Transactions" component={TransactionHistory} options={{ title: 'Transactions' }} />
-          <Stack.Screen name="About" component={AboutScreen} options={{ title: 'About EGWallet' }} />
-          <Stack.Screen name="HelpCenter" component={HelpCenterScreen} options={{ title: 'Help Center' }} />
-          <Stack.Screen name="ReportProblem" component={ReportProblemScreen} options={{ title: 'Report Problem' }} />
-          <Stack.Screen name="TrustedDevices" component={TrustedDevicesScreen} options={{ title: 'Trusted Devices' }} />
-          <Stack.Screen name="KYCVerification" component={KYCVerificationScreen} options={{ title: 'Identity Verification' }} />
-          <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: 'AI Assistant' }} />
-          <Stack.Screen name="DisputeTransaction" component={DisputeTransactionScreen} options={{ title: 'Dispute Transaction' }} />
-          <Stack.Screen name="QRPayment" component={QRPaymentScreen} options={{ title: 'QR Payment' }} />
+          {!auth.token ? (
+            // ── Not authenticated ── show login/register
+            <Stack.Screen name="Auth" component={AuthScreen} options={{ headerShown: false }} />
+          ) : (
+            // ── Authenticated ── show full app
+            <>
+              <Stack.Screen name="Main" component={Tabs} options={{ headerShown: false }} />
+              <Stack.Screen name="Transactions" component={TransactionHistory} options={{ title: 'Transactions' }} />
+              <Stack.Screen name="About" component={AboutScreen} options={{ title: 'About EGWallet' }} />
+              <Stack.Screen name="HelpCenter" component={HelpCenterScreen} options={{ title: 'Help Center' }} />
+              <Stack.Screen name="ReportProblem" component={ReportProblemScreen} options={{ title: 'Report Problem' }} />
+              <Stack.Screen name="TrustedDevices" component={TrustedDevicesScreen} options={{ title: 'Trusted Devices' }} />
+              <Stack.Screen name="KYCVerification" component={KYCVerificationScreen} options={{ title: 'Identity Verification' }} />
+              <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: 'AI Assistant' }} />
+              <Stack.Screen name="DisputeTransaction" component={DisputeTransactionScreen} options={{ title: 'Dispute Transaction' }} />
+              <Stack.Screen name="QRPayment" component={QRPaymentScreen} options={{ title: 'QR Payment' }} />
+              <Stack.Screen name="EmployerDashboard" component={EmployerDashboardScreen} options={{ title: 'Employer Dashboard' }} />
+              <Stack.Screen name="Send" component={SendScreen} options={{ title: 'Send Money' }} />
+              <Stack.Screen name="Request" component={RequestScreen} options={{ title: 'Request Money' }} />
+              <Stack.Screen name="Deposit" component={DepositScreen} options={{ title: 'Add Money' }} />
+              <Stack.Screen name="Receipt" component={ReceiptScreen} options={{ headerShown: false }} />
+            </>
+          )}
         </Stack.Navigator>
       </NavigationContainer>
+      </ToastProvider>
     );
   } catch (error) {
     console.error('AppNavigator render error:', error);

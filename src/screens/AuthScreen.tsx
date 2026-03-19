@@ -12,7 +12,7 @@ export default function AuthScreen() {
   async function onSubmit() {
     if (!email.trim()) return Alert.alert('Error', 'Please enter your email');
     if (!password.trim()) return Alert.alert('Error', 'Please enter your password');
-    if (password.length < 6) return Alert.alert('Error', 'Password must be at least 6 characters');
+    if (password.length < 8) return Alert.alert('Error', 'Password must be at least 8 characters');
 
     setLoading(true);
     try {
@@ -77,7 +77,7 @@ export default function AuthScreen() {
               style={styles.input} 
             />
             {isSignUp && (
-              <Text style={styles.hint}>Must be at least 6 characters</Text>
+              <Text style={styles.hint}>Must be at least 8 characters</Text>
             )}
           </View>
 
