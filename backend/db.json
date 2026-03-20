@@ -17,6 +17,164 @@
       "dailySpent": 0,
       "lastResetDate": "2026-02-18",
       "linkedEmployers": []
+    },
+    {
+      "id": "4edca601-053f-48b3-b276-7871772bd720",
+      "email": "smoketest_march15@test.com",
+      "region": "GQ",
+      "role": "individual",
+      "preferredCurrency": "XAF",
+      "autoConvertIncoming": true,
+      "createdAt": 1773567526942,
+      "kycTier": 0,
+      "kycStatus": "pending",
+      "kycDocuments": {},
+      "kycLimits": {
+        "dailyLimit": 100,
+        "totalLimit": 500
+      },
+      "dailySpent": 0,
+      "lastResetDate": "2026-03-15",
+      "linkedEmployers": [],
+      "passwordHash": "$2a$08$zg23yVjiKQfvEE8gSUiO2eUjkjh5MAWJQmqUeZSrstk84Zl6QqkJy"
+    },
+    {
+      "id": "ab956de4-adc7-45e5-b9ae-ae01ed58d849",
+      "email": "smoketest2_march15@test.com",
+      "region": "GQ",
+      "role": "individual",
+      "preferredCurrency": "XAF",
+      "autoConvertIncoming": true,
+      "createdAt": 1773567537022,
+      "kycTier": 0,
+      "kycStatus": "pending",
+      "kycDocuments": {},
+      "kycLimits": {
+        "dailyLimit": 100,
+        "totalLimit": 500
+      },
+      "dailySpent": 0,
+      "lastResetDate": "2026-03-15",
+      "linkedEmployers": [],
+      "passwordHash": "$2a$08$jyL/Dztcc/k3HWeQAt7guujYkzbj6qTj148E4rkH8eqn/BUQRSDNW"
+    },
+    {
+      "id": "0f5bd220-de61-4347-a13a-a14aa0c67053",
+      "email": "fulltest_mar16@test.com",
+      "region": "GQ",
+      "role": "individual",
+      "preferredCurrency": "XAF",
+      "autoConvertIncoming": true,
+      "createdAt": 1773702564505,
+      "kycTier": 0,
+      "kycStatus": "pending",
+      "kycDocuments": {},
+      "kycLimits": {
+        "dailyLimit": 100,
+        "totalLimit": 500
+      },
+      "dailySpent": 0,
+      "lastResetDate": "2026-03-16",
+      "linkedEmployers": [],
+      "passwordHash": "$2a$08$3DIdwLiBIMyMkE7mlvRQgOat83.1IJpjagKoqHpPg6oJ.79EyiJm6"
+    },
+    {
+      "id": "717beed2-a10e-46aa-80d9-de7336a946b5",
+      "email": "fulltest_mar16b@test.com",
+      "region": "GQ",
+      "role": "individual",
+      "preferredCurrency": "XAF",
+      "autoConvertIncoming": true,
+      "createdAt": 1773702916223,
+      "kycTier": 0,
+      "kycStatus": "pending",
+      "kycDocuments": {},
+      "kycLimits": {
+        "dailyLimit": 100,
+        "totalLimit": 500
+      },
+      "dailySpent": 0,
+      "lastResetDate": "2026-03-16",
+      "linkedEmployers": [],
+      "passwordHash": "$2a$08$WesZPUO1oLEiVwH7frxCP.S2PwF4Drns5wxs7E0dCSLLoXXgj9nwy"
+    },
+    {
+      "id": "bf272c01-859e-4f60-896a-8859c810e42a",
+      "email": "t1@t.com",
+      "region": "GQ",
+      "role": "individual",
+      "preferredCurrency": "XAF",
+      "autoConvertIncoming": true,
+      "createdAt": 1773703418887,
+      "kycTier": 0,
+      "kycStatus": "pending",
+      "kycDocuments": {},
+      "kycLimits": {
+        "dailyLimit": 100,
+        "totalLimit": 500
+      },
+      "dailySpent": 0,
+      "lastResetDate": "2026-03-16",
+      "linkedEmployers": [],
+      "passwordHash": "$2a$08$3c8jifB4j6YsTdXK541MROl9.RyHIkPYUIkLCx8S/9UVBb0VwmTy."
+    },
+    {
+      "id": "2d596e14-fab3-40f5-b2b9-fc2993150826",
+      "email": "apitest@test.com",
+      "region": "GQ",
+      "role": "individual",
+      "preferredCurrency": "XAF",
+      "autoConvertIncoming": true,
+      "createdAt": 1773883814555,
+      "kycTier": 0,
+      "kycStatus": "pending",
+      "kycDocuments": {},
+      "kycLimits": {
+        "dailyLimit": 100,
+        "totalLimit": 500
+      },
+      "dailySpent": 0,
+      "lastResetDate": "2026-03-19",
+      "linkedEmployers": [],
+      "passwordHash": "$2a$08$suBqZuA1a10alGu4NAe4zui.M6Dxej/s8nPF8MkNwMuzINpR6AJ9G"
+    },
+    {
+      "id": "aa13d808-cc73-4d02-bd2e-066967ff36c3",
+      "email": "deposittest2@test.com",
+      "region": "GQ",
+      "role": "individual",
+      "preferredCurrency": "XAF",
+      "autoConvertIncoming": true,
+      "createdAt": 1773884027297,
+      "kycTier": 0,
+      "kycStatus": "pending",
+      "kycDocuments": {},
+      "kycLimits": {
+        "dailyLimit": 100,
+        "totalLimit": 500
+      },
+      "dailySpent": 0,
+      "lastResetDate": "2026-03-19",
+      "linkedEmployers": [],
+      "passwordHash": "$2a$08$1qfK/ZvAOJrMhYB9LBZ1/eruR9HFKWhmar2pHCbfk8Plq8G4xAixC"
+    },
+    {
+      "id": "demo-user-egwallet-001",
+      "email": "demo@egwallet.app",
+      "passwordHash": "\\.8psHDrBkpx5aka3Za",
+      "region": "US",
+      "role": "individual",
+      "createdAt": 1700000000000,
+      "kycTier": 2,
+      "kycStatus": "approved",
+      "kycDocuments": {},
+      "kycLimits": {
+        "dailyLimit": 10000,
+        "totalLimit": 100000
+      },
+      "dailySpent": 0,
+      "lastResetDate": "2026-01-01",
+      "linkedEmployers": []
     }
   ],
   "employers": [],
@@ -32,14 +190,300 @@
       ],
       "createdAt": 1764913501714,
       "maxLimitUSD": 250000
+    },
+    {
+      "id": "a17bd89e-6f89-4935-9357-915f64a74070",
+      "userId": "4edca601-053f-48b3-b276-7871772bd720",
+      "balances": [
+        {
+          "currency": "USD",
+          "amount": 0
+        }
+      ],
+      "createdAt": 1773567526942,
+      "maxLimitUSD": 250000
+    },
+    {
+      "id": "2c71a17e-25fe-41cd-9dbd-d1e3b13b0ceb",
+      "userId": "ab956de4-adc7-45e5-b9ae-ae01ed58d849",
+      "balances": [
+        {
+          "currency": "USD",
+          "amount": 0
+        }
+      ],
+      "createdAt": 1773567537022,
+      "maxLimitUSD": 250000
+    },
+    {
+      "id": "dbde5103-da96-4422-9057-8fe92c428b15",
+      "userId": "0f5bd220-de61-4347-a13a-a14aa0c67053",
+      "balances": [
+        {
+          "currency": "USD",
+          "amount": 0
+        }
+      ],
+      "createdAt": 1773702564505,
+      "maxLimitUSD": 250000
+    },
+    {
+      "id": "a43026a4-8b5a-4794-9d6f-21249ca2d3da",
+      "userId": "717beed2-a10e-46aa-80d9-de7336a946b5",
+      "balances": [
+        {
+          "currency": "USD",
+          "amount": 0
+        }
+      ],
+      "createdAt": 1773702916223,
+      "maxLimitUSD": 250000
+    },
+    {
+      "id": "4890fe9d-f518-452f-b1b6-4bdf214faf86",
+      "userId": "bf272c01-859e-4f60-896a-8859c810e42a",
+      "balances": [
+        {
+          "currency": "USD",
+          "amount": 0
+        }
+      ],
+      "createdAt": 1773703418892,
+      "maxLimitUSD": 250000
+    },
+    {
+      "id": "0c6ff982-fed5-4ae7-9718-bc2f41d15fa4",
+      "userId": "2d596e14-fab3-40f5-b2b9-fc2993150826",
+      "balances": [
+        {
+          "currency": "USD",
+          "amount": 0
+        },
+        {
+          "currency": "XAF",
+          "amount": 10000
+        }
+      ],
+      "createdAt": 1773883814555,
+      "maxLimitUSD": 250000
+    },
+    {
+      "id": "b93e041f-4d6d-4ebf-8627-3688f7373363",
+      "userId": "aa13d808-cc73-4d02-bd2e-066967ff36c3",
+      "balances": [
+        {
+          "currency": "USD",
+          "amount": 0
+        },
+        {
+          "currency": "XAF",
+          "amount": 10000
+        }
+      ],
+      "createdAt": 1773884027298,
+      "maxLimitUSD": 250000
+    },
+    {
+      "id": "ed4bd2c9-707d-44eb-a939-e915dce48cbb",
+      "userId": "demo-user-egwallet-001",
+      "balances": [
+        {
+          "currency": "USD",
+          "amount": 500000
+        },
+        {
+          "currency": "EUR",
+          "amount": 200000
+        },
+        {
+          "currency": "XAF",
+          "amount": 50000000
+        }
+      ],
+      "createdAt": 1700000000000,
+      "maxLimitUSD": 250000
     }
   ],
-  "transactions": [],
+  "transactions": [
+    {
+      "id": "b3d7afb8-72d3-473d-8fb3-72a2dc9efadc",
+      "type": "deposit",
+      "fromWalletId": null,
+      "toWalletId": "0c6ff982-fed5-4ae7-9718-bc2f41d15fa4",
+      "amount": 10000,
+      "currency": "XAF",
+      "receivedAmount": 10000,
+      "receivedCurrency": "XAF",
+      "wasConverted": false,
+      "status": "completed",
+      "timestamp": 1773883838741,
+      "memo": "Deposit via Demo Mode",
+      "direction": "in",
+      "stripeIntentId": "demo_intent_55c464d7-d5c5-4890-88dc-76a4c64bc1b4"
+    },
+    {
+      "id": "78a80c51-24eb-47c4-bd10-65d54bd1079c",
+      "type": "deposit",
+      "fromWalletId": null,
+      "toWalletId": "b93e041f-4d6d-4ebf-8627-3688f7373363",
+      "amount": 10000,
+      "currency": "XAF",
+      "receivedAmount": 10000,
+      "receivedCurrency": "XAF",
+      "wasConverted": false,
+      "status": "completed",
+      "timestamp": 1773884027721,
+      "memo": "Deposit via Demo Mode",
+      "direction": "in",
+      "stripeIntentId": "demo_intent_13cf3152-4ad4-4af4-9d6c-db38ab02ae9e"
+    }
+  ],
   "payrollBatches": [],
   "savedContacts": [],
   "employerEmployees": [],
   "paymentRequestsRateLimit": {},
-  "qrCodes": [],
+  "qrCodes": [
+    {
+      "id": "b0df1406-393e-4a05-9ac6-e7fb96725672",
+      "userId": "0f5bd220-de61-4347-a13a-a14aa0c67053",
+      "type": "dynamic",
+      "payload": {
+        "v": "1",
+        "type": "dynamic",
+        "requestId": "b0df1406-393e-4a05-9ac6-e7fb96725672",
+        "userId": "0f5bd220-de61-4347-a13a-a14aa0c67053",
+        "amount": 2500,
+        "currency": "XAF",
+        "memo": "Grocery Payment",
+        "expiry": 1773704372423,
+        "nonce": "98f63382a77251dff223488c331cc2b2",
+        "signature": "c00b139ac35099a317be04eca1126c42bca2b06e8192a6f9c3f8a027390283d4"
+      },
+      "createdAt": 1773702572596,
+      "expiry": 1773704372423,
+      "used": false
+    },
+    {
+      "id": "e99437ee-09c0-4eef-86f5-1f726d68e07a",
+      "userId": "717beed2-a10e-46aa-80d9-de7336a946b5",
+      "type": "dynamic",
+      "payload": {
+        "v": "1",
+        "type": "dynamic",
+        "requestId": "e99437ee-09c0-4eef-86f5-1f726d68e07a",
+        "userId": "717beed2-a10e-46aa-80d9-de7336a946b5",
+        "amount": 2500,
+        "currency": "XAF",
+        "memo": "Grocery Payment",
+        "expiry": 1773704719141,
+        "nonce": "2ec97b549fac7321f9398eb667f7a0e7",
+        "signature": "f6176a94e6499bf5db81ff8db9dee96b175a5882801d13e9713a5f644d30572f"
+      },
+      "createdAt": 1773702919142,
+      "expiry": 1773704719141,
+      "used": false
+    },
+    {
+      "id": "74dd8917-7209-4cdd-b0a6-dcb32173fa92",
+      "userId": "717beed2-a10e-46aa-80d9-de7336a946b5",
+      "type": "dynamic",
+      "payload": {
+        "v": "1",
+        "type": "dynamic",
+        "requestId": "74dd8917-7209-4cdd-b0a6-dcb32173fa92",
+        "userId": "717beed2-a10e-46aa-80d9-de7336a946b5",
+        "amount": 1500,
+        "currency": "XAF",
+        "memo": "Bar / Restaurant",
+        "expiry": 1773704719828,
+        "nonce": "d490f92ea2f2a4dce86c83f8ca916469",
+        "signature": "7423d174df1c29f1e00f027fea51a6691523f712ade18f4abd51fd94d78878ed"
+      },
+      "createdAt": 1773702919828,
+      "expiry": 1773704719828,
+      "used": false
+    },
+    {
+      "id": "685425e6-0fde-4ebf-8296-aa16938f1cd3",
+      "userId": "717beed2-a10e-46aa-80d9-de7336a946b5",
+      "type": "dynamic",
+      "payload": {
+        "v": "1",
+        "type": "dynamic",
+        "requestId": "685425e6-0fde-4ebf-8296-aa16938f1cd3",
+        "userId": "717beed2-a10e-46aa-80d9-de7336a946b5",
+        "amount": 3000,
+        "currency": "XAF",
+        "memo": "Market Payment",
+        "expiry": 1773704720032,
+        "nonce": "d9051e920509c5a3ce52df434002c50d",
+        "signature": "3e6b0b8ba5f66325dba139098ddbdd2bd9584e4a752a2fd18a366340cf309811"
+      },
+      "createdAt": 1773702920032,
+      "expiry": 1773704720032,
+      "used": false
+    },
+    {
+      "id": "7c01b4f8-02c4-49e4-87e6-82fbdd369153",
+      "userId": "bf272c01-859e-4f60-896a-8859c810e42a",
+      "type": "dynamic",
+      "payload": {
+        "v": "1",
+        "type": "dynamic",
+        "requestId": "7c01b4f8-02c4-49e4-87e6-82fbdd369153",
+        "userId": "bf272c01-859e-4f60-896a-8859c810e42a",
+        "amount": 2500,
+        "currency": "XAF",
+        "memo": "Grocery Payment",
+        "expiry": 1773705445342,
+        "nonce": "046a065d8326c4308fc385dea4f2ccf3",
+        "signature": "dff2169426c847976e7c780978d415088144c9ce9d843c423338c5153a0bdacc"
+      },
+      "createdAt": 1773703645342,
+      "expiry": 1773705445342,
+      "used": false
+    },
+    {
+      "id": "11af5866-64e6-4f3b-9700-dc15bd769e1a",
+      "userId": "bf272c01-859e-4f60-896a-8859c810e42a",
+      "type": "dynamic",
+      "payload": {
+        "v": "1",
+        "type": "dynamic",
+        "requestId": "11af5866-64e6-4f3b-9700-dc15bd769e1a",
+        "userId": "bf272c01-859e-4f60-896a-8859c810e42a",
+        "amount": 1500,
+        "currency": "XAF",
+        "memo": "Bar / Restaurant",
+        "expiry": 1773705445897,
+        "nonce": "a90d83004d60343c79b3c22c467ab3c6",
+        "signature": "46292292b1f871db482ee607d8b344d8ba17b5733d42d0ac8b5d301e503b1056"
+      },
+      "createdAt": 1773703645897,
+      "expiry": 1773705445897,
+      "used": false
+    },
+    {
+      "id": "218eb5e4-b272-4215-b0f6-42c8ef0950b6",
+      "userId": "bf272c01-859e-4f60-896a-8859c810e42a",
+      "type": "dynamic",
+      "payload": {
+        "v": "1",
+        "type": "dynamic",
+        "requestId": "218eb5e4-b272-4215-b0f6-42c8ef0950b6",
+        "userId": "bf272c01-859e-4f60-896a-8859c810e42a",
+        "amount": 3000,
+        "currency": "XAF",
+        "memo": "Market Payment",
+        "expiry": 1773705446618,
+        "nonce": "039c21f79f2355450b5a21571b489b8d",
+        "signature": "cca4b6c9cf3d80620c0947b5d12683b85bb39d94aec39c8e4a6de83420efd705"
+      },
+      "createdAt": 1773703646618,
+      "expiry": 1773705446618,
+      "used": false
+    }
+  ],
   "auditLog": [],
   "rates": {
     "base": "USD",
@@ -80,5 +524,253 @@
       "SCR": 13
     },
     "updatedAt": 0
-  }
+  },
+  "devices": [
+    {
+      "id": "10c8e36c-4dbf-4b42-a4f8-b2736cd1ab00",
+      "userId": "2d596e14-fab3-40f5-b2b9-fc2993150826",
+      "fingerprint": "test123",
+      "name": "TestPC",
+      "type": "Desktop",
+      "firstSeen": 1773883814555,
+      "lastSeen": 1773883814555,
+      "trusted": true
+    },
+    {
+      "id": "f6694f16-748c-4dfa-9243-ffe7f1012620",
+      "userId": "aa13d808-cc73-4d02-bd2e-066967ff36c3",
+      "fingerprint": "fp1",
+      "name": "TestPC",
+      "type": "Desktop",
+      "firstSeen": 1773884027298,
+      "lastSeen": 1773884027298,
+      "trusted": true
+    }
+  ],
+  "refreshTokens": [
+    {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI0ZWRjYTYwMS0wNTNmLTQ4YjMtYjI3Ni03ODcxNzcyYmQ3MjAiLCJlbWFpbCI6InNtb2tldGVzdF9tYXJjaDE1QHRlc3QuY29tIiwidHlwZSI6InJlZnJlc2giLCJpYXQiOjE3NzM1Njc1MjYsImV4cCI6MTc3NjE1OTUyNn0.Rsu2TihdrmunEscNRzeKGcdNJ5ONlIUhCItf9JuOT1g",
+      "userId": "4edca601-053f-48b3-b276-7871772bd720",
+      "createdAt": 1773567526957
+    },
+    {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI0ZWRjYTYwMS0wNTNmLTQ4YjMtYjI3Ni03ODcxNzcyYmQ3MjAiLCJlbWFpbCI6InNtb2tldGVzdF9tYXJjaDE1QHRlc3QuY29tIiwidHlwZSI6InJlZnJlc2giLCJpYXQiOjE3NzM1Njc1MjcsImV4cCI6MTc3NjE1OTUyN30.52KBfyaj7BxJQStUIV-R8yzURgL6gj7veCXKEPVgJMM",
+      "userId": "4edca601-053f-48b3-b276-7871772bd720",
+      "createdAt": 1773567527275
+    },
+    {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJhYjk1NmRlNC1hZGM3LTQ1ZTUtYjlhZS1hZTAxZWQ1OGQ4NDkiLCJlbWFpbCI6InNtb2tldGVzdDJfbWFyY2gxNUB0ZXN0LmNvbSIsInR5cGUiOiJyZWZyZXNoIiwiaWF0IjoxNzczNTY3NTM3LCJleHAiOjE3NzYxNTk1Mzd9.b1DYkkNBB1mpCwpPq8eXNrSJNwYii9sZCTvpuIRygN8",
+      "userId": "ab956de4-adc7-45e5-b9ae-ae01ed58d849",
+      "createdAt": 1773567537027
+    },
+    {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJhYjk1NmRlNC1hZGM3LTQ1ZTUtYjlhZS1hZTAxZWQ1OGQ4NDkiLCJlbWFpbCI6InNtb2tldGVzdDJfbWFyY2gxNUB0ZXN0LmNvbSIsInR5cGUiOiJyZWZyZXNoIiwiaWF0IjoxNzczNTY3NTUwLCJleHAiOjE3NzYxNTk1NTB9.qZzdmS381F9SjhZUaplxIoRhRrr9PXpKGlNlUCT8p_Q",
+      "userId": "ab956de4-adc7-45e5-b9ae-ae01ed58d849",
+      "createdAt": 1773567550091
+    },
+    {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJhYjk1NmRlNC1hZGM3LTQ1ZTUtYjlhZS1hZTAxZWQ1OGQ4NDkiLCJlbWFpbCI6InNtb2tldGVzdDJfbWFyY2gxNUB0ZXN0LmNvbSIsInR5cGUiOiJyZWZyZXNoIiwiaWF0IjoxNzczNTY3NjU2LCJleHAiOjE3NzYxNTk2NTZ9.UBYpKjt2oGhCQg6hOqCl2msPPqzuNCBe4uArPJTxphk",
+      "userId": "ab956de4-adc7-45e5-b9ae-ae01ed58d849",
+      "createdAt": 1773567656804
+    },
+    {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJhYjk1NmRlNC1hZGM3LTQ1ZTUtYjlhZS1hZTAxZWQ1OGQ4NDkiLCJlbWFpbCI6InNtb2tldGVzdDJfbWFyY2gxNUB0ZXN0LmNvbSIsInR5cGUiOiJyZWZyZXNoIiwiaWF0IjoxNzczNTY3NjY4LCJleHAiOjE3NzYxNTk2Njh9.1404cuCMyGlHII5wHxYheDzKU1Mo6lC-wAuoaWflgrs",
+      "userId": "ab956de4-adc7-45e5-b9ae-ae01ed58d849",
+      "createdAt": 1773567668375
+    },
+    {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJhYjk1NmRlNC1hZGM3LTQ1ZTUtYjlhZS1hZTAxZWQ1OGQ4NDkiLCJlbWFpbCI6InNtb2tldGVzdDJfbWFyY2gxNUB0ZXN0LmNvbSIsInR5cGUiOiJyZWZyZXNoIiwiaWF0IjoxNzczNTY4NTg4LCJleHAiOjE3NzYxNjA1ODh9.-tonlfjh7K5mICn0ptwNc_MoNyZVXEKaLOi-jRL9Iko",
+      "userId": "ab956de4-adc7-45e5-b9ae-ae01ed58d849",
+      "createdAt": 1773568588559
+    },
+    {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIwZjViZDIyMC1kZTYxLTQzNDctYTEzYS1hMTRhYTBjNjcwNTMiLCJlbWFpbCI6ImZ1bGx0ZXN0X21hcjE2QHRlc3QuY29tIiwidHlwZSI6InJlZnJlc2giLCJpYXQiOjE3NzM3MDI1NjYsImV4cCI6MTc3NjI5NDU2Nn0.xuZyCUA5hG41xdQQZ797ktoHZ-pa6c5vDt6ldMxD7Xo",
+      "userId": "0f5bd220-de61-4347-a13a-a14aa0c67053",
+      "createdAt": 1773702566088
+    },
+    {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI3MTdiZWVkMi1hMTBlLTQ2YWEtODBkOS1kZTczMzZhOTQ2YjUiLCJlbWFpbCI6ImZ1bGx0ZXN0X21hcjE2YkB0ZXN0LmNvbSIsInR5cGUiOiJyZWZyZXNoIiwiaWF0IjoxNzczNzAyOTE2LCJleHAiOjE3NzYyOTQ5MTZ9.2rwlieqdXXBJInklcZvpKiB8Ceh6MzvPV50wF7y4DAI",
+      "userId": "717beed2-a10e-46aa-80d9-de7336a946b5",
+      "createdAt": 1773702916245
+    },
+    {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJiZjI3MmMwMS04NTllLTRmNjAtODk2YS04ODU5YzgxMGU0MmEiLCJlbWFpbCI6InQxQHQuY29tIiwidHlwZSI6InJlZnJlc2giLCJpYXQiOjE3NzM3MDM0MTgsImV4cCI6MTc3NjI5NTQxOH0.GnetkmGU0aA3osywPpNnMC3Cm2Ac5SX6B1-SgVALN4k",
+      "userId": "bf272c01-859e-4f60-896a-8859c810e42a",
+      "createdAt": 1773703418897
+    },
+    {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJiZjI3MmMwMS04NTllLTRmNjAtODk2YS04ODU5YzgxMGU0MmEiLCJlbWFpbCI6InQxQHQuY29tIiwidHlwZSI6InJlZnJlc2giLCJpYXQiOjE3NzM3MDM2NDEsImV4cCI6MTc3NjI5NTY0MX0.67Yn-8NaxZQDgDqODPPDQj4rX7BWd0jNm4nM3rt4POk",
+      "userId": "bf272c01-859e-4f60-896a-8859c810e42a",
+      "createdAt": 1773703641766
+    },
+    {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJiZjI3MmMwMS04NTllLTRmNjAtODk2YS04ODU5YzgxMGU0MmEiLCJlbWFpbCI6InQxQHQuY29tIiwidHlwZSI6InJlZnJlc2giLCJpYXQiOjE3NzM3MDM4MDUsImV4cCI6MTc3NjI5NTgwNX0.1krPNSLSUnSndUWaYn4D1vjvE6KG423iARJjSsNbeKE",
+      "userId": "bf272c01-859e-4f60-896a-8859c810e42a",
+      "createdAt": 1773703805497
+    },
+    {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIyZDU5NmUxNC1mYWIzLTQwZjUtYjJiOS1mYzI5OTMxNTA4MjYiLCJlbWFpbCI6ImFwaXRlc3RAdGVzdC5jb20iLCJ0eXBlIjoicmVmcmVzaCIsImlhdCI6MTc3Mzg4MzgxNCwiZXhwIjoxNzc2NDc1ODE0fQ.6TSxjxtVkUWlgNqlkAT0prjmtfIwHBng99RAa8-N2tY",
+      "userId": "2d596e14-fab3-40f5-b2b9-fc2993150826",
+      "createdAt": 1773883814611
+    },
+    {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJhYTEzZDgwOC1jYzczLTRkMDItYmQyZS0wNjY5NjdmZjM2YzMiLCJlbWFpbCI6ImRlcG9zaXR0ZXN0MkB0ZXN0LmNvbSIsInR5cGUiOiJyZWZyZXNoIiwiaWF0IjoxNzczODg0MDI3LCJleHAiOjE3NzY0NzYwMjd9.Xqu0Zou0k3MxPyVEiAGDv_bGqs0gSYPCQN4jELAP8qs",
+      "userId": "aa13d808-cc73-4d02-bd2e-066967ff36c3",
+      "createdAt": 1773884027340
+    }
+  ],
+  "paymentRequests": [
+    {
+      "id": "b0df1406-393e-4a05-9ac6-e7fb96725672",
+      "requesterId": "0f5bd220-de61-4347-a13a-a14aa0c67053",
+      "walletId": "dbde5103-da96-4422-9057-8fe92c428b15",
+      "amount": 2500,
+      "currency": "XAF",
+      "memo": "Grocery Payment",
+      "status": "pending",
+      "type": "qr_dynamic",
+      "createdAt": 1773702572595,
+      "expiry": 1773704372423,
+      "nonce": "98f63382a77251dff223488c331cc2b2",
+      "paidAt": null,
+      "paidBy": null,
+      "transactionId": null
+    },
+    {
+      "id": "e99437ee-09c0-4eef-86f5-1f726d68e07a",
+      "requesterId": "717beed2-a10e-46aa-80d9-de7336a946b5",
+      "walletId": "a43026a4-8b5a-4794-9d6f-21249ca2d3da",
+      "amount": 2500,
+      "currency": "XAF",
+      "memo": "Grocery Payment",
+      "status": "pending",
+      "type": "qr_dynamic",
+      "createdAt": 1773702919141,
+      "expiry": 1773704719141,
+      "nonce": "2ec97b549fac7321f9398eb667f7a0e7",
+      "paidAt": null,
+      "paidBy": null,
+      "transactionId": null
+    },
+    {
+      "id": "74dd8917-7209-4cdd-b0a6-dcb32173fa92",
+      "requesterId": "717beed2-a10e-46aa-80d9-de7336a946b5",
+      "walletId": "a43026a4-8b5a-4794-9d6f-21249ca2d3da",
+      "amount": 1500,
+      "currency": "XAF",
+      "memo": "Bar / Restaurant",
+      "status": "pending",
+      "type": "qr_dynamic",
+      "createdAt": 1773702919828,
+      "expiry": 1773704719828,
+      "nonce": "d490f92ea2f2a4dce86c83f8ca916469",
+      "paidAt": null,
+      "paidBy": null,
+      "transactionId": null
+    },
+    {
+      "id": "685425e6-0fde-4ebf-8296-aa16938f1cd3",
+      "requesterId": "717beed2-a10e-46aa-80d9-de7336a946b5",
+      "walletId": "a43026a4-8b5a-4794-9d6f-21249ca2d3da",
+      "amount": 3000,
+      "currency": "XAF",
+      "memo": "Market Payment",
+      "status": "pending",
+      "type": "qr_dynamic",
+      "createdAt": 1773702920032,
+      "expiry": 1773704720032,
+      "nonce": "d9051e920509c5a3ce52df434002c50d",
+      "paidAt": null,
+      "paidBy": null,
+      "transactionId": null
+    },
+    {
+      "id": "8f61cff4-41af-48a6-ac11-32c267fdc079",
+      "requesterId": "bf272c01-859e-4f60-896a-8859c810e42a",
+      "walletId": "4890fe9d-f518-452f-b1b6-4bdf214faf86",
+      "targetWalletId": null,
+      "targetEmployerId": null,
+      "amount": 5000,
+      "currency": "USD",
+      "memo": "Rent",
+      "status": "pending",
+      "type": "personal_request",
+      "createdAt": 1773703643556,
+      "paidAt": null,
+      "paidBy": null,
+      "transactionId": null
+    },
+    {
+      "id": "7c01b4f8-02c4-49e4-87e6-82fbdd369153",
+      "requesterId": "bf272c01-859e-4f60-896a-8859c810e42a",
+      "walletId": "4890fe9d-f518-452f-b1b6-4bdf214faf86",
+      "amount": 2500,
+      "currency": "XAF",
+      "memo": "Grocery Payment",
+      "status": "pending",
+      "type": "qr_dynamic",
+      "createdAt": 1773703645342,
+      "expiry": 1773705445342,
+      "nonce": "046a065d8326c4308fc385dea4f2ccf3",
+      "paidAt": null,
+      "paidBy": null,
+      "transactionId": null
+    },
+    {
+      "id": "11af5866-64e6-4f3b-9700-dc15bd769e1a",
+      "requesterId": "bf272c01-859e-4f60-896a-8859c810e42a",
+      "walletId": "4890fe9d-f518-452f-b1b6-4bdf214faf86",
+      "amount": 1500,
+      "currency": "XAF",
+      "memo": "Bar / Restaurant",
+      "status": "pending",
+      "type": "qr_dynamic",
+      "createdAt": 1773703645897,
+      "expiry": 1773705445897,
+      "nonce": "a90d83004d60343c79b3c22c467ab3c6",
+      "paidAt": null,
+      "paidBy": null,
+      "transactionId": null
+    },
+    {
+      "id": "218eb5e4-b272-4215-b0f6-42c8ef0950b6",
+      "requesterId": "bf272c01-859e-4f60-896a-8859c810e42a",
+      "walletId": "4890fe9d-f518-452f-b1b6-4bdf214faf86",
+      "amount": 3000,
+      "currency": "XAF",
+      "memo": "Market Payment",
+      "status": "pending",
+      "type": "qr_dynamic",
+      "createdAt": 1773703646618,
+      "expiry": 1773705446618,
+      "nonce": "039c21f79f2355450b5a21571b489b8d",
+      "paidAt": null,
+      "paidBy": null,
+      "transactionId": null
+    }
+  ],
+  "virtualCards": [],
+  "budgets": [],
+  "supportTickets": [],
+  "fraudAlerts": [],
+  "demoIntents": [
+    {
+      "id": "demo_intent_55c464d7-d5c5-4890-88dc-76a4c64bc1b4",
+      "userId": "2d596e14-fab3-40f5-b2b9-fc2993150826",
+      "walletId": "0c6ff982-fed5-4ae7-9718-bc2f41d15fa4",
+      "amount": 10000,
+      "currency": "XAF",
+      "status": "used",
+      "createdAt": 1773883827188
+    },
+    {
+      "id": "demo_intent_13cf3152-4ad4-4af4-9d6c-db38ab02ae9e",
+      "userId": "aa13d808-cc73-4d02-bd2e-066967ff36c3",
+      "walletId": "b93e041f-4d6d-4ebf-8627-3688f7373363",
+      "amount": 10000,
+      "currency": "XAF",
+      "status": "used",
+      "createdAt": 1773884027674
+    }
+  ]
 }
