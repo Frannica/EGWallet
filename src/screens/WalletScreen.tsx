@@ -195,7 +195,7 @@ export default function WalletScreen() {
             </Text>
           )}
           {rates && (
-            <Text style={styles.balanceEquiv}>≈ ${calculateTotalBalance().toFixed(2)} USD</Text>
+            <Text style={styles.balanceEquiv}>≈ {formatCurrency(calculateTotalBalance(), 'USD')}</Text>
           )}
           <TouchableOpacity
             onPress={() => setShowCurrencyPicker(!showCurrencyPicker)}
@@ -389,7 +389,7 @@ export default function WalletScreen() {
               <View style={[styles.detailRow, { borderBottomWidth: 0 }]}>
                 <Text style={styles.detailLabel}>Capacity</Text>
                 <Text style={styles.detailValue}>
-                  ${(rates && wallets[0] ? totalUsdValue(wallets[0]) : 0).toFixed(0)} / ${(wallets[0]?.maxLimitUSD || 250000).toLocaleString()}
+                  ${(rates && wallets[0] ? Math.round(totalUsdValue(wallets[0]) / 100) : 0).toLocaleString()} / ${(wallets[0]?.maxLimitUSD || 250000).toLocaleString()}
                 </Text>
               </View>
             </View>
