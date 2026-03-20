@@ -1,0 +1,30 @@
+# EAS Build ignore file — reduces upload size
+# Documentation and markdown
+*.md
+*.txt
+!README.md
+
+# Git history (large, not needed for builds)
+.git/
+
+# Backend (separate service, not part of the app)
+backend/
+
+# Test files
+**/__tests__/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+jest.config.cjs
+
+# Keystore backup (sensitive, not needed on EAS)
+keystore-backup/
+
+# EAS build artifacts
+*.apk
+*.aab
+*.ipa
+
+# Logs
+backend/logs/
