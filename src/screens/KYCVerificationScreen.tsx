@@ -174,7 +174,7 @@ export default function KYCVerificationScreen() {
         <View style={styles.errorCard}>
           <Ionicons name="close-circle" size={32} color="#FF3B30" />
           <View style={styles.errorContent}>
-            <Text style={styles.errorTitle}>Verification Failed</Text>
+            <Text style={styles.errorTitle}>Verification Declined</Text>
             <Text style={styles.errorText}>
               We couldn't verify your documents. Please upload clearer photos and ensure all information is visible.
             </Text>

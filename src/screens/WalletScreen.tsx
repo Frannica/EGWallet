@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, RefreshControl, A
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../auth/AuthContext';
 import { listWallets } from '../api/auth';
-import { fetchRates, Rates } from '../api/client';
+import { fetchRates, Rates, DEMO_RATES } from '../api/client';
 import { formatCurrency, convert } from '../utils/currency';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
@@ -46,7 +46,8 @@ export default function WalletScreen() {
       const r = await fetchRates();
       setRates(r);
     } catch (e) {
-      if (__DEV__) console.warn('Failed to load rates', e);
+      if (__DEV__) console.warn('Failed to load rates — using demo rates', e);
+      setRates(DEMO_RATES); // Always show balance even offline
     }
   }
 

@@ -24,7 +24,7 @@ export default function AuthScreen() {
       }
     } catch (e: any) {
       Alert.alert(
-        isSignUp ? 'Sign Up Failed' : 'Sign In Failed',
+        isSignUp ? 'Sign Up Error' : 'Sign In Error',
         e.message || 'Please check your credentials and try again'
       );
     } finally {

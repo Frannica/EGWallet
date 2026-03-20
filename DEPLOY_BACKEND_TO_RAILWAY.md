@@ -31,9 +31,27 @@ git push
 
 In **Variables** tab, ensure you have:
 ```
-JWT_SECRET=your_secure_random_string_here
 NODE_ENV=production
+JWT_SECRET=<run: openssl rand -base64 32>
+JWT_REFRESH_SECRET=<run: openssl rand -base64 32>
+
+# Firebase Admin SDK — paste the ENTIRE contents of service-account-key.json as one value
+FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"xenon-monitor-466901-f0",...}
+
+# Stripe (optional — leave blank for demo mode)
+STRIPE_SECRET_KEY=sk_live_...
+
+# CORS — add your Railway domain after deploy
+ALLOWED_ORIGINS=https://your-app.up.railway.app,https://your-frontend.com
 ```
+
+> **How to set FIREBASE_SERVICE_ACCOUNT_JSON on Railway:**
+> 1. Open `service-account-key.json` in a text editor
+> 2. Copy the entire file contents (it's a single JSON object)
+> 3. In Railway → Variables → New Variable
+> 4. Name: `FIREBASE_SERVICE_ACCOUNT_JSON`
+> 5. Value: paste the JSON (Railway stores it securely as a single-line string)
+> 6. Save — Railway will redeploy automatically
 
 ### Step 4: Redeploy
 

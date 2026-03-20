@@ -1,0 +1,29 @@
+✅ Firebase Admin SDK initialised (project: undefined)
+[FOLLOW-UP SYSTEM] Automated follow-up checker started (runs every 60 min)
+[32minfo[39m: EGWallet backend started {"environment":"development","freshdeskConfigured":false,"jwtConfigured":true,"port":"4000","service":"egwallet-backend","timestamp":"2026-03-19 01:48:08"}
+
+============================================================
+🚀 EGWallet Backend - World-Class Payroll API
+============================================================
+📍 Server: http://localhost:4000
+🌍 Environment: development
+🔐 JWT: ✅ Configured
+🎫 Freshdesk: ⚠️  Local only
+🛡️  Security: Helmet ✅ | Rate Limit ✅
+📊 Logging: Winston ✅ | Audit Logs ✅
+🔍 GDPR: ✅ Enabled
+💼 Payroll: ✅ Enabled | KYC Tiers: 0-3
+============================================================
+
+📝 Endpoints:
+   Health: GET /health, /healthz
+   Auth: POST /auth/register, /auth/login
+   AI: POST /ai/chat (rate limit: 50/min)
+   GDPR: GET /gdpr/export, DELETE /gdpr/delete-account
+   Admin: GET /admin/health/detailed, /admin/audit-logs
+   Employer: POST /employer/register, /employer/add-employee, /employer/upload-payroll
+   Payroll: POST /employer/bulk-payment, GET /payroll/received
+   QR Codes: GET /qr/static, POST /qr/dynamic, POST /qr/validate, POST /qr/pay
+   Fraud: POST /payroll/report-fraud, POST /employer/report
+============================================================
+

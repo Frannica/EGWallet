@@ -1,0 +1,1 @@
+[Stripe] STRIPE_SECRET_KEY not set — deposit endpoints will run in test/demo mode

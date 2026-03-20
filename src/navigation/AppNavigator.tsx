@@ -149,12 +149,12 @@ export default function AppNavigator() {
   } catch (error) {
     console.error('AppNavigator render error:', error);
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#d32f2f', marginBottom: 12 }}>
-          ⚠️ Navigation Error
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20, backgroundColor: '#F5F9FF' }}>
+        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1565C0', marginBottom: 12 }}>
+          EGWallet
         </Text>
         <Text style={{ fontSize: 14, color: '#666', textAlign: 'center' }}>
-          Failed to initialize navigation. Please restart the app.
+          Starting up... please wait a moment.
         </Text>
       </View>
     );
