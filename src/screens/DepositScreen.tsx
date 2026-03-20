@@ -23,6 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { API_BASE } from '../api/client';
+import { majorToMinor, formatCurrency } from '../utils/currency';
 
 // ---------------------------------------------------------------------------
 // Stripe PaymentSheet — guarded import so the app still compiles without the
@@ -192,10 +193,12 @@ export default function DepositScreen() {
   async function handleDeposit() {
     console.log('[Deposit] button pressed — amount:', parsedAmount(), currency);
     const numAmount = parsedAmount();
-    if (numAmount < 100) {
-      Alert.alert('Too Small', 'Minimum deposit is 100 in the selected currency.');
+    if (numAmount < 1) {
+      Alert.alert('Too Small', 'Please enter a valid deposit amount.');
       return;
     }
+    // Convert major units (what user types) → minor units (what backend/wallet stores)
+    const amountMinor = majorToMinor(numAmount, currency);
     // Use 'demo' as wallet ID if none found — backend will handle or local fallback will kick in
     const effectiveWalletId = walletId || 'demo';
 
@@ -205,7 +208,7 @@ export default function DepositScreen() {
       const res = await fetch(`${API_BASE}/deposits/create-intent`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ amount: numAmount, currency, walletId: effectiveWalletId }),
+        body: JSON.stringify({ amount: amountMinor, currency, walletId: effectiveWalletId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || data.message || 'Create intent failed');
@@ -259,7 +262,7 @@ export default function DepositScreen() {
     setTimeout(() => setDepositSuccess(false), 1500);
     Alert.alert(
       'Deposit Successful ✅',
-      `${parsedAmount().toLocaleString()} ${currency} has been added to your wallet.\n\nNew balance: ${data.newBalance?.toLocaleString()} ${data.currency}`,
+      `${formatCurrency(majorToMinor(parsedAmount(), currency), currency)} has been added to your wallet.\n\nNew balance: ${formatCurrency(data.newBalance, data.currency)}`,
       [{ text: 'Done', onPress: () => (navigation as any).goBack() }]
     );
     setStripeIntent(null);
