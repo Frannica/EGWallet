@@ -117,20 +117,7 @@ export default function CardScreen() {
               toast.show('Virtual card created ✅');
               loadCards();
             } catch (error: any) {
-              const now = new Date();
-              const mockCard: VirtualCard = {
-                id: `demo-${Date.now()}`,
-                cardNumber: `4242424242${String(Math.floor(Math.random() * 9000) + 1000)}`,
-                cvv: String(Math.floor(Math.random() * 900) + 100),
-                expiryMonth: String(now.getMonth() + 1).padStart(2, '0'),
-                expiryYear: String(now.getFullYear() + 3),
-                currency: 'USD',
-                label: 'My Virtual Card',
-                status: 'active',
-              };
-              setCards(prev => [...prev, mockCard]);
-              console.log('[Card] Created demo card:', mockCard.id);
-              toast.show('Virtual card created ✅');
+              Alert.alert('Card Creation Failed', error?.message || 'Could not create virtual card. Please try again.');
             } finally {
               setLoading(false);
               setIsCreating(false);

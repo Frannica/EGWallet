@@ -101,15 +101,14 @@ export default function QRPaymentScreen() {
       );
 
       if (error) {
-        // API unavailable — fall through to demo success
-        setTransactionId(`DEMO-${Date.now().toString(36).toUpperCase()}`);
-        setPaymentState('success');
+        setErrorMessage(typeof error === 'string' ? error : 'Payment service unavailable. Please try again later.');
+        setPaymentState('error');
         return;
       }
 
       if (!data || !data.success) {
-        setTransactionId(`DEMO-${Date.now().toString(36).toUpperCase()}`);
-        setPaymentState('success');
+        setErrorMessage('Payment could not be processed. Please contact support.');
+        setPaymentState('error');
         return;
       }
 
@@ -117,9 +116,8 @@ export default function QRPaymentScreen() {
       setTransactionId(data.transaction.id);
       setPaymentState('success');
     } catch (error: any) {
-      // Demo mode: always simulate success regardless of error type
-      setTransactionId(`DEMO-${Date.now().toString(36).toUpperCase()}`);
-      setPaymentState('success');
+      setErrorMessage(error?.message || 'An unexpected error occurred.');
+      setPaymentState('error');
     }
   }
 

@@ -240,13 +240,7 @@ export default function SendScreen() {
       setAccountName('');
       setShowConfirmation(false);
     } catch (e: any) {
-      // Demo mode: simulate success so testers aren't blocked
-      Alert.alert('Request Submitted', 'Your withdrawal has been queued. Funds will arrive within 1-3 business days.');
-      setAmount('');
-      setBankName('');
-      setAccountNumber('');
-      setAccountName('');
-      setShowConfirmation(false);
+      Alert.alert('Withdrawal Failed', e?.message || 'Could not process withdrawal. Please try again.');
     } finally {
       setLoading(false);
     }
