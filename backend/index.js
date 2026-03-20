@@ -24,10 +24,7 @@ if (!stripeClient) {
 
 // ==================== FIREBASE ADMIN SDK ====================
 // Initialise once; all modules import { firebaseAdmin, firebaseAuth, firestore } from here.
-// Priority order for credentials:
-//   1. FIREBASE_SERVICE_ACCOUNT_JSON env var  (Railway / production — paste the whole JSON)
-//   2. GOOGLE_APPLICATION_CREDENTIALS env var (standard GCP path)
-//   3. ../service-account-key.json next to the project root (local dev)
+// Credentials are loaded ONLY from the GOOGLE_SERVICE_ACCOUNT env var (full JSON string)
 
 let firebaseAdmin = null;
 let firebaseAuth  = null;
@@ -37,32 +34,16 @@ let firebaseProjectId = null;
 (function initFirebase() {
   try {
     const admin = require('firebase-admin');
-
-    let credential;
-
-    let sa;
-    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-      // Production: full JSON passed as a single env var string
-      sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-    } else {
-      // Local dev: resolve path relative to this file's directory
-      const saPath =
-        process.env.GOOGLE_APPLICATION_CREDENTIALS ||
-        path.resolve(__dirname, '..', 'service-account-key.json');
-
-      if (!fs.existsSync(saPath)) {
-        console.warn(`[Firebase] service-account-key.json not found at ${saPath}. Firebase disabled.`);
-        return;
-      }
-      sa = JSON.parse(fs.readFileSync(saPath, 'utf8'));
+    if (!process.env.GOOGLE_SERVICE_ACCOUNT) {
+      throw new Error('GOOGLE_SERVICE_ACCOUNT env var is not set. Firebase will be disabled.');
     }
-    credential = admin.credential.cert(sa);
-    firebaseProjectId = sa.project_id || null;
+    const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
+    const credential = admin.credential.cert(serviceAccount);
+    firebaseProjectId = serviceAccount.project_id || null;
 
     if (!admin.apps.length) {
       admin.initializeApp({
         credential,
-        // Realtime Database is optional — supply FIREBASE_DATABASE_URL to enable it
         ...(process.env.FIREBASE_DATABASE_URL && { databaseURL: process.env.FIREBASE_DATABASE_URL }),
       });
     }
@@ -74,8 +55,7 @@ let firebaseProjectId = null;
     console.log(`✅ Firebase Admin SDK initialised (project: ${firebaseProjectId})`);
   } catch (err) {
     console.warn('[Firebase] Initialisation failed:', err.message);
-    console.warn('[Firebase] The backend will continue without Firebase. ' +
-      'Set FIREBASE_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS to enable it.');
+    console.warn('[Firebase] The backend will continue without Firebase. Set GOOGLE_SERVICE_ACCOUNT to enable it.');
   }
 })();
 
@@ -106,9 +86,9 @@ if (NODE_ENV === 'production') {
   if (!FRESHDESK_DOMAIN || !FRESHDESK_API_KEY) {
     console.warn('⚠️  WARNING: Freshdesk not configured. Tickets will be stored locally only.');
   }
-  if (!process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-    console.warn('⚠️  WARNING: FIREBASE_SERVICE_ACCOUNT_JSON is not set. Firebase Auth and Firestore will be unavailable.');
-    console.warn('   Set this variable on Railway: paste the entire contents of service-account-key.json as its value.');
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT) {
+    console.warn('⚠️  WARNING: GOOGLE_SERVICE_ACCOUNT is not set. Firebase Auth and Firestore will be unavailable.');
+    console.warn('   Set this variable on Railway: paste the entire contents of your service account key JSON as its value.');
   }
 }
 
