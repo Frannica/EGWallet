@@ -3,7 +3,7 @@
 
 import Constants from 'expo-constants';
 
-const PRODUCTION_API_URL = 'https://eg-wallet-backend-production.up.railway.app';
+const PRODUCTION_API_URL = 'https://egwalletsimple-production.up.railway.app';
 const BACKEND_PORT = 4000;
 
 /**
