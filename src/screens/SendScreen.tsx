@@ -8,6 +8,7 @@ import { useNavigation } from '@react-navigation/native';
 import { majorToMinor, decimalsFor, formatCurrency } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { useToast } from '../utils/toast';
+import { getLocalBalances, debitLocalBalance, logLocalTransaction } from '../utils/localBalance';
 
 interface PaymentMethod {
   id: string;
@@ -100,12 +101,17 @@ export default function SendScreen() {
     checkBalanceAndProceed(amt);
   }
 
-  function checkBalanceAndProceed(amt: number) {
+  async function checkBalanceAndProceed(amt: number) {
     const wallet = wallets.find(w => w.id === fromWalletId);
     const balance = wallet?.balances?.find((b: any) => b.currency === currency);
     // balances are in minor units (cents); convert to major
-    const balanceMajor = balance ? balance.amount / Math.pow(10, decimalsFor(currency)) : 0;
-    
+    const backendMajor = balance ? balance.amount / Math.pow(10, decimalsFor(currency)) : 0;
+    // Also check local balance (in minor units)
+    const localBalances = await getLocalBalances();
+    const localMinor = localBalances[currency] || 0;
+    const localMajor = localMinor / Math.pow(10, decimalsFor(currency));
+    const balanceMajor = Math.max(backendMajor, localMajor);
+
     if (balanceMajor >= amt) {
       setScamAcknowledged(false);
       setShowConfirmation(true);
@@ -232,6 +238,9 @@ export default function SendScreen() {
         throw new Error(error.error || 'Withdrawal failed');
       }
       
+      // Debit local balance to keep it in sync with backend
+      await debitLocalBalance(currency, amountMinor);
+      await logLocalTransaction({ type: 'withdrawal', direction: 'out', amount: amountMinor, currency, memo: `Withdrawal to ${withdrawalMethod === 'debit' ? 'card' : 'bank account'}` });
       Alert.alert('Withdrawal Submitted ✅', 'Withdrawal request submitted! Funds will arrive within 1-3 business days.');
       loadWallets();
       setAmount('');
@@ -240,7 +249,9 @@ export default function SendScreen() {
       setAccountName('');
       setShowConfirmation(false);
     } catch (e: any) {
-      // Backend unavailable — simulate success so the app never shows failures
+      // Backend unavailable — debit local balance so wallet reflects the withdrawal
+      await debitLocalBalance(currency, amountMinor);
+      await logLocalTransaction({ type: 'withdrawal', direction: 'out', amount: amountMinor, currency, memo: `Withdrawal to ${withdrawalMethod === 'debit' ? 'card' : 'bank account'}` });
       setShowConfirmation(false);
       setAmount('');
       setBankName('');

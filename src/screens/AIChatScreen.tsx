@@ -123,7 +123,7 @@ export default function AIChatScreen() {
 
       // Call AI backend with 2-second timeout — demo mode fires instantly on any failure
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2500);
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
 
       let response: Response | null = null;
       try {

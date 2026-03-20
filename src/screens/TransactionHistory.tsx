@@ -7,6 +7,7 @@ import { fetchTransactions } from '../api/transactions';
 import { Ionicons } from '@expo/vector-icons';
 import { generateAndShareReceipt } from '../utils/receiptGenerator';
 import { TransactionCardSkeleton } from '../components/SkeletonLoader';
+import { getLocalTransactions } from '../utils/localBalance';
 
 type Params = { params: { walletId: string } };
 
@@ -63,12 +64,21 @@ export default function TransactionHistory() {
     setLoading(true);
     try {
       if (!walletId) throw new Error('no_wallet');
-      const res = await fetchTransactions(auth.token || '', walletId);
-      const loaded = res.transactions || [];
-      setTxs(loaded.length > 0 ? loaded : DEMO_TXS);
+      const [res, localTxs] = await Promise.all([
+        fetchTransactions(auth.token || '', walletId),
+        getLocalTransactions(),
+      ]);
+      const backendTxs: any[] = res.transactions || [];
+      // Merge: local txs first so newest deposits/withdrawals appear at top,
+      // deduplicate by id so re-deployed backend entries aren't doubled.
+      const backendIds = new Set(backendTxs.map((t: any) => t.id));
+      const uniqueLocal = localTxs.filter(t => !backendIds.has(t.id));
+      const combined = [...uniqueLocal, ...backendTxs];
+      setTxs(combined.length > 0 ? combined : DEMO_TXS);
     } catch (e) {
-      if (__DEV__) console.warn('Fetch tx failed — using demo data', e);
-      setTxs(DEMO_TXS);
+      if (__DEV__) console.warn('Fetch tx failed — using local+demo data', e);
+      const localTxs = await getLocalTransactions();
+      setTxs(localTxs.length > 0 ? localTxs : DEMO_TXS);
     } finally {
       setLoading(false);
     }

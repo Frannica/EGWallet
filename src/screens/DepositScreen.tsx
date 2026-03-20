@@ -24,6 +24,7 @@ import { useAuth } from '../auth/AuthContext';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { API_BASE } from '../api/client';
 import { majorToMinor, formatCurrency } from '../utils/currency';
+import { creditLocalBalance, logLocalTransaction } from '../utils/localBalance';
 
 // ---------------------------------------------------------------------------
 // Stripe PaymentSheet — guarded import so the app still compiles without the
@@ -237,13 +238,15 @@ export default function DepositScreen() {
         await auth.handleTokenExpired();
         Alert.alert('Session Expired', 'Your session has expired. Please sign in again.');
       } else {
-        // Backend unavailable — simulate demo deposit success
+        // Backend unavailable — credit locally so balance updates immediately
         const amountMinor = majorToMinor(parsedAmount(), currency);
+        await creditLocalBalance(currency, amountMinor);
+        await logLocalTransaction({ type: 'deposit', direction: 'in', amount: amountMinor, currency, memo: 'Card deposit' });
         setDepositSuccess(true);
         setTimeout(() => setDepositSuccess(false), 1500);
         Alert.alert(
-          'Deposit Received ✅',
-          `${formatCurrency(amountMinor, currency)} will be credited to your wallet shortly.`,
+          'Deposit Successful ✅',
+          `${formatCurrency(amountMinor, currency)} has been added to your wallet.`,
           [{ text: 'Done', onPress: () => (navigation as any).goBack() }]
         );
       }
@@ -262,11 +265,15 @@ export default function DepositScreen() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Confirm failed');
 
+    // Keep local balance in sync with backend
+    const amountMinor = majorToMinor(parsedAmount(), currency);
+    await creditLocalBalance(currency, amountMinor);
+    await logLocalTransaction({ type: 'deposit', direction: 'in', amount: amountMinor, currency, memo: 'Card deposit' });
     setDepositSuccess(true);
     setTimeout(() => setDepositSuccess(false), 1500);
     Alert.alert(
       'Deposit Successful ✅',
-      `${formatCurrency(majorToMinor(parsedAmount(), currency), currency)} has been added to your wallet.\n\nNew balance: ${formatCurrency(data.newBalance, data.currency)}`,
+      `${formatCurrency(amountMinor, currency)} has been added to your wallet.\n\nNew balance: ${formatCurrency(data.newBalance, data.currency)}`,
       [{ text: 'Done', onPress: () => (navigation as any).goBack() }]
     );
     setStripeIntent(null);

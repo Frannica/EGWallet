@@ -9,6 +9,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { Ionicons } from '@expo/vector-icons';
 import { useToast } from '../utils/toast';
+import { getLocalBalances, mergeWithLocalBalances } from '../utils/localBalance';
 
 type Balance = { currency: string; amount: number };
 
@@ -57,7 +58,9 @@ export default function WalletScreen() {
     setApiError(null);
     try {
       const res = await listWallets(auth.token);
-      setWallets(res.wallets || []);
+      const localBalances = await getLocalBalances();
+      const mergedWallets = mergeWithLocalBalances(res.wallets || [], localBalances);
+      setWallets(mergedWallets);
       setApiError(null);
 
       // Load most recent payroll transaction for banner
@@ -101,8 +104,13 @@ export default function WalletScreen() {
     } catch (e: any) {
       if (__DEV__) console.warn('Load wallets failed:', e?.message);
       setApiError(e?.message || 'Unable to reach the server.');
-      // Show demo wallet so the UI stays functional
-      setWallets(prev => prev.length === 0 ? [DEMO_WALLET] : prev);
+      // Show demo wallet with local balances so the UI stays functional
+      const localBalancesOnError = await getLocalBalances();
+      const localCurrencies = Object.entries(localBalancesOnError).filter(([, amt]) => amt > 0);
+      const fallbackBalances = localCurrencies.length > 0
+        ? localCurrencies.map(([cur, amt]) => ({ currency: cur, amount: amt }))
+        : [{ currency: 'XAF', amount: 0 }];
+      setWallets(prev => prev.length === 0 ? [{ ...DEMO_WALLET, balances: fallbackBalances }] : prev);
       // Demo insights
       setInsights(prev => prev ?? { spent: 15000, received: 50000, topCategory: 'Transfers', currency: 'XAF' });
     } finally {

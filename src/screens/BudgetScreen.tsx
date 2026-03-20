@@ -9,6 +9,9 @@ import { getCurrencySymbol } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { BudgetCardSkeleton } from '../components/SkeletonLoader';
 import { useToast } from '../utils/toast';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const BUDGETS_STORAGE_KEY = '@egwallet_budgets_v1';
 
 interface Budget {
   id: string;
@@ -70,10 +73,25 @@ export default function BudgetScreen() {
     try {
       setLoading(true);
       const data = await getBudgets(auth.token!);
-      setBudgets(data.budgets || []);
+      const apiList: Budget[] = data.budgets || [];
+      if (apiList.length > 0) {
+        // Backend returned real budgets — save and show them
+        setBudgets(apiList);
+        await AsyncStorage.setItem(BUDGETS_STORAGE_KEY, JSON.stringify(apiList));
+      } else {
+        // Backend is empty or old code — load from local storage
+        const raw = await AsyncStorage.getItem(BUDGETS_STORAGE_KEY);
+        setBudgets(raw ? JSON.parse(raw) : []);
+      }
     } catch (error: any) {
       if (__DEV__) console.log('Load budgets error (non-blocking):', error);
-      // Silently ignore — show empty state
+      // Load from local storage as fallback
+      try {
+        const raw = await AsyncStorage.getItem(BUDGETS_STORAGE_KEY);
+        setBudgets(raw ? JSON.parse(raw) : []);
+      } catch {
+        setBudgets([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -123,14 +141,16 @@ export default function BudgetScreen() {
               setShowCreateForm(false);
               loadBudgets();
             } catch (error: any) {
-              // Demo mode: add a local budget so UI stays functional
+              // Demo mode: add a local budget and persist it so it survives refresh
               const localBudget: Budget = {
                 id: `demo-${Date.now()}`,
                 walletId: wallets[0]?.id || 'demo',
                 currency,
                 monthlyLimit: amountMinor,
               };
-              setBudgets(prev => [...prev, localBudget]);
+              const updated = [...budgets, localBudget];
+              setBudgets(updated);
+              try { await AsyncStorage.setItem(BUDGETS_STORAGE_KEY, JSON.stringify(updated)); } catch {}
               console.log('[Budget] Created demo budget:', currency, amountMinor);
               toast.show('Budget saved ✅');
               setAmount('');
@@ -156,8 +176,10 @@ export default function BudgetScreen() {
             loadBudgets();
             setSelectedBudget(null);
           } catch (error: any) {
-            // Demo mode: remove locally
-            setBudgets(prev => prev.filter(b => b.id !== budgetId));
+            // Demo mode: remove locally and persist
+            const filtered = budgets.filter(b => b.id !== budgetId);
+            setBudgets(filtered);
+            try { await AsyncStorage.setItem(BUDGETS_STORAGE_KEY, JSON.stringify(filtered)); } catch {}
             setSelectedBudget(null);
           } finally {
             setLoading(false);
