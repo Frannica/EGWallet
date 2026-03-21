@@ -481,9 +481,35 @@ function getUserContext(userId, db) {
 
 // ==================== MULTI-LANGUAGE SUPPORT ====================
 
+/**
+ * Simple keyword/script-based language detector.
+ * Returns a language code if the message contains strong signals,
+ * or null if the language cannot be determined.
+ */
+function detectLanguageFromMessage(message) {
+  if (!message || message.length < 3) return null;
+  // Unambiguous non-Latin scripts
+  if (/[\u4e00-\u9fff]/.test(message)) return 'zh';
+  if (/[\u3040-\u30ff]/.test(message)) return 'ja';
+  if (/[\u0400-\u04ff]/.test(message)) return 'ru';
+  // Latin-script detection via characteristic chars + common words
+  const frenchScore = (message.match(/[çàâêèéûùœæ]/gi) || []).length
+    + (message.toLowerCase().match(/\b(je|vous|nous|bonjour|merci|comment|votre|pour|dans|avec|mais)\b/g) || []).length;
+  const spanishScore = (message.match(/[áéíóúñ¡¿]/g) || []).length
+    + (message.toLowerCase().match(/\b(hola|gracias|buenos|como|para|este|muy|también|dónde|cuándo|qué)\b/g) || []).length;
+  const portugueseScore = (message.match(/[ãõâêôçáéíóú]/gi) || []).length
+    + (message.toLowerCase().match(/\b(olá|obrigado|bom|dia|como|muito|também|onde|quando|você)\b/g) || []).length;
+  const germanScore = (message.match(/[äöüß]/gi) || []).length
+    + (message.toLowerCase().match(/\b(hallo|danke|bitte|ich|sie|wir|nicht|haben|oder|einen)\b/g) || []).length;
+  const scores = { fr: frenchScore, es: spanishScore, pt: portugueseScore, de: germanScore };
+  const best = Object.entries(scores).sort((a, b) => b[1] - a[1])[0];
+  return (best && best[1] >= 2) ? best[0] : null;
+}
+
 const translations = {
   en: {
-    greeting: "Hello! 👋 I'm your EGWallet AI assistant. I can help you with:\n\n• Transaction questions\n• Account information\n• Feature guides\n• Support tickets\n\nWhat can I help you with today?",
+    greeting: "Hello! 👋 My name is Felisa, your EGWallet assistant. I can help you with:\n\n• Transaction questions\n• Account information\n• Feature guides\n• Support tickets\n\nWhat can I help you with today?",
+    greeting_return: "Hi again! 👋 How can I help you today?",
     escalated_fraud: "I understand this is very important. I've created an URGENT priority ticket ({ticketId}) for our fraud security team.",
     escalated_security: "I understand this is urgent. I've created an URGENT priority ticket ({ticketId}) for our account security team.",
     escalated_legal: "I understand this is very important. I've created an URGENT priority ticket ({ticketId}) for our legal team.",
@@ -523,7 +549,8 @@ const translations = {
     multiple_suspicious: "⚠️ ALERT: Multiple suspicious transactions detected — possible account takeover."
   },
   es: {
-    greeting: "¡Hola! 👋 Soy tu asistente de IA de EGWallet. Puedo ayudarte con:\n\n• Preguntas sobre transacciones\n• Información de cuenta\n• Guías de funciones\n• Tickets de soporte\n\n¿En qué puedo ayudarte hoy?",
+    greeting: "¡Hola! 👋 Me llamo Felisa, tu asistente de EGWallet. Puedo ayudarte con:\n\n• Preguntas sobre transacciones\n• Información de cuenta\n• Guías de funciones\n• Tickets de soporte\n\n¿En qué puedo ayudarte hoy?",
+    greeting_return: "¡Hola de nuevo! 👋 ¿En qué puedo ayudarte hoy?",
     escalated_fraud: "Entiendo que esto es muy importante. He creado un ticket de prioridad URGENTE ({ticketId}) para nuestro equipo de seguridad contra fraudes.",
     escalated_security: "Entiendo que esto es urgente. He creado un ticket de prioridad URGENTE ({ticketId}) para nuestro equipo de seguridad de cuentas.",
     escalated_legal: "Entiendo que esto es muy importante. He creado un ticket de prioridad URGENTE ({ticketId}) para nuestro equipo legal.",
@@ -563,7 +590,8 @@ const translations = {
     multiple_suspicious: "⚠️ ALERTA: Múltiples transacciones sospechosas detectadas — posible toma de control de cuenta."
   },
   fr: {
-    greeting: "Bonjour ! 👋 Je suis votre assistant IA EGWallet. Je peux vous aider avec :\n\n• Questions sur les transactions\n• Informations sur le compte\n• Guides des fonctionnalités\n• Tickets de support\n\nComment puis-je vous aider aujourd'hui ?",
+    greeting: "Bonjour ! 👋 Je m'appelle Felisa, votre assistante EGWallet. Je peux vous aider avec :\n\n• Questions sur les transactions\n• Informations sur le compte\n• Guides des fonctionnalités\n• Tickets de support\n\nComment puis-je vous aider aujourd'hui ?",
+    greeting_return: "Bonjour de nouveau ! 👋 Comment puis-je vous aider aujourd'hui ?",
     escalated_fraud: "Je comprends que c'est très important. J'ai créé un ticket de priorité URGENT ({ticketId}) pour notre équipe de sécurité contre la fraude.",
     escalated_security: "Je comprends que c'est urgent. J'ai créé un ticket de priorité URGENT ({ticketId}) pour notre équipe de sécurité des comptes.",
     escalated_legal: "Je comprends que c'est très important. J'ai créé un ticket de priorité URGENT ({ticketId}) pour notre équipe juridique.",
@@ -603,7 +631,8 @@ const translations = {
     multiple_suspicious: "⚠️ ALERTE : Plusieurs transactions suspectes détectées — prise de contrôle de compte possible."
   },
   pt: {
-    greeting: "Olá! 👋 Sou seu assistente de IA da EGWallet. Posso ajudá-lo com:\n\n• Perguntas sobre transações\n• Informações da conta\n• Guias de recursos\n• Tickets de suporte\n\nComo posso ajudá-lo hoje?",
+    greeting: "Olá! 👋 Meu nome é Felisa, sua assistente da EGWallet. Posso ajudá-lo com:\n\n• Perguntas sobre transações\n• Informações da conta\n• Guias de recursos\n• Tickets de suporte\n\nComo posso ajudá-lo hoje?",
+    greeting_return: "Olá de novo! 👋 Como posso ajudá-lo hoje?",
     escalated_fraud: "Entendo que isso é muito importante. Criei um ticket de prioridade URGENTE ({ticketId}) para nossa equipe de segurança contra fraudes.",
     escalated_security: "Entendo que isso é urgente. Criei um ticket de prioridade URGENTE ({ticketId}) para nossa equipe de segurança de contas.",
     escalated_legal: "Entendo que isso é muito importante. Criei um ticket de prioridade URGENTE ({ticketId}) para nossa equipe jurídica.",
@@ -643,7 +672,8 @@ const translations = {
     multiple_suspicious: "⚠️ ALERTA: Múltiplas transações suspeitas detectadas — possível tomada de conta."
   },
   zh: {
-    greeting: "您好！👋 我是您的 EGWallet AI 助手。我可以帮助您：\n\n• 交易问题\n• 账户信息\n• 功能指南\n• 支持工单\n\n今天我能帮您什么？",
+    greeting: "您好！👋 我叫 Felisa，是您的 EGWallet 助手。我可以帮助您：\n\n• 交易问题\n• 账户信息\n• 功能指南\n• 支持工单\n\n今天我能帮您什么？",
+    greeting_return: "您好！👋 今天我能帮您什么？",
     escalated_fraud: "我理解这非常重要。我已为我们的反欺诈安全团队创建了紧急优先工单 ({ticketId})。",
     escalated_security: "我理解这很紧急。我已为我们的账户安全团队创建了紧急优先工单 ({ticketId})。",
     escalated_legal: "我理解这非常重要。我已为我们的法律团队创建了紧急优先工单 ({ticketId})。",
@@ -683,7 +713,8 @@ const translations = {
     multiple_suspicious: "⚠️ 警报：检测到多笔可疑交易 — 可能的账户接管。"
   },
   ja: {
-    greeting: "こんにちは！👋 EGWallet AI アシスタントです。以下についてサポートできます：\n\n• 取引に関する質問\n• アカウント情報\n• 機能ガイド\n• サポートチケット\n\n本日はどのようにお手伝いできますか？",
+    greeting: "こんにちは！👋 私はFelisaです、EGWalletのアシスタントです。以下についてサポートできます：\n\n• 取引に関する質問\n• アカウント情報\n• 機能ガイド\n• サポートチケット\n\n本日はどのようにお手伝いできますか？",
+    greeting_return: "こんにちは！👋 本日はどのようにお手伝いできますか？",
     escalated_fraud: "これは非常に重要だと理解しています。不正対策セキュリティチームのために緊急優先チケット ({ticketId}) を作成しました。",
     escalated_security: "これは緊急だと理解しています。アカウントセキュリティチームのために緊急優先チケット ({ticketId}) を作成しました。",
     escalated_legal: "これは非常に重要だと理解しています。法務チームのために緊急優先チケット ({ticketId}) を作成しました。",
@@ -723,7 +754,8 @@ const translations = {
     multiple_suspicious: "⚠️ 警告：複数の不審な取引が検出されました — アカウント乗っ取りの可能性。"
   },
   ru: {
-    greeting: "Здравствуйте! 👋 Я ваш AI-помощник EGWallet. Я могу помочь вам с:\n\n• Вопросами о транзакциях\n• Информацией об учетной записи\n• Руководствами по функциям\n• Заявками в поддержку\n\nКак я могу помочь вам сегодня?",
+    greeting: "Здравствуйте! 👋 Меня зовут Фелиса, ваш помощник EGWallet. Я могу помочь вам с:\n\n• Вопросами о транзакциях\n• Информацией об учетной записи\n• Руководствами по функциям\n• Заявками в поддержку\n\nКак я могу помочь вам сегодня?",
+    greeting_return: "Снова здравствуйте! 👋 Как я могу помочь вам сегодня?",
     escalated_fraud: "Я понимаю, что это очень важно. Я создал СРОЧНУЮ заявку ({ticketId}) для нашей команды безопасности по борьбе с мошенничеством.",
     escalated_security: "Я понимаю, что это срочно. Я создал СРОЧНУЮ заявку ({ticketId}) для нашей команды безопасности учетных записей.",
     escalated_legal: "Я понимаю, что это очень важно. Я создал СРОЧНУЮ заявку ({ticketId}) для нашей юридической команды.",
@@ -763,7 +795,8 @@ const translations = {
     multiple_suspicious: "⚠️ ТРЕВОГА: Обнаружено несколько подозрительных транзакций — возможный захват аккаунта."
   },
   de: {
-    greeting: "Hallo! 👋 Ich bin Ihr EGWallet KI-Assistent. Ich kann Ihnen helfen mit:\n\n• Transaktionsfragen\n• Kontoinformationen\n• Funktionsanleitungen\n• Support-Tickets\n\nWie kann ich Ihnen heute helfen?",
+    greeting: "Hallo! 👋 Mein Name ist Felisa, Ihre EGWallet-Assistentin. Ich kann Ihnen helfen mit:\n\n• Transaktionsfragen\n• Kontoinformationen\n• Funktionsanleitungen\n• Support-Tickets\n\nWie kann ich Ihnen heute helfen?",
+    greeting_return: "Hallo nochmal! 👋 Wie kann ich Ihnen heute helfen?",
     escalated_fraud: "Ich verstehe, dass dies sehr wichtig ist. Ich habe ein DRINGENDES Prioritäts-Ticket ({ticketId}) für unser Betrugsbekämpfungs-Sicherheitsteam erstellt.",
     escalated_security: "Ich verstehe, dass dies dringend ist. Ich habe ein DRINGENDES Prioritäts-Ticket ({ticketId}) für unser Kontosicherheitsteam erstellt.",
     escalated_legal: "Ich verstehe, dass dies sehr wichtig ist. Ich habe ein DRINGENDES Prioritäts-Ticket ({ticketId}) für unser Rechtsteam erstellt.",
@@ -2776,7 +2809,9 @@ app.post('/ai/chat',
   
   // ===== GET ACCOUNT-AWARE CONTEXT (Revolut-level personalization) =====
   const userContext = getUserContext(req.user.userId, db);
-  const lang = language || userContext.language || 'en'; // Use request lang, user pref, or default to English
+  const requestedLang = language || userContext.language || 'en';
+  const detectedLang = detectLanguageFromMessage(message);
+  const lang = detectedLang || requestedLang; // Detected language from message takes priority
   
   // ===== CHECK FRAUD VELOCITY (prevent abuse) =====
   const escalation = detectEscalation(message);
@@ -3140,7 +3175,8 @@ app.post('/ai/chat',
   
   // Greeting
   else if (lowerMessage.includes('hello') || lowerMessage.includes('hi') || lowerMessage.includes('hey') || lowerMessage.includes('hola') || lowerMessage.includes('bonjour') || lowerMessage.includes('olá') || lowerMessage.includes('привет') || lowerMessage.includes('こんにちは')) {
-    response = t('greeting', lang);
+    const hasUserHistory = (conversationHistory || []).some(m => m.sender === 'user');
+    response = hasUserHistory ? t('greeting_return', lang) : t('greeting', lang);
     suggestions = ['View transactions', 'Check account', 'Browse FAQs'];
   }
   
@@ -4963,8 +4999,11 @@ app.post('/admin/update-kyc-tier',
     body('kycStatus').isIn(['approved', 'pending', 'rejected'])
   ]),
   (req, res) => {
-    // TODO: Add admin role check
     const db = loadDB();
+    const requestingUser = db.users.find(u => u.id === req.user.userId);
+    if (!requestingUser || requestingUser.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden: admin access required' });
+    }
     const { userId, kycTier, kycStatus } = req.body;
     
     const user = db.users.find(u => u.id === userId);
@@ -5010,8 +5049,11 @@ app.post('/admin/verify-employer',
     body('verificationStatus').isIn(['verified', 'rejected'])
   ]),
   (req, res) => {
-    // TODO: Add admin role check
     const db = loadDB();
+    const requestingUser = db.users.find(u => u.id === req.user.userId);
+    if (!requestingUser || requestingUser.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden: admin access required' });
+    }
     const { employerId, verificationStatus, notes } = req.body;
     
     const employer = db.employers.find(e => e.id === employerId);

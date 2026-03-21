@@ -1,3 +1,4 @@
+import 'react-native-get-random-values'; // MUST be first — required by uuid v4
 import { registerRootComponent } from 'expo';
 import * as Sentry from '@sentry/react-native';
 import { LogBox } from 'react-native';

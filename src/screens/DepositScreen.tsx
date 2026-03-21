@@ -238,16 +238,10 @@ export default function DepositScreen() {
         await auth.handleTokenExpired();
         Alert.alert('Session Expired', 'Your session has expired. Please sign in again.');
       } else {
-        // Backend unavailable — credit locally so balance updates immediately
-        const amountMinor = majorToMinor(parsedAmount(), currency);
-        await creditLocalBalance(currency, amountMinor);
-        await logLocalTransaction({ type: 'deposit', direction: 'in', amount: amountMinor, currency, memo: 'Card deposit' });
-        setDepositSuccess(true);
-        setTimeout(() => setDepositSuccess(false), 1500);
+        // Backend unavailable — show a clear error instead of silently crediting funds
         Alert.alert(
-          'Deposit Successful ✅',
-          `${formatCurrency(amountMinor, currency)} has been added to your wallet.`,
-          [{ text: 'Done', onPress: () => (navigation as any).goBack() }]
+          'Service Unavailable',
+          'Could not connect to the server. Please check your connection and try again.',
         );
       }
     } finally {

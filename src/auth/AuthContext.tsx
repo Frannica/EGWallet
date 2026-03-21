@@ -219,7 +219,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const rt = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
       if (rt && token) {
-        await fetch(`${require('../config/env').default.API_BASE_URL}/auth/logout`, {
+        await fetch(`${API_BASE}/auth/logout`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

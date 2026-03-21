@@ -37,7 +37,6 @@ export default function CardScreen() {
   }, []);
 
   useEffect(() => {
-    loadCards();
     loadWallets();
   }, []);
 
@@ -58,9 +57,10 @@ export default function CardScreen() {
   };
 
   const loadCards = async () => {
+    if (!auth.token) return;
     try {
       setLoading(true);
-      const data = await getVirtualCards(auth.token!);
+      const data = await getVirtualCards(auth.token);
       const loaded = data.cards || [];
       if (loaded.length === 0) {
         // Pre-populate a demo card so the screen is never empty

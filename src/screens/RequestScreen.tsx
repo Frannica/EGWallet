@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
+import { listWallets } from '../api/auth';
 import { getCurrencySymbol } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import QRCode from 'react-native-qrcode-svg';
@@ -47,7 +48,7 @@ const QR_PURPOSES = [
   { label: '📦 Other', memo: '' },
 ];
 
-const DEMO_WALLET_ID = 'egwallet-demo-001';
+const DEMO_WALLET_ID = 'egwallet-demo-001'; // fallback only
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -92,15 +93,24 @@ export default function RequestScreen() {
   const [qrMemo, setQrMemo] = useState('');
   const [qrPurpose, setQrPurpose] = useState('');
   const [dynamicQR, setDynamicQR] = useState<{ value: string; expiresAt: number } | null>(null);
+  const [realWalletId, setRealWalletId] = useState<string>(DEMO_WALLET_ID);
 
-  // Generate static QR immediately on mount — no API call needed
+  // Fetch the real wallet ID then generate the static QR
   useEffect(() => {
-    setStaticQRValue(JSON.stringify({
-      type: 'wallet_address',
-      walletId: DEMO_WALLET_ID,
-      version: 1,
-    }));
-  }, []);
+    if (!auth.token) {
+      setStaticQRValue(JSON.stringify({ type: 'wallet_address', walletId: DEMO_WALLET_ID, version: 1 }));
+      return;
+    }
+    listWallets(auth.token)
+      .then(res => {
+        const wid = res.wallets?.[0]?.id || DEMO_WALLET_ID;
+        setRealWalletId(wid);
+        setStaticQRValue(JSON.stringify({ type: 'wallet_address', walletId: wid, version: 1 }));
+      })
+      .catch(() => {
+        setStaticQRValue(JSON.stringify({ type: 'wallet_address', walletId: DEMO_WALLET_ID, version: 1 }));
+      });
+  }, [auth.token]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -272,7 +282,7 @@ export default function RequestScreen() {
     setDynamicQR({
       value: JSON.stringify({
         type: 'payment_request',
-        walletId: DEMO_WALLET_ID,
+        walletId: realWalletId,
         amount: amountNum,
         currency: qrCurrency,
         memo: qrMemo || qrPurpose || 'Payment',
