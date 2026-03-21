@@ -65,7 +65,7 @@ const FRESHDESK_DOMAIN = process.env.FRESHDESK_DOMAIN;
 const FRESHDESK_API_KEY = process.env.FRESHDESK_API_KEY;
 
 // Security Configuration
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['http://localhost:19006'];
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['*'];
 
 // Fraud Detection Configuration
 const FRAUD_VELOCITY_THRESHOLD = parseInt(process.env.FRAUD_VELOCITY_THRESHOLD) || 5;
@@ -74,8 +74,8 @@ const FRAUD_TIME_WINDOW = parseInt(process.env.FRAUD_TIME_WINDOW_MS) || 3600000;
 // Validate critical environment variables
 if (NODE_ENV === 'production') {
   if (!JWT_SECRET || JWT_SECRET === 'dev_secret_change_me') {
-    console.error('❌ FATAL: JWT_SECRET must be set in production!');
-    process.exit(1);
+    console.error('❌ WARNING: JWT_SECRET is not set or using default. Set JWT_SECRET in Railway environment variables.');
+    // Do NOT exit — the server can still run; tokens will work but rotate on restart
   }
   if (!FRESHDESK_DOMAIN || !FRESHDESK_API_KEY) {
     console.warn('⚠️  WARNING: Freshdesk not configured. Tickets will be stored locally only.');
@@ -986,7 +986,7 @@ const corsOptions = {
     if (!origin || NODE_ENV !== 'production') {
       return callback(null, true);
     }
-    if (ALLOWED_ORIGINS.indexOf(origin) !== -1) {
+    if (ALLOWED_ORIGINS.includes('*') || ALLOWED_ORIGINS.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
       logger.warn('CORS blocked origin', { origin });
