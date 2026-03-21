@@ -29,7 +29,6 @@ if (!stripeClient) {
 let firebaseAdmin = null;
 let firebaseAuth  = null;
 let firestore     = null;
-let firebaseProjectId = null;
 
 (function initFirebase() {
   try {
@@ -38,21 +37,16 @@ let firebaseProjectId = null;
       throw new Error('GOOGLE_SERVICE_ACCOUNT env var is not set. Firebase will be disabled.');
     }
     const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
-    const credential = admin.credential.cert(serviceAccount);
-    firebaseProjectId = serviceAccount.project_id || null;
-
     if (!admin.apps.length) {
       admin.initializeApp({
-        credential,
+        credential: admin.credential.cert(serviceAccount),
         ...(process.env.FIREBASE_DATABASE_URL && { databaseURL: process.env.FIREBASE_DATABASE_URL }),
       });
+      console.log('Firebase Admin initialized');
     }
-
     firebaseAdmin = admin;
     firebaseAuth  = admin.auth();
     firestore     = admin.firestore();
-
-    console.log(`✅ Firebase Admin SDK initialised (project: ${firebaseProjectId})`);
   } catch (err) {
     console.warn('[Firebase] Initialisation failed:', err.message);
     console.warn('[Firebase] The backend will continue without Firebase. Set GOOGLE_SERVICE_ACCOUNT to enable it.');
