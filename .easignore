@@ -4,8 +4,11 @@
 *.txt
 !README.md
 
-# Git history (large, not needed for builds)
-.git/
+# Git history and GitHub CI files (not needed for builds, cause tar errors on Linux)
+.git
+.git/**
+.github
+.github/**
 
 # Backend (separate service, not part of the app)
 backend/

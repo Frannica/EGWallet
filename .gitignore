@@ -42,6 +42,14 @@ google-services.json
 # typescript
 *.tsbuildinfo
 
+# npm backup files
+package.json.*[^n]
+!package.json
+
+# build inspect and log files
+build_latest*.json
+build_log_latest_*.txt
+
 # generated native folders
 /ios
 /android
