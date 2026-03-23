@@ -57,7 +57,7 @@ let firestore     = null;
 const DB_FILE = process.env.DB_FILE_PATH || path.join(__dirname, 'db.json');
 const DB_BACKUP = process.env.DB_BACKUP_PATH || path.join(__dirname, 'db.json.bak');
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 8080;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 // Freshdesk Configuration
@@ -5153,6 +5153,7 @@ app.use((req, res) => {
 // ==================== SERVER STARTUP ====================
 
 app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
   logger.info(`EGWallet backend started`, {
     port: PORT,
     environment: NODE_ENV,
@@ -5163,7 +5164,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n${'='.repeat(60)}`);
   console.log(`🚀 EGWallet Backend - World-Class Payroll API`);
   console.log(`${'='.repeat(60)}`);
-  console.log(`📍 Server: http://localhost:${PORT}`);
+  console.log(`📍 Server: http://0.0.0.0:${PORT}`);
   console.log(`🌍 Environment: ${NODE_ENV}`);
   console.log(`🔐 JWT: ${JWT_SECRET ? '✅ Configured' : '❌ Not configured'}`);
   console.log(`🎫 Freshdesk: ${(FRESHDESK_DOMAIN && FRESHDESK_API_KEY) ? '✅ Integrated' : '⚠️  Local only'}`);
