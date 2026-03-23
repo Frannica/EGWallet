@@ -3,6 +3,5 @@ cmd = "npm install"
 
 [deploy]
 startCommand = "node index.js"
-healthcheckPath = "/healthz"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10

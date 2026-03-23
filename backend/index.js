@@ -972,6 +972,11 @@ function saveDB(db) {
 
 const app = express();
 
+// Health check MUST be first — before any middleware (CORS, Helmet, rate-limit)
+// so Railway's healthcheck always gets 200 and never gets blocked
+app.get('/healthz', (req, res) => res.status(200).send('OK'));
+app.get('/health-simple', (req, res) => res.status(200).json({ status: 'ok', port: PORT }));
+
 // ==================== SECURITY MIDDLEWARE ====================
 
 // Helmet - Security headers
@@ -1099,10 +1104,6 @@ app.get('/health', (req, res) => {
     freshdeskConfigured: !!(FRESHDESK_DOMAIN && FRESHDESK_API_KEY)
   };
   res.status(200).json(healthStatus);
-});
-
-app.get('/healthz', (req, res) => {
-  res.status(200).send('OK');
 });
 
 // Firebase connectivity health check
