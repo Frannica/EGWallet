@@ -57,7 +57,11 @@ let firestore     = null;
 const DB_FILE = process.env.DB_FILE_PATH || path.join(__dirname, 'db.json');
 const DB_BACKUP = process.env.DB_BACKUP_PATH || path.join(__dirname, 'db.json.bak');
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT;
+if (!PORT) {
+  console.error('❌ FATAL: process.env.PORT is not set. Railway must inject PORT.');
+  process.exit(1);
+}
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 // Freshdesk Configuration
@@ -5151,6 +5155,8 @@ app.use((req, res) => {
 });
 
 // ==================== SERVER STARTUP ====================
+
+console.log('PORT from Railway:', process.env.PORT);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
