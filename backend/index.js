@@ -57,9 +57,10 @@ let firestore     = null;
 const DB_FILE = process.env.DB_FILE_PATH || path.join(__dirname, 'db.json');
 const DB_BACKUP = process.env.DB_BACKUP_PATH || path.join(__dirname, 'db.json.bak');
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
-const PORT = process.env.PORT;
-if (!PORT) {
-  console.error('❌ FATAL: process.env.PORT is not set. Railway must inject PORT.');
+console.log('PORT from Railway:', process.env.PORT);
+const PORT = Number(process.env.PORT);
+if (!process.env.PORT || isNaN(PORT) || PORT <= 0) {
+  console.error('❌ FATAL: PORT is not defined or invalid. Got:', process.env.PORT);
   process.exit(1);
 }
 const NODE_ENV = process.env.NODE_ENV || 'development';
