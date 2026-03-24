@@ -1301,12 +1301,12 @@ app.post('/auth/register',
   const passwordHash = bcrypt.hashSync(password, 8);
   
   // Auto-detect preferred currency using the global country→currency map
-  const preferredCurrency = COUNTRY_TO_CURRENCY[region] || 'XAF';
+  const preferredCurrency = COUNTRY_TO_CURRENCY[region] || 'USD';
   
   const user = { 
     id, 
     email, 
-    region: region || 'GQ', 
+    region: region || 'US', 
     role: 'individual',
     preferredCurrency, 
     autoConvertIncoming: true, 
