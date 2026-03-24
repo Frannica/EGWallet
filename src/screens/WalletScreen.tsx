@@ -413,24 +413,7 @@ export default function WalletScreen() {
               </View>
             </View>
 
-            {/* Currency Breakdown */}
-            {wallets[0]?.balances?.map((b: Balance, index: number) => {
-              const displayConverted = rates ? convert(b.amount, b.currency, preferredCurrency, rates) : b.amount;
-              return (
-                <View key={index} style={styles.currencyCard}>
-                  <View style={styles.currencyBadge}>
-                    <Text style={styles.currencyBadgeText}>{b.currency}</Text>
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 14 }}>
-                    <Text style={styles.currencyAmount}>{formatCurrency(b.amount, b.currency)}</Text>
-                    {preferredCurrency !== b.currency && (
-                      <Text style={styles.currencyConverted}>≈ {formatCurrency(displayConverted, preferredCurrency)}</Text>
-                    )}
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color="#9BAAB8" />
-                </View>
-              );
-            })}
+
           </>
         )}
 
