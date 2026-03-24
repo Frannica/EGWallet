@@ -147,7 +147,7 @@ export default function WalletScreen() {
     return wallets.reduce((total, wallet) => total + totalUsdValue(wallet), 0);
   }
 
-  const POPULAR_CURRENCIES = ['XAF', 'USD', 'EUR', 'GBP', 'NGN', 'GHS', 'ZAR', 'KES', 'INR', 'CNY', 'JPY', 'BRL'];
+  const POPULAR_CURRENCIES = ['XAF', 'XOF', 'MAD', 'USD', 'EUR', 'GBP', 'NGN', 'GHS', 'ZAR', 'KES', 'INR', 'CNY', 'JPY', 'BRL'];
 
   return (
     <View style={styles.container}>

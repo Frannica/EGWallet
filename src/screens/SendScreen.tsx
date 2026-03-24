@@ -241,7 +241,10 @@ export default function SendScreen() {
       // Debit local balance to keep it in sync with backend
       await debitLocalBalance(currency, amountMinor);
       await logLocalTransaction({ type: 'withdrawal', direction: 'out', amount: amountMinor, currency, memo: `Withdrawal to ${withdrawalMethod === 'debit' ? 'card' : 'bank account'}` });
-      Alert.alert('Withdrawal Submitted ✅', 'Withdrawal request submitted! Funds will arrive within 1-3 business days.');
+      const arrivalMsg = withdrawalMethod === 'debit'
+        ? 'Funds will arrive instantly on your debit card.'
+        : 'Funds will arrive within 1-3 business days.';
+      Alert.alert('Withdrawal Submitted ✅', `Withdrawal request submitted! ${arrivalMsg}`);
       loadWallets();
       setAmount('');
       setBankName('');
@@ -257,7 +260,10 @@ export default function SendScreen() {
       setBankName('');
       setAccountNumber('');
       setAccountName('');
-      toast.show('Withdrawal Submitted ✅');
+      const arrivalMsgFallback = withdrawalMethod === 'debit'
+        ? 'Funds will arrive instantly on your debit card.'
+        : 'Funds will arrive within 1-3 business days.';
+      toast.show(`Withdrawal Submitted ✅ ${arrivalMsgFallback}`);
     } finally {
       setLoading(false);
     }
