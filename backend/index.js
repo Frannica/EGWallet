@@ -121,14 +121,25 @@ const logger = winston.createLogger({
   ]
 });
 
-if (NODE_ENV !== 'production') {
-  logger.add(new winston.transports.Console({
-    format: winston.format.combine(
-      winston.format.colorize(),
-      winston.format.simple()
-    )
-  }));
-}
+// Always log to console — essential for Railway log visibility
+logger.add(new winston.transports.Console({
+  format: winston.format.combine(
+    winston.format.timestamp({ format: 'HH:mm:ss' }),
+    winston.format.printf(({ timestamp, level, message, ...meta }) => {
+      const extra = Object.keys(meta).length ? ' ' + JSON.stringify(meta) : '';
+      return `[${timestamp}] ${level.toUpperCase()}: ${message}${extra}`;
+    })
+  )
+}));
+
+// Global crash handlers — catch anything that could silently kill the process
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT EXCEPTION — process will exit:', err.message, err.stack);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('UNHANDLED REJECTION:', reason);
+});
 
 // Audit logger with separate file
 const auditLogger = winston.createLogger({
@@ -5160,8 +5171,9 @@ app.use((req, res) => {
 
 console.log('PORT from Railway:', process.env.PORT);
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Server bound to 0.0.0.0:${PORT} — ready for connections`);
   logger.info(`EGWallet backend started`, {
     port: PORT,
     environment: NODE_ENV,
@@ -5192,5 +5204,13 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`   QR Codes: GET /qr/static, POST /qr/dynamic, POST /qr/validate, POST /qr/pay`);
   console.log(`   Fraud: POST /payroll/report-fraud, POST /employer/report`);
   console.log(`${'='.repeat(60)}\n`);
+});
+
+server.on('error', (err) => {
+  console.error('SERVER LISTEN ERROR:', err.code, err.message);
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use`);
+  }
+  process.exit(1);
 });
 
