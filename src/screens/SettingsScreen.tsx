@@ -7,13 +7,17 @@ import { useAuth } from '../auth/AuthContext';
 import { useBiometric } from '../auth/BiometricContext';
 import { useNavigation } from '@react-navigation/native';
 import { KYCDisclosure } from '../components/KYCDisclosure';
-import { getCurrencySymbol } from '../utils/currency';
+import { getCurrencySymbol, getCurrencyName, CURRENCY_INFO } from '../utils/currency';
 
-const CURRENCIES = [
-  'XAF', 'NGN', 'GHS', 'ZAR', 'KES', 'TZS', 'UGX', 'RWF', 'ETB', 'EGP',
-  'TND', 'MAD', 'LYD', 'DZD', 'AOA', 'ERN', 'SOS', 'SDG', 'GMD', 'MUR',
-  'SCR', 'BWP', 'ZWL', 'MZN', 'NAD', 'LSL', 'XOF', 'USD', 'EUR', 'GBP', 'JPY', 'CNY', 'INR', 'BRL', 'CAD'
-];
+// Full list ordered: popular first, then alphabetical by code
+const CURRENCIES = Object.keys(CURRENCY_INFO).sort((a, b) => {
+  const popular = ['USD','EUR','GBP','CNY','JPY','INR','NGN','GHS','XAF','XOF','ZAR','KES','BRL','CAD','AUD','AED','MAD'];
+  const ai = popular.indexOf(a); const bi = popular.indexOf(b);
+  if (ai !== -1 && bi !== -1) return ai - bi;
+  if (ai !== -1) return -1;
+  if (bi !== -1) return 1;
+  return a.localeCompare(b);
+});
 
 export default function SettingsScreen() {
   const auth = useAuth();
@@ -175,7 +179,7 @@ export default function SettingsScreen() {
                 <View style={styles.currencyDisplay}>
                   <Ionicons name="cash" size={20} color="#007AFF" />
                   <Text style={styles.currencyText}>
-                    {auth.user?.preferredCurrency || 'XAF'} {getCurrencySymbol(auth.user?.preferredCurrency || 'XAF')}
+                    {auth.user?.preferredCurrency || 'USD'} {getCurrencySymbol(auth.user?.preferredCurrency || 'USD')}
                   </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={20} color="#007AFF" />
@@ -195,7 +199,7 @@ export default function SettingsScreen() {
                   </View>
                   <Text style={styles.toggleDescription}>
                     {auth.user?.autoConvertIncoming !== false 
-                      ? `Automatically convert all incoming payments to ${auth.user?.preferredCurrency || 'XAF'}`
+                      ? `Automatically convert all incoming payments to ${auth.user?.preferredCurrency || 'USD'}`
                       : 'Receive payments in original currency (multi-currency wallet)'}
                   </Text>
                 </View>
@@ -460,28 +464,30 @@ export default function SettingsScreen() {
             <FlatList
               data={CURRENCIES}
               keyExtractor={(item) => item}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  onPress={() => handleChangeCurrency(item)}
-                  style={[
-                    styles.currencyOption,
-                    auth.user?.preferredCurrency === item && styles.currencyOptionSelected
-                  ]}
-                >
-                  <View style={styles.currencyOptionContent}>
-                    <Ionicons name="cash" size={20} color={auth.user?.preferredCurrency === item ? '#007AFF' : '#657786'} />
-                    <Text style={[
-                      styles.currencyOptionText,
-                      auth.user?.preferredCurrency === item && styles.currencyOptionTextSelected
-                    ]}>
-                      {item} {getCurrencySymbol(item)}
-                    </Text>
-                  </View>
-                  {auth.user?.preferredCurrency === item && (
-                    <Ionicons name="checkmark" size={24} color="#007AFF" />
-                  )}
-                </TouchableOpacity>
-              )}
+              renderItem={({ item }) => {
+                const selected = auth.user?.preferredCurrency === item;
+                return (
+                  <TouchableOpacity
+                    onPress={() => handleChangeCurrency(item)}
+                    style={[styles.currencyOption, selected && styles.currencyOptionSelected]}
+                  >
+                    <View style={styles.currencyOptionContent}>
+                      <View style={[styles.currencySymbolBadge, selected && { backgroundColor: '#007AFF' }]}>
+                        <Text style={[styles.currencySymbolBadgeText, selected && { color: '#fff' }]}>
+                          {getCurrencySymbol(item)}
+                        </Text>
+                      </View>
+                      <View>
+                        <Text style={[styles.currencyOptionText, selected && styles.currencyOptionTextSelected]}>
+                          {item}
+                        </Text>
+                        <Text style={styles.currencyOptionName}>{getCurrencyName(item)}</Text>
+                      </View>
+                    </View>
+                    {selected && <Ionicons name="checkmark" size={24} color="#007AFF" />}
+                  </TouchableOpacity>
+                );
+              }}
             />
           </View>
         </View>
@@ -853,6 +859,24 @@ const styles = StyleSheet.create({
     color: '#14171A',
   },
   currencyOptionTextSelected: {
+    fontWeight: '700',
+    color: '#1565C0',
+  },
+  currencyOptionName: {
+    fontSize: 12,
+    color: '#657786',
+    marginTop: 1,
+  },
+  currencySymbolBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: 'rgba(21,101,192,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  currencySymbolBadgeText: {
+    fontSize: 13,
     fontWeight: '700',
     color: '#1565C0',
   },

@@ -92,12 +92,78 @@ export const currencySymbols: Record<string, string> = {
   INR: '₹',
 };
 
+// Full currency info: code → { name, symbol }
+export const CURRENCY_INFO: Record<string, { name: string; symbol: string }> = {
+  USD: { name: 'US Dollar',               symbol: '$'    },
+  EUR: { name: 'Euro',                    symbol: '€'    },
+  GBP: { name: 'British Pound',           symbol: '£'    },
+  JPY: { name: 'Japanese Yen',            symbol: '¥'    },
+  CNY: { name: 'Chinese Yuan',            symbol: '¥'    },
+  INR: { name: 'Indian Rupee',            symbol: '₹'    },
+  CAD: { name: 'Canadian Dollar',         symbol: 'C$'   },
+  AUD: { name: 'Australian Dollar',       symbol: 'A$'   },
+  NZD: { name: 'New Zealand Dollar',      symbol: 'NZ$'  },
+  SGD: { name: 'Singapore Dollar',        symbol: 'S$'   },
+  HKD: { name: 'Hong Kong Dollar',        symbol: 'HK$'  },
+  CHF: { name: 'Swiss Franc',             symbol: 'Fr'   },
+  SEK: { name: 'Swedish Krona',           symbol: 'kr'   },
+  NOK: { name: 'Norwegian Krone',         symbol: 'kr'   },
+  DKK: { name: 'Danish Krone',            symbol: 'kr'   },
+  PLN: { name: 'Polish Złoty',            symbol: 'zł'   },
+  CZK: { name: 'Czech Koruna',            symbol: 'Kč'   },
+  HUF: { name: 'Hungarian Forint',        symbol: 'Ft'   },
+  TRY: { name: 'Turkish Lira',            symbol: '₺'    },
+  RUB: { name: 'Russian Ruble',           symbol: '₽'    },
+  BRL: { name: 'Brazilian Real',          symbol: 'R$'   },
+  ARS: { name: 'Argentine Peso',          symbol: '$'    },
+  CLP: { name: 'Chilean Peso',            symbol: '$'    },
+  COP: { name: 'Colombian Peso',          symbol: '$'    },
+  MXN: { name: 'Mexican Peso',            symbol: '$'    },
+  PEN: { name: 'Peruvian Sol',            symbol: 'S/'   },
+  SAR: { name: 'Saudi Riyal',             symbol: '﷼'   },
+  AED: { name: 'UAE Dirham',              symbol: 'د.إ'  },
+  QAR: { name: 'Qatari Riyal',            symbol: '﷼'   },
+  KWD: { name: 'Kuwaiti Dinar',           symbol: 'د.ك'  },
+  ILS: { name: 'Israeli Shekel',          symbol: '₪'    },
+  THB: { name: 'Thai Baht',              symbol: '฿'    },
+  MYR: { name: 'Malaysian Ringgit',       symbol: 'RM'   },
+  IDR: { name: 'Indonesian Rupiah',       symbol: 'Rp'   },
+  PHP: { name: 'Philippine Peso',         symbol: '₱'    },
+  VND: { name: 'Vietnamese Dong',         symbol: '₫'    },
+  KRW: { name: 'South Korean Won',        symbol: '₩'    },
+  PKR: { name: 'Pakistani Rupee',         symbol: '₨'    },
+  BDT: { name: 'Bangladeshi Taka',        symbol: '৳'    },
+  NGN: { name: 'Nigerian Naira',          symbol: '₦'    },
+  GHS: { name: 'Ghanaian Cedi',           symbol: '₵'    },
+  KES: { name: 'Kenyan Shilling',         symbol: 'KSh'  },
+  ZAR: { name: 'South African Rand',      symbol: 'R'    },
+  TZS: { name: 'Tanzanian Shilling',      symbol: 'TSh'  },
+  UGX: { name: 'Ugandan Shilling',        symbol: 'USh'  },
+  ETB: { name: 'Ethiopian Birr',          symbol: 'Br'   },
+  EGP: { name: 'Egyptian Pound',          symbol: 'E£'   },
+  MAD: { name: 'Moroccan Dirham',         symbol: 'د.م'  },
+  TND: { name: 'Tunisian Dinar',          symbol: 'د.ت'  },
+  DZD: { name: 'Algerian Dinar',          symbol: 'دج'   },
+  XAF: { name: 'Central African CFA Franc', symbol: 'FCFA' },
+  XOF: { name: 'West African CFA Franc',  symbol: 'CFA'  },
+  RWF: { name: 'Rwandan Franc',           symbol: 'FRw'  },
+  MUR: { name: 'Mauritian Rupee',         symbol: '₨'    },
+  BWP: { name: 'Botswana Pula',           symbol: 'P'    },
+  ZMW: { name: 'Zambian Kwacha',          symbol: 'ZK'   },
+  AOA: { name: 'Angolan Kwanza',          symbol: 'Kz'   },
+  GMD: { name: 'Gambian Dalasi',          symbol: 'D'    },
+};
+
 export function decimalsFor(currency: string) {
   return currencyDecimals[currency] ?? 2;
 }
 
 export function getCurrencySymbol(currency: string): string {
-  return currencySymbols[currency] ?? currency;
+  return CURRENCY_INFO[currency]?.symbol ?? currencySymbols[currency] ?? currency;
+}
+
+export function getCurrencyName(currency: string): string {
+  return CURRENCY_INFO[currency]?.name ?? currency;
 }
 
 export function minorToMajor(amountMinor: number, currency: string) {

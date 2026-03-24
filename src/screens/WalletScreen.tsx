@@ -241,7 +241,11 @@ export default function WalletScreen() {
               {POPULAR_CURRENCIES.map(c => (
                 <TouchableOpacity
                   key={c}
-                  onPress={() => { setPreferredCurrency(c); setShowCurrencyPicker(false); }}
+                  onPress={() => {
+                    setPreferredCurrency(c);
+                    setShowCurrencyPicker(false);
+                    auth.updatePreferredCurrency(c);
+                  }}
                   style={[styles.currencyButton, preferredCurrency === c && styles.currencyButtonActive]}
                   activeOpacity={0.75}
                 >
