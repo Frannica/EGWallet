@@ -1422,7 +1422,7 @@ app.post('/auth/login',
   res.json({ 
     token, 
     refreshToken, 
-    user: { id: u.id, email: u.email, region: u.region, preferredCurrency: u.preferredCurrency || 'XAF', autoConvertIncoming: u.autoConvertIncoming !== false },
+    user: { id: u.id, email: u.email, region: u.region, preferredCurrency: u.preferredCurrency || 'USD', autoConvertIncoming: u.autoConvertIncoming !== false },
     newDevice: isNewDevice,
     deviceName: deviceInfo?.name || 'Unknown Device'
   });
@@ -1432,7 +1432,7 @@ app.get('/auth/me', authMiddleware, (req, res) => {
   const db = loadDB();
   const user = db.users.find(u => u.id === req.user.userId);
   if (!user) return res.status(404).json({ error: 'User not found' });
-  res.json({ id: user.id, email: user.email, preferredCurrency: user.preferredCurrency || 'XAF', autoConvertIncoming: user.autoConvertIncoming !== false });
+  res.json({ id: user.id, email: user.email, preferredCurrency: user.preferredCurrency || 'USD', autoConvertIncoming: user.autoConvertIncoming !== false });
 });
 
 // Refresh token endpoint
@@ -1513,7 +1513,7 @@ app.get('/wallets', authMiddleware, (req, res) => {
   // Auto-create wallet if user has none (backward compatibility fix)
   if (wallets.length === 0) {
     const autoUser = db.users.find(u => u.id === req.user.userId);
-    const autoCurrency = autoUser?.preferredCurrency || 'XAF';
+    const autoCurrency = autoUser?.preferredCurrency || 'USD';
     const wallet = { 
       id: uuidv4(), 
       userId: req.user.userId, 
@@ -1778,7 +1778,7 @@ app.get('/wallets/:id/currency', authMiddleware, (req, res) => {
   if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
   const owner = db.users.find(u => u.id === wallet.userId);
   // Prefer user's explicitly set preferredCurrency, then first balance currency
-  const currency = owner?.preferredCurrency || wallet.balances?.[0]?.currency || 'XAF';
+  const currency = owner?.preferredCurrency || wallet.balances?.[0]?.currency || 'USD';
   res.json({ currency, walletId: req.params.id });
 });
 
