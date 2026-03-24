@@ -9,7 +9,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { Ionicons } from '@expo/vector-icons';
 import { useToast } from '../utils/toast';
-import { getLocalBalances, mergeWithLocalBalances } from '../utils/localBalance';
+import { getLocalBalances, mergeWithLocalBalances, getLocalTransactions } from '../utils/localBalance';
 
 type Balance = { currency: string; amount: number };
 
@@ -81,21 +81,31 @@ export default function WalletScreen() {
             );
             setRecentPayroll(payrollTx || null);
             // Smart Insights — last 7 days
+            // Merge local transactions so deposits/withdrawals are counted too
+            const localTxsForInsights = await getLocalTransactions();
+            const backendTxIds = new Set(allTxs.map((t: any) => t.id));
+            const uniqueLocalTxs = localTxsForInsights.filter((t: any) => !backendTxIds.has(t.id));
+            const allTxsCombined = [...uniqueLocalTxs, ...allTxs];
+            const currentRates = rates || DEMO_RATES;
+            const insightsCurrency = preferredCurrency;
             const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-            const weekTxs = allTxs.filter((t: any) => {
+            const weekTxs = allTxsCombined.filter((t: any) => {
               const ts = typeof t.timestamp === 'string' ? new Date(t.timestamp).getTime() : t.timestamp;
               return ts >= weekAgo;
             });
-            const spent = weekTxs.filter((t: any) => t.direction === 'out').reduce((s: number, t: any) => s + t.amount, 0);
-            const received = weekTxs.filter((t: any) => t.direction === 'in').reduce((s: number, t: any) => s + t.amount, 0);
+            const spent = weekTxs
+              .filter((t: any) => t.direction === 'out')
+              .reduce((s: number, t: any) => s + convert(t.amount, t.currency || insightsCurrency, insightsCurrency, currentRates), 0);
+            const received = weekTxs
+              .filter((t: any) => t.direction === 'in')
+              .reduce((s: number, t: any) => s + convert(t.amount, t.currency || insightsCurrency, insightsCurrency, currentRates), 0);
             const cats: Record<string, number> = {};
-            allTxs.forEach((t: any) => {
+            allTxsCombined.forEach((t: any) => {
               const cat = (t.type === 'payroll' || t.type === 'payroll_request') ? 'Payroll' : t.direction === 'in' ? 'Received' : 'Transfers';
               cats[cat] = (cats[cat] || 0) + 1;
             });
             const topCat = Object.entries(cats).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-            const wCurrency = res.wallets[0]?.balances?.[0]?.currency || 'XAF';
-            setInsights({ spent, received, topCategory: topCat, currency: wCurrency });
+            setInsights({ spent, received, topCategory: topCat, currency: insightsCurrency });
           }
         } catch (_) {
           // payroll banner is optional â€” ignore failures
