@@ -9,12 +9,18 @@ const BACKEND_PORT = 4000;
 /**
  * Resolves the correct API base URL for the current runtime environment.
  *
+ * - EXPO_PUBLIC_API_URL env var (set in eas.json preview/production): always wins
  * - Physical device / Expo Go: uses the dev machine's LAN IP surfaced by Expo
  * - Android emulator fallback: 10.0.2.2 (routes to host loopback)
  * - iOS simulator fallback: localhost
  * - Production: Railway deployment
  */
 function getBaseUrl(): string {
+  // Explicitly set at build time via eas.json env — most reliable
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL;
+  }
+
   if (!__DEV__) {
     return PRODUCTION_API_URL;
   }

@@ -21,7 +21,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
 export async function safeApiCall<T>(
   fn: () => Promise<T>,
   options: SafeApiCallOptions = {}
-): Promise<T | null> {
+): Promise<T> {
   const timeoutMs = options.timeout ?? 10000;
   const retries = options.retries ?? 0;
   let lastError: unknown = null;
@@ -34,8 +34,7 @@ export async function safeApiCall<T>(
     }
   }
 
-  if (lastError instanceof Error) {
-    if (__DEV__) console.warn(lastError.message);
-  }
-  return null;
+  // Re-throw the real error so callers get the actual message (wrong password,
+  // network failure, etc.) rather than a generic null check fallback.
+  throw lastError;
 }
