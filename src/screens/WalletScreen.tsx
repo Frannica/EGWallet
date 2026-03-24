@@ -28,12 +28,12 @@ export default function WalletScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [rates, setRates] = useState<Rates | null>(null);
-  const [preferredCurrency, setPreferredCurrency] = useState<string>('XAF');
+  const [preferredCurrency, setPreferredCurrency] = useState<string>(auth.user?.preferredCurrency || 'USD');
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
   const [recentPayroll, setRecentPayroll] = useState<any>(null);
   const [selectedTab, setSelectedTab] = useState<'all' | 'payroll' | 'transfers'>('all');
   const [insights, setInsights] = useState<{ spent: number; received: number; topCategory: string | null; currency: string } | null>(
-    { spent: 0, received: 0, topCategory: null, currency: 'XAF' }
+    { spent: 0, received: 0, topCategory: null, currency: auth.user?.preferredCurrency || 'USD' }
   );
   const navigation = useNavigation();
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -119,10 +119,10 @@ export default function WalletScreen() {
       const localCurrencies = Object.entries(localBalancesOnError).filter(([, amt]) => amt > 0);
       const fallbackBalances = localCurrencies.length > 0
         ? localCurrencies.map(([cur, amt]) => ({ currency: cur, amount: amt }))
-        : [{ currency: 'XAF', amount: 0 }];
+        : [{ currency: preferredCurrency, amount: 0 }];
       setWallets(prev => prev.length === 0 ? [{ ...DEMO_WALLET, balances: fallbackBalances }] : prev);
       // Demo insights
-      setInsights(prev => prev ?? { spent: 15000, received: 50000, topCategory: 'Transfers', currency: 'XAF' });
+      setInsights(prev => prev ?? { spent: 15000, received: 50000, topCategory: 'Transfers', currency: preferredCurrency });
     } finally {
       setLoading(false);
     }
@@ -133,6 +133,13 @@ export default function WalletScreen() {
     await Promise.all([loadWallets(), loadRates()]);
     setRefreshing(false);
   }
+
+  // Sync preferredCurrency whenever auth.user updates (e.g. after login)
+  useEffect(() => {
+    if (auth.user?.preferredCurrency) {
+      setPreferredCurrency(auth.user.preferredCurrency);
+    }
+  }, [auth.user?.preferredCurrency]);
 
   useEffect(() => {
     loadRates();
