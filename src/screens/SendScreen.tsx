@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, TextInput, Alert, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { listWallets } from '../api/auth';
-import { sendTransaction } from '../api/transactions';
+import { sendTransaction, getWalletCurrency, fetchFxQuote, FxQuote } from '../api/transactions';
 import { useNavigation } from '@react-navigation/native';
 import { majorToMinor, decimalsFor, formatCurrency } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
@@ -56,9 +56,32 @@ export default function SendScreen() {
   const [bankAccountNum, setBankAccountNum] = useState('');
   const [bankRoutingNum, setBankRoutingNum] = useState('');
   
+  // FX state — receiver currency preview
+  const [receiverCurrency, setReceiverCurrency] = useState<string | null>(null);
+  const [fxQuote, setFxQuote] = useState<FxQuote | null>(null);
+  const fxDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
   const navigation = useNavigation();
 
   useEffect(() => { loadWallets(); }, [auth.token]);
+
+  // Debounced FX lookup: when wallet ID or amount/currency changes, fetch quote
+  useEffect(() => {
+    if (fxDebounceRef.current) clearTimeout(fxDebounceRef.current);
+    setFxQuote(null);
+    setReceiverCurrency(null);
+    if (!toWalletId.trim() || toWalletId.length < 8 || !auth.token) return;
+    fxDebounceRef.current = setTimeout(async () => {
+      const toCurrency = await getWalletCurrency(auth.token!, toWalletId.trim());
+      setReceiverCurrency(toCurrency);
+      const amt = parseFloat(amount);
+      if (amt > 0 && toCurrency !== currency) {
+        const amtMinor = majorToMinor(amt, currency);
+        const quote = await fetchFxQuote(auth.token!, currency, toCurrency, amtMinor);
+        setFxQuote(quote);
+      }
+    }, 500);
+  }, [toWalletId, currency, amount, auth.token]);
 
   async function loadWallets() {
     if (!auth.token) return;
@@ -275,12 +298,27 @@ export default function SendScreen() {
 
     const fee = amt * FEE_PERCENTAGE;
     const total = amt + fee;
+    const netSent = amt - fee; // amount after fee that gets converted
+
+    // FX-aware receiver amount
+    const effectiveToCurrency = receiverCurrency || currency;
+    const isCrossCurrency = effectiveToCurrency !== currency;
+    let receiverGetsMinor: number;
+    if (isCrossCurrency && fxQuote) {
+      receiverGetsMinor = fxQuote.receivedAmountMinor;
+    } else {
+      receiverGetsMinor = majorToMinor(netSent, currency);
+    }
 
     return {
       amount: amt,
       fee,
       total,
-      recipientGets: amt,
+      recipientGets: netSent,
+      receiverGetsMinor,
+      receiverCurrency: effectiveToCurrency,
+      isCrossCurrency,
+      rateDisplay: fxQuote?.rateDisplay ?? null,
     };
   }
 
@@ -701,13 +739,25 @@ export default function SendScreen() {
             </View>
             <View style={styles.recipientRow}>
               <Text style={styles.recipientLabel}>Recipient Receives</Text>
-              <Text style={styles.recipientValue}>{formatCurrency(preview.recipientGets * 100, currency)}</Text>
+              <Text style={styles.recipientValue}>
+                {formatCurrency(preview.receiverGetsMinor, preview.receiverCurrency)}
+                {preview.isCrossCurrency && ` (${preview.receiverCurrency})`}
+              </Text>
             </View>
+            {preview.isCrossCurrency && preview.rateDisplay && (
+              <View style={[styles.amountRow, { marginTop: 2 }]}>
+                <Text style={[styles.amountLabel, { color: '#1565C0', fontSize: 11 }]}>Exchange Rate</Text>
+                <Text style={[styles.amountLabel, { color: '#1565C0', fontSize: 11 }]}>{preview.rateDisplay}</Text>
+              </View>
+            )}
           </View>
 
           <View style={styles.infoBox}>
             <Text style={styles.infoText}>
-              ℹ️ The recipient will receive the funds in their preferred currency based on current exchange rates.
+              {preview.isCrossCurrency
+                ? `ℹ️ Funds are automatically converted to the recipient's local currency (${preview.receiverCurrency}) at the current exchange rate.`
+                : 'ℹ️ The recipient will receive the funds in their preferred currency based on current exchange rates.'
+              }
             </Text>
           </View>
 

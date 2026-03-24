@@ -869,41 +869,75 @@ function t(key, lang = 'en', replacements = {}) {
 
 // Currency decimals map (minor units)
 const currencyDecimals = {
-  USD: 2,
-  EUR: 2,
-  CNY: 2,
-  CAD: 2,
-  BRL: 2,
-  GBP: 2,
-  JPY: 0,
-  NGN: 2,
-  XAF: 2,
-  GHS: 2,
-  ZAR: 2,
-  CNY: 2,
-  XOF: 0,
-  KES: 2,
-  TZS: 2,
-  UGX: 0,
-  RWF: 0,
-  ETB: 2,
-  BWP: 2,
-  ZWL: 2,
-  MZN: 2,
-  NAD: 2,
-  LSL: 2,
-  EGP: 2,
-  TND: 3,
-  MAD: 2,
-  LYD: 3,
-  DZD: 2,
-  ERN: 2,
-  AOA: 2,
-  SOS: 2,
-  SDG: 2,
-  GMD: 2,
-  MUR: 2,
-  SCR: 2,
+  // Major global
+  USD: 2, EUR: 2, GBP: 2, CHF: 2, CAD: 2, AUD: 2, NZD: 2,
+  // Asia-Pacific
+  CNY: 2, JPY: 0, KRW: 0, HKD: 2, SGD: 2, TWD: 2, THB: 2,
+  MYR: 2, IDR: 0, PHP: 2, VND: 0, INR: 2, PKR: 2, BDT: 2,
+  LKR: 2, NPR: 2, MMK: 2, KHR: 2, MNT: 2,
+  // Europe
+  SEK: 2, NOK: 2, DKK: 2, PLN: 2, CZK: 2, HUF: 0, RON: 2,
+  BGN: 2, HRK: 2, RSD: 2, UAH: 2, RUB: 2, TRY: 2, GEL: 2,
+  // Middle East
+  SAR: 2, AED: 2, QAR: 2, KWD: 3, BHD: 3, OMR: 3, ILS: 2, JOD: 3,
+  // Africa
+  NGN: 2, GHS: 2, ZAR: 2, KES: 2, TZS: 2, UGX: 0, RWF: 0,
+  ETB: 2, EGP: 2, TND: 3, MAD: 2, LYD: 3, DZD: 2, ERN: 2,
+  AOA: 2, SOS: 2, SDG: 2, GMD: 2, MUR: 2, SCR: 2,
+  BWP: 2, ZWL: 2, MZN: 2, NAD: 2, LSL: 2, SZL: 2,
+  ZMW: 2, MWK: 2, GNF: 0, MGA: 0, DJF: 0, BIF: 0, KMF: 0,
+  XAF: 2, XOF: 0, CVE: 2, STN: 2,
+  // Americas
+  BRL: 2, MXN: 2, ARS: 2, CLP: 0, COP: 2, PEN: 2, UYU: 2,
+  BOB: 2, PYG: 0, GTQ: 2, HNL: 2, NIO: 2, CRC: 2, JMD: 2,
+  TTD: 2, DOP: 2, BBD: 2, GYD: 2, SRD: 2,
+};
+
+// Comprehensive global country → default currency mapping
+const COUNTRY_TO_CURRENCY = {
+  // North America
+  US: 'USD', CA: 'CAD', MX: 'MXN',
+  // Europe — Euro zone
+  DE: 'EUR', FR: 'EUR', IT: 'EUR', ES: 'EUR', NL: 'EUR', BE: 'EUR',
+  AT: 'EUR', PT: 'EUR', FI: 'EUR', IE: 'EUR', GR: 'EUR', LU: 'EUR',
+  SK: 'EUR', SI: 'EUR', EE: 'EUR', LV: 'EUR', LT: 'EUR', CY: 'EUR',
+  MT: 'EUR', AD: 'EUR', MC: 'EUR', SM: 'EUR', VA: 'EUR', ME: 'EUR',
+  XK: 'EUR', HR: 'EUR',
+  // Europe — non-Euro
+  GB: 'GBP', CH: 'CHF', SE: 'SEK', NO: 'NOK', DK: 'DKK', IS: 'ISK',
+  PL: 'PLN', CZ: 'CZK', HU: 'HUF', RO: 'RON', BG: 'BGN', RS: 'RSD',
+  UA: 'UAH', RU: 'RUB', TR: 'TRY', GE: 'GEL', AM: 'AMD', AZ: 'AZN',
+  BY: 'BYN', MD: 'MDL', AL: 'ALL', MK: 'MKD', BA: 'BAM',
+  // Asia-Pacific
+  CN: 'CNY', JP: 'JPY', KR: 'KRW', IN: 'INR', SG: 'SGD', HK: 'HKD',
+  TW: 'TWD', TH: 'THB', MY: 'MYR', ID: 'IDR', PH: 'PHP', VN: 'VND',
+  PK: 'PKR', BD: 'BDT', LK: 'LKR', NP: 'NPR', MM: 'MMK', KH: 'KHR',
+  LA: 'LAK', MN: 'MNT', AU: 'AUD', NZ: 'NZD', FJ: 'FJD', PG: 'PGK',
+  KZ: 'KZT', UZ: 'UZS',
+  // Middle East
+  SA: 'SAR', AE: 'AED', QA: 'QAR', KW: 'KWD', BH: 'BHD', OM: 'OMR',
+  IL: 'ILS', JO: 'JOD', LB: 'LBP', IQ: 'IQD', IR: 'IRR', YE: 'YER',
+  // Africa — XAF zone (Central Africa CFA)
+  GQ: 'XAF', CM: 'XAF', CF: 'XAF', TD: 'XAF', CG: 'XAF', GA: 'XAF',
+  // Africa — XOF zone (West Africa CFA)
+  BJ: 'XOF', BF: 'XOF', CI: 'XOF', GW: 'XOF', ML: 'XOF',
+  NE: 'XOF', SN: 'XOF', TG: 'XOF',
+  // Africa — individual currencies
+  NG: 'NGN', GH: 'GHS', ZA: 'ZAR', KE: 'KES', TZ: 'TZS',
+  UG: 'UGX', RW: 'RWF', ET: 'ETB', EG: 'EGP', TN: 'TND',
+  MA: 'MAD', LY: 'LYD', DZ: 'DZD', AO: 'AOA', ER: 'ERN',
+  SO: 'SOS', SD: 'SDG', GM: 'GMD', MU: 'MUR', SC: 'SCR',
+  BW: 'BWP', ZW: 'ZWL', MZ: 'MZN', NA: 'NAD', LS: 'LSL', SZ: 'SZL',
+  ZM: 'ZMW', MW: 'MWK', LR: 'LRD', SL: 'SLL', GN: 'GNF',
+  MG: 'MGA', MR: 'MRU', SS: 'SSP', CV: 'CVE', ST: 'STN',
+  KM: 'KMF', DJ: 'DJF', BI: 'BIF',
+  // South America
+  BR: 'BRL', AR: 'ARS', CL: 'CLP', CO: 'COP', PE: 'PEN', UY: 'UYU',
+  BO: 'BOB', PY: 'PYG', GY: 'GYD', SR: 'SRD', VE: 'VES',
+  // Central America & Caribbean
+  GT: 'GTQ', HN: 'HNL', NI: 'NIO', CR: 'CRC', BZ: 'BZD',
+  JM: 'JMD', TT: 'TTD', DO: 'DOP', BB: 'BBD', HT: 'HTG',
+  PA: 'USD', EC: 'USD', SV: 'USD', PR: 'USD',
 };
 
 function decimalsFor(currency) {
@@ -952,12 +986,28 @@ function loadDB() {
       rates: {
         base: 'USD',
         values: { 
-          USD: 1, EUR: 0.93, CNY: 7, CAD: 1.35, BRL: 5.2, GBP: 0.79, JPY: 145,
+          // Major
+          USD: 1, EUR: 0.93, GBP: 0.79, CHF: 0.90, CAD: 1.35,
+          AUD: 1.52, NZD: 1.63,
+          // Asia-Pacific
+          CNY: 7.25, JPY: 149, KRW: 1340, HKD: 7.82, SGD: 1.34,
+          TWD: 31, THB: 34, MYR: 4.65, IDR: 15600, PHP: 56,
+          VND: 24500, INR: 83, PKR: 278, BDT: 110, LKR: 320,
+          // Europe non-Euro
+          SEK: 10.5, NOK: 10.7, DKK: 6.89, PLN: 3.95, CZK: 22.7,
+          HUF: 360, RON: 4.62, RUB: 90, TRY: 32, UAH: 37,
+          // Middle East
+          SAR: 3.75, AED: 3.67, QAR: 3.64, KWD: 0.31, BHD: 0.38,
+          OMR: 0.38, ILS: 3.71,
+          // Americas
+          BRL: 5.2, MXN: 17, ARS: 850, CLP: 910, COP: 3900, PEN: 3.7,
+          // Africa
           NGN: 1540, GHS: 12, XAF: 600, XOF: 600, ZAR: 19,
           KES: 130, TZS: 2650, UGX: 3800, RWF: 1300, ETB: 52,
-          BWP: 14, ZWL: 360, MZN: 65, NAD: 19, LSL: 19,
           EGP: 50, TND: 3.1, MAD: 10, LYD: 4.8, DZD: 135,
-          ERN: 15, AOA: 835, SOS: 570, SDG: 550, GMD: 65, MUR: 45, SCR: 13
+          BWP: 14, ZWL: 360, MZN: 65, NAD: 19, LSL: 19,
+          ERN: 15, AOA: 835, SOS: 570, SDG: 550, GMD: 65,
+          MUR: 45, SCR: 13, ZMW: 25, MWK: 1700, GNF: 8600,
         },
         updatedAt: Date.now()
       }
@@ -979,6 +1029,33 @@ function saveDB(db) {
   fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
   logger.debug('Database saved', { timestamp: Date.now() });
 }
+
+// ==================== LIVE FX RATE REFRESH ====================
+// Uses open.er-api.com (free, no API key required, updates every hour)
+// Falls back gracefully to seeded rates if the request fails.
+async function fetchLiveRates() {
+  try {
+    const response = await axios.get('https://open.er-api.com/v6/latest/USD', { timeout: 10000 });
+    const liveRates = response.data && response.data.rates;
+    if (!liveRates || Object.keys(liveRates).length < 20) throw new Error('Unexpected response shape');
+
+    const db = loadDB();
+    // Merge: start with existing rates (keeps currencies not in the free API like XAF/XOF)
+    // then overlay with live data so real currencies are always fresh.
+    const merged = { ...db.rates.values, ...liveRates };
+    // Force USD = 1 as the base
+    merged.USD = 1;
+    db.rates = { base: 'USD', values: merged, updatedAt: Date.now(), source: 'open.er-api.com' };
+    saveDB(db);
+    logger.info(`[FX] Live rates refreshed — ${Object.keys(liveRates).length} currencies`);
+  } catch (err) {
+    logger.warn('[FX] Rate refresh failed — using cached rates', { error: err.message });
+  }
+}
+
+// Refresh on startup (async, non-blocking) and every 6 hours
+fetchLiveRates();
+setInterval(fetchLiveRates, 6 * 60 * 60 * 1000);
 
 // ==================== EXPRESS APP INITIALIZATION ====================
 
@@ -1223,15 +1300,8 @@ app.post('/auth/register',
   const id = uuidv4();
   const passwordHash = bcrypt.hashSync(password, 8);
   
-  // Auto-detect preferred currency from region
-  const regionToCurrency = { 
-    GQ: 'XAF', NG: 'NGN', GH: 'GHS', ZA: 'ZAR', KE: 'KES', TZ: 'TZS', 
-    UG: 'UGX', RW: 'RWF', ET: 'ETB', EG: 'EGP', TN: 'TND', MA: 'MAD',
-    LY: 'LYD', DZ: 'DZD', AO: 'AOA', ER: 'ERN', SO: 'SOS', SD: 'SDG',
-    GM: 'GMD', MU: 'MUR', SC: 'SCR', BW: 'BWP', ZW: 'ZWL', MZ: 'MZN',
-    NA: 'NAD', LS: 'LSL'
-  };
-  const preferredCurrency = regionToCurrency[region] || 'XAF';
+  // Auto-detect preferred currency using the global country→currency map
+  const preferredCurrency = COUNTRY_TO_CURRENCY[region] || 'XAF';
   
   const user = { 
     id, 
@@ -1254,8 +1324,8 @@ app.post('/auth/register',
   };
   db.users.push({ ...user, passwordHash });
 
-  // create wallet
-  const wallet = { id: uuidv4(), userId: id, balances: [{ currency: 'USD', amount: 0 }], createdAt: Date.now(), maxLimitUSD: 250000 };
+  // create wallet — seed with user's preferred currency so their wallet opens in their local currency
+  const wallet = { id: uuidv4(), userId: id, balances: [{ currency: preferredCurrency, amount: 0 }], createdAt: Date.now(), maxLimitUSD: 250000 };
   db.wallets.push(wallet);
 
   // Register first device (no alert needed on registration)
@@ -1442,10 +1512,12 @@ app.get('/wallets', authMiddleware, (req, res) => {
   
   // Auto-create wallet if user has none (backward compatibility fix)
   if (wallets.length === 0) {
+    const autoUser = db.users.find(u => u.id === req.user.userId);
+    const autoCurrency = autoUser?.preferredCurrency || 'XAF';
     const wallet = { 
       id: uuidv4(), 
       userId: req.user.userId, 
-      balances: [{ currency: 'USD', amount: 0 }], 
+      balances: [{ currency: autoCurrency, amount: 0 }], 
       createdAt: Date.now(), 
       maxLimitUSD: 250000 
     };
@@ -1548,7 +1620,16 @@ app.post('/transactions', authMiddleware, (req, res) => {
   // Get receiver's preferred currency and auto-convert setting
   const toUser = db.users.find(u => u.id === toWallet.userId);
   const shouldAutoConvert = toUser?.autoConvertIncoming !== false;
-  const receiverCurrency = shouldAutoConvert ? (toUser?.preferredCurrency || currency) : currency;
+  // Determine receiver's local currency:
+  //   1. Explicit preferredCurrency on user record (set at registration or via settings)
+  //   2. Country-based lookup from user's region (global map covers all countries)
+  //   3. Wallet's primary balance currency (for existing wallets before this feature)
+  //   4. Fall back to sender's currency (no conversion)
+  const receiverCurrencyByRegion = COUNTRY_TO_CURRENCY[toUser?.region] || null;
+  const receiverWalletCurrency = toWallet.balances?.[0]?.currency || null;
+  const receiverCurrency = shouldAutoConvert
+    ? (toUser?.preferredCurrency || receiverCurrencyByRegion || receiverWalletCurrency || currency)
+    : currency;
   
   // Deduct from sender in original currency
   fromBalance.amount -= amount;
@@ -1647,6 +1728,58 @@ app.post('/withdrawals', authMiddleware, (req, res) => {
 app.get('/rates', (req, res) => {
   const db = loadDB();
   res.json(db.rates);
+});
+
+// FX Quote — preview a cross-currency conversion before sending
+// GET /fx-quote?from=XAF&to=NGN&amount=500000  (amount in minor units of 'from')
+app.get('/fx-quote', authMiddleware, (req, res) => {
+  const { from, to, amount } = req.query;
+  if (!from || !to || !amount) return res.status(400).json({ error: 'from, to, and amount are required' });
+  const sentAmountMinor = Math.round(Number(amount));
+  if (isNaN(sentAmountMinor) || sentAmountMinor <= 0) return res.status(400).json({ error: 'amount must be a positive integer in minor units' });
+
+  const db = loadDB();
+  const rates = db.rates.values;
+  const fromRate = rates[from];
+  const toRate = rates[to];
+  if (!fromRate) return res.status(400).json({ error: `Unsupported currency: ${from}` });
+  if (!toRate) return res.status(400).json({ error: `Unsupported currency: ${to}` });
+
+  if (from === to) {
+    return res.json({
+      fromCurrency: from, toCurrency: to,
+      sentAmountMinor, receivedAmountMinor: sentAmountMinor,
+      rate: 1, rateDisplay: `1 ${from} = 1 ${to}`,
+      isSameCurrency: true, ratesUpdatedAt: db.rates.updatedAt,
+    });
+  }
+
+  // Convert: minor(from) → major(from) → USD → major(to) → minor(to)
+  const amountMajorFrom = minorToMajor(sentAmountMinor, from);
+  const amountUSD = amountMajorFrom / fromRate;
+  const amountMajorTo = amountUSD * toRate;
+  const receivedAmountMinor = majorToMinor(amountMajorTo, to);
+  // Exchange rate: 1 unit of fromCurrency in toCurrency
+  const rate = toRate / fromRate;
+
+  res.json({
+    fromCurrency: from, toCurrency: to,
+    sentAmountMinor, receivedAmountMinor,
+    rate, rateDisplay: `1 ${from} = ${rate.toFixed(6)} ${to}`,
+    isSameCurrency: false, ratesUpdatedAt: db.rates.updatedAt,
+  });
+});
+
+// Get a wallet's primary currency (used by sender to show FX preview for recipient)
+// Only returns currency code — no balance or owner data exposed.
+app.get('/wallets/:id/currency', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const wallet = db.wallets.find(w => w.id === req.params.id);
+  if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+  const owner = db.users.find(u => u.id === wallet.userId);
+  // Prefer user's explicitly set preferredCurrency, then first balance currency
+  const currency = owner?.preferredCurrency || wallet.balances?.[0]?.currency || 'XAF';
+  res.json({ currency, walletId: req.params.id });
 });
 
 // ==================== DEPOSIT / TOP-UP ENDPOINTS ====================

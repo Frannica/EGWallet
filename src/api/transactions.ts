@@ -1,6 +1,48 @@
 import { API_BASE } from './client';
 import { v4 as uuidv4 } from 'uuid';
 
+/** Fetch the primary currency of any wallet (used to preview FX before sending). */
+export async function getWalletCurrency(
+  token: string,
+  walletId: string
+): Promise<string> {
+  const res = await fetch(`${API_BASE}/wallets/${walletId}/currency`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return 'XAF'; // graceful fallback
+  const data = await res.json();
+  return data.currency || 'XAF';
+}
+
+export interface FxQuote {
+  fromCurrency: string;
+  toCurrency: string;
+  sentAmountMinor: number;
+  receivedAmountMinor: number;
+  rate: number;
+  rateDisplay: string;
+  isSameCurrency: boolean;
+}
+
+/** Get a real-time FX quote for a cross-currency transfer preview. */
+export async function fetchFxQuote(
+  token: string,
+  from: string,
+  to: string,
+  amountMinor: number
+): Promise<FxQuote | null> {
+  try {
+    const res = await fetch(
+      `${API_BASE}/fx-quote?from=${from}&to=${to}&amount=${amountMinor}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
 export async function sendTransaction(
   token: string,
   fromWalletId: string,
