@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Button, ScrollView, Alert, TouchableOpacity, Modal, FlatList, Switch, StyleSheet, TextInput } from 'react-native';
+import { View, Text, ScrollView, Alert, TouchableOpacity, Modal, FlatList, Switch, StyleSheet, TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { useBiometric } from '../auth/BiometricContext';
 import { useNavigation } from '@react-navigation/native';
-import { KYCDisclosure } from '../components/KYCDisclosure';
-import { getCurrencySymbol, getCurrencyName, CURRENCY_INFO } from '../utils/currency';
+import { getCurrencySymbol, getCurrencyName, CURRENCY_INFO, formatCurrency, convert } from '../utils/currency';
+import { listWallets } from '../api/auth';
+import { fetchRates, DEMO_RATES, Rates } from '../api/client';
 
 // Full list ordered: popular first, then alphabetical by code
 const CURRENCIES = Object.keys(CURRENCY_INFO).sort((a, b) => {
@@ -30,10 +31,26 @@ export default function SettingsScreen() {
   const [appLock, setAppLock] = useState(false);
   const [faceId, setFaceId] = useState(false);
   const [trustedDevice, setTrustedDevice] = useState(false);
+  const [walletInfo, setWalletInfo] = useState<{ id: string; maxLimitUSD: number; usdValue: number } | null>(null);
 
   useEffect(() => {
     AsyncStorage.getItem('@egwallet:username').then(v => { if (v) setUsername(v); });
   }, []);
+
+  useEffect(() => {
+    if (!auth.token) return;
+    Promise.all([
+      listWallets(auth.token),
+      fetchRates().catch(() => DEMO_RATES),
+    ]).then(([walletRes, ratesData]: [any, Rates]) => {
+      const wallet = walletRes.wallets?.[0];
+      if (!wallet) return;
+      const usdValue = (wallet.balances || []).reduce(
+        (s: number, b: any) => s + convert(b.amount, b.currency, 'USD', ratesData), 0
+      );
+      setWalletInfo({ id: wallet.id, maxLimitUSD: wallet.maxLimitUSD || 250000, usdValue });
+    }).catch(() => {});
+  }, [auth.token]);
 
   const saveUsername = async () => {
     const clean = usernameInput.trim();
@@ -142,11 +159,6 @@ export default function SettingsScreen() {
     <ScrollView style={styles.container}>
       <View style={styles.content}>
 
-        {/* KYC & Limits Disclosure */}
-        <View style={styles.section}>
-          <KYCDisclosure region="GQ" />
-        </View>
-        
         {/* Account Section */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
@@ -217,6 +229,37 @@ export default function SettingsScreen() {
             <Ionicons name="log-out" size={20} color="#007AFF" />
             <Text style={styles.signOutText}>Sign Out</Text>
           </TouchableOpacity>
+        </View>
+
+        {/* Wallet Details */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="wallet" size={24} color="#1565C0" />
+            <Text style={styles.sectionTitle}>WALLET DETAILS</Text>
+          </View>
+          <View style={styles.cardContent}>
+            <View style={styles.wdRow}>
+              <Text style={styles.wdLabel}>Wallet ID</Text>
+              <Text style={styles.wdValue}>
+                {walletInfo ? `${walletInfo.id.substring(0, 14)}...` : '—'}
+              </Text>
+            </View>
+            <View style={styles.wdRow}>
+              <Text style={styles.wdLabel}>Status</Text>
+              <View style={styles.wdStatusBadge}>
+                <View style={styles.wdStatusDot} />
+                <Text style={styles.wdStatusText}>Active</Text>
+              </View>
+            </View>
+            <View style={[styles.wdRow, { borderBottomWidth: 0 }]}>
+              <Text style={styles.wdLabel}>Capacity (USD)</Text>
+              <Text style={styles.wdValue}>
+                {walletInfo
+                  ? `$${Math.round(walletInfo.usdValue / 100).toLocaleString()} / $${walletInfo.maxLimitUSD.toLocaleString()}`
+                  : `— / $250,000`}
+              </Text>
+            </View>
+          </View>
         </View>
 
         {/* Identity Verification Section */}
@@ -417,8 +460,10 @@ export default function SettingsScreen() {
         </View>
       </View>
 
-      {/* Username Modal */}
-      <Modal visible={showUsernameModal} transparent animationType="fade">
+    </ScrollView>
+
+    {/* Username Modal */}
+    <Modal visible={showUsernameModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.usernameModal}>
             <Text style={styles.usernameModalTitle}>Set Username</Text>
@@ -491,8 +536,7 @@ export default function SettingsScreen() {
             />
           </View>
         </View>
-      </Modal>
-    </ScrollView>
+    </Modal>
     </LinearGradient>
   );
 }
@@ -884,5 +928,42 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#E1E8ED',
     marginHorizontal: 16,
+  },
+  wdRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 11,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(21,101,192,0.06)',
+  },
+  wdLabel: {
+    fontSize: 13,
+    color: '#657786',
+  },
+  wdValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#0D1B2E',
+  },
+  wdStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    gap: 5,
+  },
+  wdStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#00C853',
+  },
+  wdStatusText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#15803D',
   },
 });

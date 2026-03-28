@@ -6,7 +6,7 @@ import { API_BASE } from '../api/client';
 import { getDeviceFingerprint, getDeviceDisplayName, getDeviceType } from '../utils/deviceInfo';
 
 type AuthState = {
-  user: { id: string; email: string; preferredCurrency?: string; autoConvertIncoming?: boolean } | null;
+  user: { id: string; email: string; preferredCurrency?: string; autoConvertIncoming?: boolean; region?: string } | null;
   token: string | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
@@ -29,7 +29,7 @@ export function useAuth() {
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<{ id: string; email: string; preferredCurrency?: string; autoConvertIncoming?: boolean } | null>(null);
+  const [user, setUser] = useState<{ id: string; email: string; preferredCurrency?: string; autoConvertIncoming?: boolean; region?: string } | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 

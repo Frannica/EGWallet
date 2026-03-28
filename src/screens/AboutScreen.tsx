@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, ScrollView, Linking, Alert, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import config from '../config/env';
+import { FEE_SCHEDULE } from '../config/fees';
 
 export default function AboutScreen() {
   const appVersion = '1.0.0';
@@ -119,7 +120,7 @@ export default function AboutScreen() {
         {/* Limits & Fees */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
-            <Ionicons name="shield-checkmark" size={24} color="#007AFF" />
+            <Ionicons name="pricetag" size={24} color="#007AFF" />
             <Text style={styles.cardTitle}>Limits & Fees</Text>
           </View>
           <View style={styles.limitItem}>
@@ -130,10 +131,24 @@ export default function AboutScreen() {
             <Ionicons name="wallet" size={20} color="#657786" />
             <Text style={styles.limitText}>Wallet capacity: $250,000 USD</Text>
           </View>
-          <View style={[styles.limitItem, { borderBottomWidth: 0 }]}>
-            <Ionicons name="pricetag" size={20} color="#657786" />
-            <Text style={styles.limitText}>Fees: Standard rate applies (check with your bank)</Text>
+          {/* Fee schedule */}
+          <View style={{ marginTop: 8 }}>
+            {FEE_SCHEDULE.map((item, idx) => (
+              <View
+                key={item.type}
+                style={[
+                  styles.feeRow,
+                  idx === FEE_SCHEDULE.length - 1 && { borderBottomWidth: 0 },
+                ]}
+              >
+                <Text style={styles.feeType}>{item.type}</Text>
+                <Text style={[styles.feeAmount, item.fee === 'Free' ? styles.feeFree : styles.feePaid]}>
+                  {item.fee}
+                </Text>
+              </View>
+            ))}
           </View>
+          <Text style={styles.feeNote}>All fees displayed before confirmation. No hidden charges.</Text>
         </View>
 
         {/* Links */}
@@ -269,6 +284,36 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#657786',
     lineHeight: 20,
+  },
+  feeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5F5F5',
+  },
+  feeType: {
+    fontSize: 14,
+    color: '#1C1E21',
+    flex: 1,
+  },
+  feeAmount: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  feeFree: {
+    color: '#2E7D32',
+  },
+  feePaid: {
+    color: '#1565C0',
+  },
+  feeNote: {
+    fontSize: 11,
+    color: '#999',
+    marginTop: 10,
+    fontStyle: 'italic',
   },
   linkButton: {
     flexDirection: 'row',

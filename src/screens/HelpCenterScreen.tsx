@@ -47,7 +47,7 @@ const FAQS: FAQ[] = [
   {
     category: 'Virtual Cards',
     question: 'Are virtual cards free?',
-    answer: 'Yes, you can create up to 5 virtual cards for free. Each card has a daily spending limit of $1,000 USD.',
+    answer: 'Yes, virtual cards are free to create. You can use them for online purchases and digital subscriptions. Spending limits depend on your account tier.',
   },
   {
     category: 'Budgets',

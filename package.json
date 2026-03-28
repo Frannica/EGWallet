@@ -25,6 +25,7 @@
     "expo-linear-gradient": "^15.0.8",
     "expo-local-authentication": "~17.0.8",
     "expo-localization": "~17.0.8",
+    "expo-modules-core": "^3.0.29",
     "expo-network": "~8.0.8",
     "expo-notifications": "~0.32.16",
     "expo-print": "~15.0.8",

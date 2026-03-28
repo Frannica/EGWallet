@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity } from 'react-native';
-import { formatCurrency } from '../utils/currency';
+import { formatCurrency, convert } from '../utils/currency';
+import { fetchRates, Rates, DEMO_RATES } from '../api/client';
 import { useRoute, RouteProp, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../auth/AuthContext';
 import { fetchTransactions } from '../api/transactions';
@@ -50,6 +51,11 @@ export default function TransactionHistory() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<'all' | 'payroll' | 'sent' | 'received'>(routeFilter || 'all');
+  const [rates, setRates] = useState<Rates | null>(null);
+
+  useEffect(() => {
+    fetchRates().then(setRates).catch(() => setRates(DEMO_RATES));
+  }, []);
 
   const DEMO_TXS = [
     { id: 'dtx-1', type: 'receive', direction: 'in', amount: 50000, currency: 'XAF', status: 'completed', timestamp: Date.now() - 1 * 3600000, memo: 'Salary payment' },
@@ -105,6 +111,31 @@ export default function TransactionHistory() {
 
   // Group filtered transactions by date period
   const groupedData = useMemo(() => groupTransactions(filteredTxs), [filteredTxs]);
+
+  // Smart Insights — computed from all loaded transactions, last 7 days
+  const insights = useMemo(() => {
+    if (!rates || txs.length === 0) return null;
+    const preferredCurrency = auth.user?.preferredCurrency || 'USD';
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const weekTxs = txs.filter(t => {
+      const ts = typeof t.timestamp === 'string' ? new Date(t.timestamp).getTime() : (t.timestamp as number);
+      return ts >= weekAgo;
+    });
+    const resolveDir = (t: any) => t.direction || (t.type === 'deposit' || t.type === 'receive' ? 'in' : 'out');
+    const spent = weekTxs
+      .filter(t => resolveDir(t) === 'out')
+      .reduce((s: number, t: any) => s + convert(t.amount, t.currency || preferredCurrency, preferredCurrency, rates), 0);
+    const received = weekTxs
+      .filter(t => resolveDir(t) === 'in')
+      .reduce((s: number, t: any) => s + convert(t.amount, t.currency || preferredCurrency, preferredCurrency, rates), 0);
+    const cats: Record<string, number> = {};
+    txs.forEach(t => {
+      const cat = (t.type === 'payroll' || t.type === 'payroll_request') ? 'Payroll' : resolveDir(t) === 'in' ? 'Received' : 'Transfers';
+      cats[cat] = (cats[cat] || 0) + 1;
+    });
+    const topCat = Object.entries(cats).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    return { spent, received, topCategory: topCat, currency: preferredCurrency };
+  }, [txs, rates]);
 
   // Show filter bar whenever there are transactions
   const showFilterBar = txs.length > 0;
@@ -214,6 +245,60 @@ export default function TransactionHistory() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#007AFF']} />
         }
         contentContainerStyle={styles.listContent}
+        ListHeaderComponent={insights ? (
+          <View style={styles.insightsCard}>
+            <View style={styles.insightsHeader}>
+              <View style={styles.insightsTitleRow}>
+                <Ionicons name="flash" size={18} color="#1565C0" />
+                <Text style={styles.insightsTitle}>Smart Insights</Text>
+              </View>
+              <Text style={styles.insightsPeriod}>This week</Text>
+            </View>
+            <View style={styles.insightsStats}>
+              <View style={styles.insightStat}>
+                <Text style={styles.insightStatValue}>{formatCurrency(insights.spent, insights.currency)}</Text>
+                <Text style={styles.insightStatLabel}>Spent</Text>
+              </View>
+              <View style={styles.insightDivider} />
+              <View style={styles.insightStat}>
+                <Text style={[styles.insightStatValue, { color: '#15803D' }]}>{formatCurrency(insights.received, insights.currency)}</Text>
+                <Text style={styles.insightStatLabel}>Received</Text>
+              </View>
+            </View>
+            {insights.topCategory && (insights.spent > 0 || insights.received > 0) && (
+              <View style={styles.insightHighlight}>
+                <Text style={styles.insightHighlightText}>
+                  Top category: <Text style={{ fontWeight: '700', color: '#1565C0' }}>{insights.topCategory}</Text>
+                </Text>
+              </View>
+            )}
+            <View style={styles.flowChart}>
+              <Text style={styles.flowChartTitle}>Money Flow</Text>
+              <View style={styles.flowBarsContainer}>
+                {(() => {
+                  const maxVal = Math.max(insights.spent, insights.received, 1);
+                  const inH = Math.max(12, (insights.received / maxVal) * 64);
+                  const outH = Math.max(12, (insights.spent / maxVal) * 64);
+                  return (
+                    <>
+                      <View style={styles.flowBarGroup}>
+                        <View style={[styles.flowBar, { height: inH, backgroundColor: '#22C55E' }]} />
+                        <Text style={styles.flowBarLabel}>In</Text>
+                      </View>
+                      <View style={styles.flowBarGroup}>
+                        <View style={[styles.flowBar, { height: outH, backgroundColor: '#F97316' }]} />
+                        <Text style={styles.flowBarLabel}>Out</Text>
+                      </View>
+                    </>
+                  );
+                })()}
+              </View>
+            </View>
+            {insights.spent === 0 && insights.received === 0 && (
+              <Text style={styles.insightNoData}>Send or receive money to see your weekly flow</Text>
+            )}
+          </View>
+        ) : null}
         ListEmptyComponent={
           <View style={{ padding: 32, alignItems: 'center' }}>
             <Text style={{ fontSize: 15, color: '#9BAEC8', textAlign: 'center' }}>
@@ -236,6 +321,7 @@ export default function TransactionHistory() {
           const isPayroll = item.type === 'payroll' || item.type === 'payroll_request';
           const isQrPayment = item.type === 'qr_payment';
           const isWithdrawal = item.type === 'withdrawal';
+          const isPaymentRequest = item.type === 'payment_request';
           const isIn = item.direction === 'in';
           const employerName = item.payrollMetadata?.employerName || 'Employer';
 
@@ -243,6 +329,8 @@ export default function TransactionHistory() {
             ? `Salary from ${employerName}`
             : isQrPayment
             ? (isIn ? 'QR Payment Received' : 'QR Payment Sent')
+            : isPaymentRequest
+            ? 'Payment Request Sent'
             : isWithdrawal
             ? 'Withdrawal'
             : isIn
@@ -253,6 +341,8 @@ export default function TransactionHistory() {
             ? 'briefcase'
             : isQrPayment
             ? 'qr-code'
+            : isPaymentRequest
+            ? 'time-outline'
             : isWithdrawal
             ? 'log-out'
             : isIn
@@ -263,6 +353,8 @@ export default function TransactionHistory() {
             ? '#1976D2'
             : isQrPayment
             ? '#7C3AED'
+            : isPaymentRequest
+            ? '#F57C00'
             : isWithdrawal
             ? '#F57C00'
             : isIn
@@ -273,6 +365,8 @@ export default function TransactionHistory() {
             ? '#E3F2FD'
             : isQrPayment
             ? '#F3E8FF'
+            : isPaymentRequest
+            ? '#FFF3E0'
             : isWithdrawal
             ? '#FFF3E0'
             : isIn
@@ -280,7 +374,7 @@ export default function TransactionHistory() {
             : '#FFEBEE';
 
           const showPlus = isIn || isPayroll;
-          const accentColor = isPayroll ? '#1976D2' : isWithdrawal ? '#F57C00' : isIn ? '#22C55E' : '#1565C0';
+          const accentColor = isPayroll ? '#1976D2' : isWithdrawal ? '#F57C00' : isPaymentRequest ? '#F57C00' : isIn ? '#22C55E' : '#1565C0';
           
           return (
             <View style={[styles.transactionCard, { borderLeftWidth: 3, borderLeftColor: accentColor }]}>
@@ -307,13 +401,21 @@ export default function TransactionHistory() {
                   )}
                   
                   <View style={styles.transactionDetails}>
-                    <View style={styles.statusBadge}>
+                    <View style={[styles.statusBadge, { backgroundColor: statusColor + '20' }]}>
+                      <Ionicons name={statusIcon as any} size={11} color={statusColor} />
                       <Text style={[styles.statusText, { color: statusColor }]}>
-                        {item.status}
+                        {(item.status ?? 'unknown').charAt(0).toUpperCase() + (item.status ?? 'unknown').slice(1)}
                       </Text>
                     </View>
                     <Text style={styles.transactionTime}>{formatDate(item.timestamp)}</Text>
                   </View>
+
+                  {/* Reference ID */}
+                  {item.id && (
+                    <Text style={styles.refId} numberOfLines={1}>
+                      Ref: {item.id.length > 18 ? item.id.substring(0, 18) + '…' : item.id}
+                    </Text>
+                  )}
 
                   {item.wasConverted && item.receivedCurrency !== item.currency && (
                     <View style={styles.conversionInfo}>
@@ -463,15 +565,17 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
+    paddingVertical: 3,
+    borderRadius: 6,
     marginRight: 8,
+    gap: 4,
   },
   statusText: {
     fontSize: 11,
-    fontWeight: '600',
-    textTransform: 'capitalize',
+    fontWeight: '700',
   },
   transactionTime: {
     fontSize: 13,
@@ -495,6 +599,12 @@ const styles = StyleSheet.create({
     color: '#657786',
     marginTop: 4,
     fontStyle: 'italic',
+  },
+  refId: {
+    fontSize: 11,
+    color: '#AAB8C2',
+    marginTop: 3,
+    fontFamily: 'monospace',
   },
   actionButtons: {
     flexDirection: 'row',
@@ -576,9 +686,123 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 8,
     paddingHorizontal: 12,
-    backgroundColor: '#FFEBEE',
+    backgroundColor: '#FFF0EE',
     borderRadius: 8,
     gap: 6,
+  },
+
+  // Smart Insights
+  insightsCard: {
+    marginBottom: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(21,101,192,0.1)',
+    shadowColor: '#1565C0',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  insightsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  insightsTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  insightsTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0D1B2E',
+  },
+  insightsPeriod: {
+    fontSize: 12,
+    color: '#9BAEC8',
+    fontWeight: '500',
+  },
+  insightsStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  insightStat: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  insightDivider: {
+    width: 1,
+    height: 44,
+    backgroundColor: '#E1E8ED',
+  },
+  insightStatValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0D1B2E',
+    letterSpacing: -0.5,
+  },
+  insightStatLabel: {
+    fontSize: 11,
+    color: '#9BAEC8',
+    fontWeight: '600',
+    marginTop: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  insightHighlight: {
+    backgroundColor: '#EEF3FA',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 14,
+  },
+  insightHighlightText: {
+    fontSize: 13,
+    color: '#5C6E8A',
+  },
+  flowChart: {
+    borderTopWidth: 1,
+    borderTopColor: '#F0F4F9',
+    paddingTop: 14,
+  },
+  flowChartTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#9BAEC8',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 12,
+  },
+  flowBarsContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 20,
+    height: 84,
+  },
+  flowBarGroup: {
+    alignItems: 'center',
+    gap: 6,
+  },
+  flowBar: {
+    width: 52,
+    borderRadius: 8,
+  },
+  flowBarLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#657786',
+  },
+  insightNoData: {
+    fontSize: 13,
+    color: '#9BAEC8',
+    textAlign: 'center',
+    marginTop: 12,
+    fontStyle: 'italic',
   },
   fraudButtonText: {
     fontSize: 14,

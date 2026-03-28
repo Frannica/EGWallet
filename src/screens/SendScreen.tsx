@@ -5,10 +5,11 @@ import { useAuth } from '../auth/AuthContext';
 import { listWallets } from '../api/auth';
 import { sendTransaction, getWalletCurrency, fetchFxQuote, FxQuote } from '../api/transactions';
 import { useNavigation } from '@react-navigation/native';
-import { majorToMinor, decimalsFor, formatCurrency } from '../utils/currency';
+import { majorToMinor, decimalsFor, formatCurrency, CURRENCY_INFO } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { useToast } from '../utils/toast';
 import { getLocalBalances, debitLocalBalance, logLocalTransaction } from '../utils/localBalance';
+import { WITHDRAW_LOCAL_RATE, WITHDRAW_INTL_RATE, FX_CONVERSION_RATE } from '../config/fees';
 
 interface PaymentMethod {
   id: string;
@@ -17,7 +18,8 @@ interface PaymentMethod {
   last4: string;
 }
 
-const FEE_PERCENTAGE = 0.01; // 1% fee
+// Sends are FREE; FX fee is applied on cross-currency conversion (backend)
+const FEE_PERCENTAGE = 0;
 
 export default function SendScreen() {
   const auth = useAuth();
@@ -41,6 +43,7 @@ export default function SendScreen() {
   const [accountNumber, setAccountNumber] = useState<string>('');
   const [accountName, setAccountName] = useState<string>('');
   const [withdrawalMethod, setWithdrawalMethod] = useState<'bank' | 'mobile' | 'debit'>('bank');
+  const [isIntlWithdrawal, setIsIntlWithdrawal] = useState(false);
   const [withdrawalCardNumber, setWithdrawalCardNumber] = useState<string>('');
   const [withdrawalCardExpiry, setWithdrawalCardExpiry] = useState<string>('');
 
@@ -221,9 +224,12 @@ export default function SendScreen() {
       (navigation as any).navigate('Receipt', {
         amount: majorToMinor(parseFloat(sendAmt) || 0, sendCurrency),
         currency: sendCurrency,
+        senderCurrency: sendCurrency,
         recipientName: recipientId || 'Recipient',
         recipientId,
         timestamp: Date.now(),
+        type: 'send',
+        status: 'completed',
       });
     }, 1200);
   }
@@ -249,6 +255,7 @@ export default function SendScreen() {
           amount: amountMinor,
           currency,
           method: withdrawalMethod,
+          isInternational: isIntlWithdrawal,
           bankName: withdrawalMethod === 'debit' ? 'Debit Card' : bankName,
           accountNumber: withdrawalMethod === 'debit' ? withdrawalCardNumber.replace(/\s/g, '') : accountNumber,
           accountName,
@@ -264,16 +271,27 @@ export default function SendScreen() {
       // Debit local balance to keep it in sync with backend
       await debitLocalBalance(currency, amountMinor);
       await logLocalTransaction({ type: 'withdrawal', direction: 'out', amount: amountMinor, currency, memo: `Withdrawal to ${withdrawalMethod === 'debit' ? 'card' : 'bank account'}` });
-      const arrivalMsg = withdrawalMethod === 'debit'
-        ? 'Funds will arrive instantly on your debit card.'
-        : 'Funds will arrive within 1-3 business days.';
-      Alert.alert('Withdrawal Submitted ✅', `Withdrawal request submitted! ${arrivalMsg}`);
+      const wData = await response.json();
+      const feeCalc = wData.feeBreakdown;
       loadWallets();
       setAmount('');
       setBankName('');
       setAccountNumber('');
       setAccountName('');
       setShowConfirmation(false);
+      (navigation as any).navigate('Receipt', {
+        amount: amountMinor,
+        currency,
+        senderCurrency: currency,
+        fee: feeCalc?.fee ?? Math.round(amountMinor * (isIntlWithdrawal ? WITHDRAW_INTL_RATE : WITHDRAW_LOCAL_RATE)),
+        feeLabel: `Withdrawal Fee (${isIntlWithdrawal ? '1.75%' : '0.8%'})`,
+        recipientName: accountName || (withdrawalMethod === 'debit' ? 'Debit Card' : bankName),
+        recipientId: withdrawalMethod === 'debit' ? `Card ending ${withdrawalCardNumber.replace(/\s/g, '').slice(-4)}` : accountNumber,
+        timestamp: Date.now(),
+        transactionId: wData.withdrawal?.id,
+        type: 'withdrawal',
+        status: 'pending',
+      });
     } catch (e: any) {
       // Backend unavailable — debit local balance so wallet reflects the withdrawal
       await debitLocalBalance(currency, amountMinor);
@@ -283,10 +301,18 @@ export default function SendScreen() {
       setBankName('');
       setAccountNumber('');
       setAccountName('');
-      const arrivalMsgFallback = withdrawalMethod === 'debit'
-        ? 'Funds will arrive instantly on your debit card.'
-        : 'Funds will arrive within 1-3 business days.';
-      toast.show(`Withdrawal Submitted ✅ ${arrivalMsgFallback}`);
+      (navigation as any).navigate('Receipt', {
+        amount: amountMinor,
+        currency,
+        senderCurrency: currency,
+        fee: Math.round(amountMinor * (isIntlWithdrawal ? WITHDRAW_INTL_RATE : WITHDRAW_LOCAL_RATE)),
+        feeLabel: `Withdrawal Fee (${isIntlWithdrawal ? '1.75%' : '0.8%'})`,
+        recipientName: accountName || (withdrawalMethod === 'debit' ? 'Debit Card' : bankName),
+        recipientId: withdrawalMethod === 'debit' ? `Card ending ${withdrawalCardNumber.replace(/\s/g, '').slice(-4)}` : accountNumber,
+        timestamp: Date.now(),
+        type: 'withdrawal',
+        status: 'pending',
+      });
     } finally {
       setLoading(false);
     }
@@ -296,29 +322,44 @@ export default function SendScreen() {
     const amt = parseFloat(amount);
     if (!amt || amt <= 0) return null;
 
-    const fee = amt * FEE_PERCENTAGE;
-    const total = amt + fee;
-    const netSent = amt - fee; // amount after fee that gets converted
+    // Transfers: FREE (0 sender fee). FX fee is deducted on the received side by backend.
+    // Withdrawals: fee is deducted from the sent amount.
+    const feeRate = activeTab === 'withdraw'
+      ? (isIntlWithdrawal ? WITHDRAW_INTL_RATE : WITHDRAW_LOCAL_RATE)
+      : 0;
+    const fee = amt * feeRate;
+    const total = amt + (activeTab === 'withdraw' ? 0 : 0); // total deducted from wallet = amount
+    const netSent = amt - fee; // amount after withdrawal fee (or same as amt for transfers)
 
     // FX-aware receiver amount
     const effectiveToCurrency = receiverCurrency || currency;
     const isCrossCurrency = effectiveToCurrency !== currency;
+
+    // For transfers: FX fee (1.15%) is taken from the converted amount on receiver's side
+    const fxFeeRate = isCrossCurrency && activeTab === 'transfer' ? FX_CONVERSION_RATE : 0;
+
     let receiverGetsMinor: number;
     if (isCrossCurrency && fxQuote) {
-      receiverGetsMinor = fxQuote.receivedAmountMinor;
+      // Backend quote already applies 1.15% FX fee — use receivedAmountMinorAfterFee if present
+      receiverGetsMinor = (fxQuote as any).receivedAmountMinorAfterFee ?? fxQuote.receivedAmountMinor;
     } else {
       receiverGetsMinor = majorToMinor(netSent, currency);
     }
 
     return {
       amount: amt,
-      fee,
-      total,
+      fee,          // withdrawal fee (0 for transfers)
+      feeRate,
+      fxFeeRate,
+      total: amt,    // wallet always debited the full entered amount
       recipientGets: netSent,
       receiverGetsMinor,
       receiverCurrency: effectiveToCurrency,
       isCrossCurrency,
       rateDisplay: fxQuote?.rateDisplay ?? null,
+      fxFeeAmount: isCrossCurrency && fxQuote
+        ? ((fxQuote as any).fxFeeAmount ?? Math.round(fxQuote.receivedAmountMinor * FX_CONVERSION_RATE))
+        : 0,
     };
   }
 
@@ -360,21 +401,32 @@ export default function SendScreen() {
     setLoading(true);
     try {
       const res = await sendTransaction(auth.token, fromWalletId, toWalletId, amountMinor, currency);
-      loadWallets();
+      await debitLocalBalance(currency, amountMinor);
+      await logLocalTransaction({ type: 'send', direction: 'out', amount: amountMinor, currency });
+      await loadWallets();
       setAmount('');
       setShowConfirmation(false);
       toast.show('Payment Sent \u2705');
       (navigation as any).navigate('Receipt', {
         amount: amountMinor,
         currency,
+        senderCurrency: currency,
+        receiverCurrency: preview?.receiverCurrency ?? currency,
+        fee: preview?.fxFeeAmount ?? 0,
+        feeLabel: preview?.isCrossCurrency ? 'FX Conversion Fee (1.15%)' : undefined,
+        fxRate: preview?.rateDisplay ?? undefined,
         recipientName: toWalletId || 'Recipient',
         recipientId: toWalletId,
         timestamp: Date.now(),
         transactionId: (res as any)?.transaction?.id,
+        type: 'send',
+        status: 'completed',
       });
       setToWalletId('');
     } catch (e: any) {
-      // Demo mode — simulate success
+      // Demo mode — simulate success and track locally so balance + insights update
+      await debitLocalBalance(currency, amountMinor);
+      await logLocalTransaction({ type: 'send', direction: 'out', amount: amountMinor, currency });
       const recip = toWalletId;
       setAmount('');
       setToWalletId('');
@@ -383,9 +435,16 @@ export default function SendScreen() {
       (navigation as any).navigate('Receipt', {
         amount: amountMinor,
         currency,
+        senderCurrency: currency,
+        receiverCurrency: preview?.receiverCurrency ?? currency,
+        fee: preview?.fxFeeAmount ?? 0,
+        feeLabel: preview?.isCrossCurrency ? 'FX Conversion Fee (1.15%)' : undefined,
+        fxRate: preview?.rateDisplay ?? undefined,
         recipientName: recip || 'Recipient',
         recipientId: recip,
         timestamp: Date.now(),
+        type: 'send',
+        status: 'completed',
       });
       return;
     } finally {
@@ -394,7 +453,15 @@ export default function SendScreen() {
   }
 
   const preview = calculatePreview();
-  const CURRENCIES = ['XAF', 'USD', 'EUR', 'GBP', 'NGN', 'GHS', 'ZAR', 'KES', 'INR', 'CNY', 'JPY', 'BRL'];
+  const POPULAR_CURRENCIES = ['XAF', 'XOF', 'USD', 'EUR', 'GBP', 'NGN', 'GHS', 'ZAR', 'KES', 'MAD', 'INR', 'CNY', 'JPY', 'BRL', 'CAD', 'AUD', 'AED'];
+  const CURRENCIES = Object.keys(CURRENCY_INFO).sort((a, b) => {
+    const ai = POPULAR_CURRENCIES.indexOf(a);
+    const bi = POPULAR_CURRENCIES.indexOf(b);
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+    return a.localeCompare(b);
+  });
 
   // Payment Method Modal (for insufficient balance flow)
   const PaymentMethodModal = () => (
@@ -725,38 +792,72 @@ export default function SendScreen() {
           </View>
 
           <View style={styles.amountCard}>
+            {/* You send / You withdraw */}
             <View style={styles.amountRow}>
-              <Text style={styles.amountLabel}>Amount</Text>
-              <Text style={styles.amountValue}>{formatCurrency(preview.amount * 100, currency)}</Text>
+              <Text style={styles.amountLabel}>{activeTab === 'withdraw' ? 'You withdraw' : 'You send'}</Text>
+              <Text style={styles.amountValue}>{formatCurrency(majorToMinor(preview.amount, currency), currency)}</Text>
             </View>
+            {/* Sender / Your currency */}
             <View style={styles.amountRow}>
-              <Text style={styles.amountLabel}>Transaction Fee (1%)</Text>
-              <Text style={styles.feeValue}>-{formatCurrency(preview.fee * 100, currency)}</Text>
+              <Text style={styles.amountLabel}>{activeTab === 'withdraw' ? 'Your currency' : 'Sender currency'}</Text>
+              <Text style={styles.amountLabel}>{currency}</Text>
             </View>
-            <View style={[styles.amountRow, styles.totalRow]}>
-              <Text style={styles.totalLabel}>Total Charge</Text>
-              <Text style={styles.totalValue}>{formatCurrency(preview.total * 100, currency)}</Text>
-            </View>
-            <View style={styles.recipientRow}>
-              <Text style={styles.recipientLabel}>Recipient Receives</Text>
-              <Text style={styles.recipientValue}>
-                {formatCurrency(preview.receiverGetsMinor, preview.receiverCurrency)}
-                {preview.isCrossCurrency && ` (${preview.receiverCurrency})`}
-              </Text>
-            </View>
-            {preview.isCrossCurrency && preview.rateDisplay && (
-              <View style={[styles.amountRow, { marginTop: 2 }]}>
-                <Text style={[styles.amountLabel, { color: '#1565C0', fontSize: 11 }]}>Exchange Rate</Text>
-                <Text style={[styles.amountLabel, { color: '#1565C0', fontSize: 11 }]}>{preview.rateDisplay}</Text>
+            {activeTab === 'withdraw' && preview.fee > 0 && (
+              <View style={styles.amountRow}>
+                <Text style={styles.amountLabel}>
+                  {preview.feeRate ? `Withdrawal Fee (${(preview.feeRate * 100).toFixed(2)}%)` : 'Withdrawal Fee'}
+                  {isIntlWithdrawal ? ' · International' : ' · Local'}
+                </Text>
+                <Text style={styles.feeValue}>-{formatCurrency(majorToMinor(preview.fee, currency), currency)}</Text>
               </View>
             )}
+            {activeTab === 'transfer' && preview.isCrossCurrency && (
+              <View style={styles.amountRow}>
+                <Text style={styles.amountLabel}>FX Conversion Fee (1.15%)</Text>
+                <Text style={styles.feeValue}>-{formatCurrency(preview.fxFeeAmount, preview.receiverCurrency)}</Text>
+              </View>
+            )}
+            {activeTab === 'transfer' && !preview.isCrossCurrency && (
+              <View style={styles.amountRow}>
+                <Text style={styles.amountLabel}>Transfer Fee</Text>
+                <Text style={[styles.feeValue, { color: '#2E7D32' }]}>Free</Text>
+              </View>
+            )}
+            {/* FX rate */}
+            {preview.isCrossCurrency && preview.rateDisplay && (
+              <View style={styles.amountRow}>
+                <Text style={[styles.amountLabel, { color: '#7C3AED', fontSize: 12 }]}>FX Rate</Text>
+                <Text style={[styles.amountLabel, { color: '#7C3AED', fontSize: 12 }]}>{preview.rateDisplay}</Text>
+              </View>
+            )}
+            {/* Recipient currency */}
+            {preview.isCrossCurrency && (
+              <View style={styles.amountRow}>
+                <Text style={[styles.amountLabel, { color: '#7C3AED' }]}>Recipient currency</Text>
+                <Text style={[styles.amountLabel, { color: '#7C3AED' }]}>{preview.receiverCurrency}</Text>
+              </View>
+            )}
+            {/* They receive / You receive — total row */}
+            <View style={[styles.amountRow, styles.totalRow]}>
+              <Text style={styles.totalLabel}>{activeTab === 'withdraw' ? 'You receive' : 'They receive'}</Text>
+              <Text style={styles.totalValue}>
+                {formatCurrency(preview.receiverGetsMinor, preview.receiverCurrency)}
+              </Text>
+            </View>
+            {/* Total charged from wallet */}
+            <View style={[styles.amountRow, { borderTopWidth: 1, borderTopColor: '#E8F0FC', marginTop: 4, paddingTop: 10 }]}>
+              <Text style={[styles.amountLabel, { fontWeight: '700', color: '#0D1B2E' }]}>Total charged from wallet</Text>
+              <Text style={[styles.amountValue, { color: '#0D1B2E' }]}>{formatCurrency(majorToMinor(preview.amount, currency), currency)}</Text>
+            </View>
           </View>
 
           <View style={styles.infoBox}>
             <Text style={styles.infoText}>
-              {preview.isCrossCurrency
-                ? `ℹ️ Funds are automatically converted to the recipient's local currency (${preview.receiverCurrency}) at the current exchange rate.`
-                : 'ℹ️ The recipient will receive the funds in their preferred currency based on current exchange rates.'
+              {activeTab === 'withdraw'
+                ? `ℹ️ ${isIntlWithdrawal ? 'International' : 'Local'} withdrawal fee: ${isIntlWithdrawal ? '1.75%' : '0.8%'} deducted from the amount.`
+                : preview.isCrossCurrency
+                  ? `ℹ️ A 1.15% FX conversion fee is deducted from the converted amount (${preview.receiverCurrency}).`
+                  : 'ℹ️ Same-currency transfers are free. No fees apply.'
               }
             </Text>
           </View>
@@ -817,7 +918,7 @@ export default function SendScreen() {
               {loading ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.confirmButtonText}>Confirm & Send</Text>
+                <Text style={styles.confirmButtonText}>{activeTab === 'withdraw' ? 'Confirm Withdrawal' : 'Confirm & Send'}</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -885,6 +986,14 @@ export default function SendScreen() {
                       ]}>
                         {w.id.substring(0, 12)}...
                       </Text>
+                      {(() => {
+                        const bal = (w.balances || []).find((b: any) => b.currency === currency);
+                        return (
+                          <Text style={{ fontSize: 13, color: fromWalletId === w.id ? '#1565C0' : '#5C6E8A', marginTop: 3 }}>
+                            {bal ? formatCurrency(bal.amount, currency) : `${currency} 0.00`}
+                          </Text>
+                        );
+                      })()}
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -932,6 +1041,27 @@ export default function SendScreen() {
                       <Text style={[styles.methodText, withdrawalMethod === 'debit' && styles.methodTextActive]}>Debit Card</Text>
                     </TouchableOpacity>
                   </View>
+                </View>
+
+                {/* International withdrawal toggle */}
+                <View style={styles.section}>
+                  <TouchableOpacity
+                    style={styles.intlToggle}
+                    onPress={() => setIsIntlWithdrawal(v => !v)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.intlToggleBox, isIntlWithdrawal && styles.intlToggleBoxActive]}>
+                      {isIntlWithdrawal && <Ionicons name="checkmark" size={14} color="#fff" />}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.intlToggleLabel}>International withdrawal</Text>
+                      <Text style={styles.intlToggleHint}>
+                        {isIntlWithdrawal
+                          ? 'Fee: 1.75% — overseas bank account'
+                          : 'Fee: 0.8% — local bank or mobile money'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
                 </View>
 
                 {withdrawalMethod === 'debit' ? (
@@ -1064,7 +1194,10 @@ export default function SendScreen() {
 
             <View style={styles.infoBox}>
               <Text style={styles.infoText}>
-                ℹ️ A 1% transaction fee will be applied to this transfer.
+                {activeTab === 'withdraw'
+                  ? `ℹ️ Fee: ${isIntlWithdrawal ? '1.75% (international)' : '0.8% (local)'} — deducted from withdrawal.`
+                  : 'ℹ️ Transfers are free. A 1.15% FX fee applies only on cross-currency sends.'
+                }
               </Text>
             </View>
 
@@ -1200,6 +1333,39 @@ const styles = StyleSheet.create({
   },
   methodTextActive: {
     color: '#1565C0',
+  },
+  intlToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(21,101,192,0.06)',
+    borderRadius: 12,
+    padding: 14,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(21,101,192,0.15)',
+  },
+  intlToggleBox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#AAB8C2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  intlToggleBoxActive: {
+    backgroundColor: '#1565C0',
+    borderColor: '#1565C0',
+  },
+  intlToggleLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0D1B2E',
+    marginBottom: 2,
+  },
+  intlToggleHint: {
+    fontSize: 12,
+    color: '#657786',
   },
   loadingContainer: {
     alignItems: 'center',

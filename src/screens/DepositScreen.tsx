@@ -25,6 +25,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { API_BASE } from '../api/client';
 import { majorToMinor, formatCurrency } from '../utils/currency';
 import { creditLocalBalance, logLocalTransaction } from '../utils/localBalance';
+import { TOPUP_FREE_LIMIT, TOPUP_FEE_RATE } from '../config/fees';
 
 // ---------------------------------------------------------------------------
 // Stripe PaymentSheet — guarded import so the app still compiles without the
@@ -145,6 +146,13 @@ export default function DepositScreen() {
     intentId: string;
     publishableKey: string | null;
   } | null>(null);
+  const [feeInfo, setFeeInfo] = useState<{
+    depositCount: number;
+    freeTopupsRemaining: number;
+    isFreeTopup: boolean;
+    feeRate: number;
+    freeLimit: number;
+  } | null>(null);
 
   // Animations & UI helpers
   const buttonScale = useRef(new Animated.Value(1)).current;
@@ -173,9 +181,10 @@ export default function DepositScreen() {
     Authorization: `Bearer ${auth.token}`,
   };
 
-  // Load user's first wallet if not provided
+  // Load user's first wallet + fee tier info on mount
   useEffect(() => {
-    if (!walletId && auth.token) {
+    if (!auth.token) return;
+    if (!walletId) {
       fetch(`${API_BASE}/wallets`, { headers })
         .then(r => r.json())
         .then(data => {
@@ -184,6 +193,10 @@ export default function DepositScreen() {
         })
         .catch(() => {});
     }
+    fetch(`${API_BASE}/deposits/fee-info`, { headers })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setFeeInfo(data); })
+      .catch(() => {});
   }, [auth.token]);
 
   function parsedAmount(): number {
@@ -259,18 +272,33 @@ export default function DepositScreen() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Confirm failed');
 
-    // Keep local balance in sync with backend
-    const amountMinor = majorToMinor(parsedAmount(), currency);
-    await creditLocalBalance(currency, amountMinor);
-    await logLocalTransaction({ type: 'deposit', direction: 'in', amount: amountMinor, currency, memo: 'Card deposit' });
+    // Keep local balance in sync with backend (credit the net amount)
+    const netMinor = data.feeBreakdown?.addedToWallet ?? majorToMinor(parsedAmount(), currency);
+    await creditLocalBalance(currency, netMinor);
+    await logLocalTransaction({ type: 'deposit', direction: 'in', amount: netMinor, currency, memo: 'Card deposit' });
+
+    // Refresh fee tier
+    fetch(`${API_BASE}/deposits/fee-info`, { headers })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setFeeInfo(d); })
+      .catch(() => {});
+
     setDepositSuccess(true);
     setTimeout(() => setDepositSuccess(false), 1500);
-    Alert.alert(
-      'Deposit Successful ✅',
-      `${formatCurrency(amountMinor, currency)} has been added to your wallet.\n\nNew balance: ${formatCurrency(data.newBalance, data.currency)}`,
-      [{ text: 'Done', onPress: () => (navigation as any).goBack() }]
-    );
+
+    const fb = data.feeBreakdown;
     setStripeIntent(null);
+    (navigation as any).navigate('Receipt', {
+      amount: netMinor,
+      currency,
+      senderCurrency: currency,
+      fee: fb?.fee ?? 0,
+      feeLabel: fb?.fee > 0 ? `Top-up Fee (${((fb.feeRate ?? 0) * 100).toFixed(1)}%)` : undefined,
+      recipientName: 'Your Wallet',
+      timestamp: Date.now(),
+      type: 'deposit',
+      status: 'completed',
+    });
   }
 
   async function handleStripeSuccess() {
@@ -392,18 +420,47 @@ export default function DepositScreen() {
             ))}
           </View>
 
-          {/* Summary */}
-          <LinearGradient
-            colors={['rgba(21,101,192,0.08)', 'rgba(10,61,124,0.04)']}
-            style={styles.summaryRow}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          >
-            <Text style={styles.summaryLabel}>You will receive</Text>
-            <Text style={styles.summaryValue}>
-              {numAmount > 0 ? numAmount.toLocaleString() : '—'} {currency}
-            </Text>
-          </LinearGradient>
+          {/* Fee breakdown preview */}
+          {(() => {
+            const amtMinor = majorToMinor(numAmount, currency);
+            const isActuallyFree = feeInfo ? feeInfo.isFreeTopup : true;
+            const rate = isActuallyFree ? 0 : TOPUP_FEE_RATE;
+            const feeMinor = Math.round(amtMinor * rate);
+            const totalCharged = amtMinor + feeMinor;
+            return numAmount > 0 ? (
+              <View style={styles.feeBreakdown}>
+                {feeInfo && (
+                  <View style={styles.feeTierBadge}>
+                    <Ionicons
+                      name={isActuallyFree ? 'gift-outline' : 'pricetag-outline'}
+                      size={14}
+                      color={isActuallyFree ? '#2E7D32' : '#1565C0'}
+                    />
+                    <Text style={[styles.feeTierText, { color: isActuallyFree ? '#2E7D32' : '#1565C0' }]}>
+                      {isActuallyFree
+                        ? `${feeInfo.freeTopupsRemaining} free top-up${feeInfo.freeTopupsRemaining !== 1 ? 's' : ''} remaining`
+                        : `Standard rate applies (${(TOPUP_FEE_RATE * 100).toFixed(1)}%)`
+                      }
+                    </Text>
+                  </View>
+                )}
+                <View style={styles.feeRow}>
+                  <Text style={styles.feeLabel}>You pay</Text>
+                  <Text style={styles.feeValue}>{formatCurrency(totalCharged, currency)}</Text>
+                </View>
+                <View style={styles.feeRow}>
+                  <Text style={styles.feeLabel}>Fee</Text>
+                  <Text style={[styles.feeValue, feeMinor === 0 && styles.feeFree]}>
+                    {feeMinor === 0 ? 'Free' : `-${formatCurrency(feeMinor, currency)}`}
+                  </Text>
+                </View>
+                <View style={[styles.feeRow, styles.feeTotal]}>
+                  <Text style={styles.feeTotalLabel}>Added to wallet</Text>
+                  <Text style={styles.feeTotalValue}>{formatCurrency(amtMinor, currency)}</Text>
+                </View>
+              </View>
+            ) : null;
+          })()}
         </View>
 
         {/* Deposit button */}
@@ -719,6 +776,63 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
     color: '#0A3D7C',
+  },
+  // Fee breakdown styles
+  feeBreakdown: {
+    backgroundColor: 'rgba(255,255,255,0.7)',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(21,101,192,0.12)',
+    marginTop: 4,
+  },
+  feeTierBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+    backgroundColor: 'rgba(21,101,192,0.06)',
+    borderRadius: 8,
+    padding: 8,
+  },
+  feeTierText: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.1,
+  },
+  feeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 5,
+  },
+  feeLabel: {
+    fontSize: 13,
+    color: '#5580A0',
+    fontWeight: '500',
+  },
+  feeValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0A3D7C',
+  },
+  feeFree: {
+    color: '#2E7D32',
+  },
+  feeTotal: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(21,101,192,0.12)',
+    marginTop: 6,
+    paddingTop: 10,
+  },
+  feeTotalLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0A3D7C',
+  },
+  feeTotalValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#1565C0',
   },
   buttonWrapper: {
     marginBottom: 12,

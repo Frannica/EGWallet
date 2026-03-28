@@ -17,6 +17,11 @@ try {
       if (event.request?.headers) {
         delete event.request.headers.Authorization;
       }
+      // Suppress benign Expo dev-mode keep awake error (Expo Go limitation)
+      const msg = event.message || hint?.originalException?.message || '';
+      if (typeof msg === 'string' && msg.includes('Unable to activate keep awake')) {
+        return null;
+      }
       return event;
     },
   });
@@ -28,6 +33,7 @@ try {
 // Ignore specific warnings that don't affect functionality
 LogBox.ignoreLogs([
   'Non-serializable values were found in the navigation state',
+  'Unable to activate keep awake',
 ]);
 
 // Use require() instead of import to load App AFTER Sentry initializes

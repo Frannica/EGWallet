@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, StatusBar, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../auth/AuthContext';
@@ -8,8 +8,7 @@ import { formatCurrency, convert } from '../utils/currency';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { Ionicons } from '@expo/vector-icons';
-import { useToast } from '../utils/toast';
-import { getLocalBalances, mergeWithLocalBalances, getLocalTransactions } from '../utils/localBalance';
+import { getLocalBalances, mergeWithLocalBalances } from '../utils/localBalance';
 
 type Balance = { currency: string; amount: number };
 
@@ -22,7 +21,6 @@ const DEMO_WALLET = {
 export default function WalletScreen() {
   const auth = useAuth();
   const { isOnline } = useNetworkStatus();
-  const toast = useToast();
   const [wallets, setWallets] = useState<Array<any>>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -30,11 +28,7 @@ export default function WalletScreen() {
   const [rates, setRates] = useState<Rates | null>(null);
   const [preferredCurrency, setPreferredCurrency] = useState<string>(auth.user?.preferredCurrency || 'USD');
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
-  const [recentPayroll, setRecentPayroll] = useState<any>(null);
-  const [selectedTab, setSelectedTab] = useState<'all' | 'payroll' | 'transfers'>('all');
-  const [insights, setInsights] = useState<{ spent: number; received: number; topCategory: string | null; currency: string } | null>(
-    { spent: 0, received: 0, topCategory: null, currency: auth.user?.preferredCurrency || 'USD' }
-  );
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
   const navigation = useNavigation();
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -47,7 +41,7 @@ export default function WalletScreen() {
       const r = await fetchRates();
       setRates(r);
     } catch (e) {
-      if (__DEV__) console.warn('Failed to load rates — using demo rates', e);
+      if (__DEV__) console.warn('Failed to load rates � using demo rates', e);
       setRates(DEMO_RATES); // Always show balance even offline
     }
   }
@@ -62,55 +56,6 @@ export default function WalletScreen() {
       const mergedWallets = mergeWithLocalBalances(res.wallets || [], localBalances);
       setWallets(mergedWallets);
       setApiError(null);
-
-      // Load most recent payroll transaction for banner
-      if (res.wallets && res.wallets.length > 0) {
-        try {
-          const { API_BASE } = await import('../api/client');
-          const firstWallet = res.wallets[0];
-          const response = await fetch(
-            `${API_BASE}/wallets/${firstWallet.id}/transactions`,
-            { headers: { Authorization: `Bearer ${auth.token}` } }
-          );
-          if (response.ok) {
-            const txData = await response.json();
-            const allTxs: any[] = txData.transactions || [];
-            const payrollTx = allTxs.find((tx: any) =>
-              (tx.type === 'payroll' || tx.type === 'payroll_request') &&
-              tx.status === 'completed'
-            );
-            setRecentPayroll(payrollTx || null);
-            // Smart Insights — last 7 days
-            // Merge local transactions so deposits/withdrawals are counted too
-            const localTxsForInsights = await getLocalTransactions();
-            const backendTxIds = new Set(allTxs.map((t: any) => t.id));
-            const uniqueLocalTxs = localTxsForInsights.filter((t: any) => !backendTxIds.has(t.id));
-            const allTxsCombined = [...uniqueLocalTxs, ...allTxs];
-            const currentRates = rates || DEMO_RATES;
-            const insightsCurrency = preferredCurrency;
-            const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-            const weekTxs = allTxsCombined.filter((t: any) => {
-              const ts = typeof t.timestamp === 'string' ? new Date(t.timestamp).getTime() : t.timestamp;
-              return ts >= weekAgo;
-            });
-            const spent = weekTxs
-              .filter((t: any) => t.direction === 'out')
-              .reduce((s: number, t: any) => s + convert(t.amount, t.currency || insightsCurrency, insightsCurrency, currentRates), 0);
-            const received = weekTxs
-              .filter((t: any) => t.direction === 'in')
-              .reduce((s: number, t: any) => s + convert(t.amount, t.currency || insightsCurrency, insightsCurrency, currentRates), 0);
-            const cats: Record<string, number> = {};
-            allTxsCombined.forEach((t: any) => {
-              const cat = (t.type === 'payroll' || t.type === 'payroll_request') ? 'Payroll' : t.direction === 'in' ? 'Received' : 'Transfers';
-              cats[cat] = (cats[cat] || 0) + 1;
-            });
-            const topCat = Object.entries(cats).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-            setInsights({ spent, received, topCategory: topCat, currency: insightsCurrency });
-          }
-        } catch (_) {
-          // payroll banner is optional â€” ignore failures
-        }
-      }
     } catch (e: any) {
       if (__DEV__) console.warn('Load wallets failed:', e?.message);
       setApiError(e?.message || 'Unable to reach the server.');
@@ -120,9 +65,13 @@ export default function WalletScreen() {
       const fallbackBalances = localCurrencies.length > 0
         ? localCurrencies.map(([cur, amt]) => ({ currency: cur, amount: amt }))
         : [{ currency: preferredCurrency, amount: 0 }];
-      setWallets(prev => prev.length === 0 ? [{ ...DEMO_WALLET, balances: fallbackBalances }] : prev);
-      // Demo insights
-      setInsights(prev => prev ?? { spent: 15000, received: 50000, topCategory: 'Transfers', currency: preferredCurrency });
+      setWallets(prev => {
+        if (localCurrencies.length > 0) {
+          // User has locally-stored balance — always reflect it, even on repeat refreshes
+          return [{ ...(prev[0] || DEMO_WALLET), balances: fallbackBalances }];
+        }
+        return prev.length === 0 ? [{ ...DEMO_WALLET, balances: [{ currency: preferredCurrency, amount: 0 }] }] : prev;
+      });
     } finally {
       setLoading(false);
     }
@@ -147,6 +96,20 @@ export default function WalletScreen() {
 
   useEffect(() => { loadWallets(); }, [auth.token]);
 
+  // Poll unread notification count whenever screen is focused
+  useFocusEffect(
+    React.useCallback(() => {
+      if (auth.token) {
+        import('../api/client').then(({ API_BASE }) => {
+          fetch(`${API_BASE}/notifications`, { headers: { Authorization: `Bearer ${auth.token}` } })
+            .then(r => r.ok ? r.json() : null)
+            .then(d => { if (d) setUnreadNotifCount(d.unreadCount ?? 0); })
+            .catch(() => {});
+        });
+      }
+    }, [auth.token])
+  );
+
   // Reload balance whenever this screen comes back into focus (e.g. after a deposit)
   useFocusEffect(
     React.useCallback(() => {
@@ -156,7 +119,7 @@ export default function WalletScreen() {
 
   function totalUsdValue(wallet: any) {
     if (!rates || !wallet) return 0;
-    return (wallet.balances || []).reduce((s: number, b: Balance) => s + (b.amount / (rates.values[b.currency] ?? 1)), 0);
+    return (wallet.balances || []).reduce((s: number, b: Balance) => s + convert(b.amount, b.currency, 'USD', rates!), 0);
   }
 
   function calculateTotalBalance() {
@@ -191,13 +154,29 @@ export default function WalletScreen() {
             <Text style={styles.greetingText}>Welcome back</Text>
             <Text style={styles.appTitle}>EGWallet</Text>
           </View>
-          <TouchableOpacity
-            style={styles.profileBtn}
-            onPress={() => (navigation as any).navigate('Settings')}
-            activeOpacity={0.75}
-          >
-            <Ionicons name="person-circle-outline" size={38} color="#1565C0" />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TouchableOpacity
+              style={styles.profileBtn}
+              onPress={() => (navigation as any).navigate('Notifications')}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="notifications-outline" size={28} color="#1565C0" />
+              {unreadNotifCount > 0 && (
+                <View style={styles.notifBadge}>
+                  <Text style={styles.notifBadgeText}>
+                    {unreadNotifCount > 9 ? '9+' : String(unreadNotifCount)}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.profileBtn}
+              onPress={() => (navigation as any).navigate('Settings')}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="person-circle-outline" size={38} color="#1565C0" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Balance Hero Card */}
@@ -221,7 +200,7 @@ export default function WalletScreen() {
             </Text>
           )}
           {rates && (
-            <Text style={styles.balanceEquiv}>≈ {formatCurrency(calculateTotalBalance(), 'USD')}</Text>
+            <Text style={styles.balanceEquiv}>� {formatCurrency(calculateTotalBalance(), 'USD')}</Text>
           )}
           <TouchableOpacity
             onPress={() => setShowCurrencyPicker(!showCurrencyPicker)}
@@ -281,151 +260,37 @@ export default function WalletScreen() {
           ))}
         </ScrollView>
 
-        {/* Smart Wallet Insights */}
-        {insights !== null && (
-          <View style={styles.insightsCard}>
-            <View style={styles.insightsHeader}>
-              <View style={styles.insightsTitleRow}>
-                <Ionicons name="flash" size={18} color="#1565C0" />
-                <Text style={styles.insightsTitle}>Smart Insights</Text>
-              </View>
-              <Text style={styles.insightsPeriod}>This week</Text>
-            </View>
-            <View style={styles.insightsStats}>
-              <View style={styles.insightStat}>
-                <Text style={styles.insightStatEmoji}>💸</Text>
-                <Text style={styles.insightStatValue}>{formatCurrency(insights.spent, insights.currency)}</Text>
-                <Text style={styles.insightStatLabel}>Spent</Text>
-              </View>
-              <View style={styles.insightDivider} />
-              <View style={styles.insightStat}>
-                <Text style={styles.insightStatEmoji}>📥</Text>
-                <Text style={[styles.insightStatValue, { color: '#15803D' }]}>{formatCurrency(insights.received, insights.currency)}</Text>
-                <Text style={styles.insightStatLabel}>Received</Text>
-              </View>
-            </View>
-            {insights.topCategory && (insights.spent > 0 || insights.received > 0) && (
-              <View style={styles.insightHighlight}>
-                <Text style={styles.insightHighlightText}>
-                  🏆 Top category: <Text style={{ fontWeight: '700', color: '#1565C0' }}>{insights.topCategory}</Text>
-                </Text>
-              </View>
-            )}
-            {/* Money Flow Chart */}
-            <View style={styles.flowChart}>
-              <Text style={styles.flowChartTitle}>Money Flow</Text>
-              <View style={styles.flowBarsContainer}>
-                {(() => {
-                  const maxVal = Math.max(insights.spent, insights.received, 1);
-                  const inH = Math.max(12, (insights.received / maxVal) * 64);
-                  const outH = Math.max(12, (insights.spent / maxVal) * 64);
-                  return (
-                    <>
-                      <View style={styles.flowBarGroup}>
-                        <View style={[styles.flowBar, { height: inH, backgroundColor: '#22C55E' }]} />
-                        <Text style={styles.flowBarLabel}>In</Text>
-                      </View>
-                      <View style={styles.flowBarGroup}>
-                        <View style={[styles.flowBar, { height: outH, backgroundColor: '#F97316' }]} />
-                        <Text style={styles.flowBarLabel}>Out</Text>
-                      </View>
-                    </>
-                  );
-                })()}
-              </View>
-            </View>
-            {insights.spent === 0 && insights.received === 0 && (
-              <Text style={styles.insightNoData}>Send or receive money to see your weekly flow</Text>
-            )}
-          </View>
-        )}
-
-        {/* Payroll Banner */}
-        {recentPayroll && wallets.length > 0 && (
-          <TouchableOpacity
-            style={styles.payrollBanner}
-            onPress={() => (navigation as any).navigate('Transactions', { walletId: wallets[0].id, filter: 'payroll' })}
-            activeOpacity={0.8}
-          >
-            <View style={styles.payrollIconContainer}>
-              <Ionicons name="briefcase" size={20} color="#1976D2" />
-            </View>
-            <View style={styles.payrollContent}>
-              <Text style={styles.payrollTitle}>
-                Salary from {recentPayroll.payrollMetadata?.employerName || 'Employer'}
-              </Text>
-              <Text style={styles.payrollAmount}>
-                +{formatCurrency(recentPayroll.amount, recentPayroll.currency)}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#90CAF9" />
-          </TouchableOpacity>
-        )}
-
-        {/* Section Header */}
+        {/* Wallet Overview */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Wallet Overview</Text>
-          {wallets.length > 0 && (
-            <TouchableOpacity onPress={() => (navigation as any).navigate('Transactions', { walletId: wallets[0].id })} activeOpacity={0.75}>
-              <Text style={styles.sectionLink}>View All</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity onPress={() => (navigation as any).navigate('Transactions', { walletId: wallets[0]?.id })}>
+            <Text style={styles.sectionLink}>View All</Text>
+          </TouchableOpacity>
         </View>
 
-        {loading && wallets.length === 0 ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#1565C0" />
-            <Text style={styles.loadingText}>Loading your wallet...</Text>
-          </View>
-        ) : (
-          <>
-            {/* Overview Glass Card */}
-            <TouchableOpacity
-              style={styles.glassCard}
-              onPress={() => { if (wallets.length > 0) (navigation as any).navigate('Transactions', { walletId: wallets[0].id }); }}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.cardIconCircle, { backgroundColor: '#DBEAFE' }]}>
-                <Ionicons name="briefcase" size={22} color="#1565C0" />
-              </View>
-              <View style={styles.cardBody}>
-                <Text style={styles.cardTitle}>Wallet Balance</Text>
-                <Text style={styles.cardSub}>
-                  {wallets[0]?.balances?.length || 0} {wallets[0]?.balances?.length === 1 ? 'currency' : 'currencies'}
-                </Text>
-              </View>
-              <Text style={styles.cardAmount}>
-                {formatCurrency(
-                  rates && wallets[0] ? convert(totalUsdValue(wallets[0]), 'USD', preferredCurrency, rates) : 0,
-                  preferredCurrency
-                )}
-              </Text>
-            </TouchableOpacity>
-
-            {/* Wallet Details */}
-            <View style={styles.detailsCard}>
-              <Text style={styles.detailsTitle}>Wallet Details</Text>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Wallet ID</Text>
-                <Text style={styles.detailValue}>{wallets[0]?.id?.substring(0, 12)}...</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Status</Text>
-                <View style={styles.statusBadge}>
-                  <View style={styles.statusDot} />
-                  <Text style={styles.statusText}>Active</Text>
+        {wallets.flatMap(wallet =>
+          (wallet.balances || [])
+            .filter((b: Balance) => b.amount > 0)
+            .map((b: Balance) => (
+              <View key={`${wallet.id}-${b.currency}`} style={styles.currencyCard}>
+                <View style={styles.currencyBadge}>
+                  <Text style={styles.currencyBadgeText}>{b.currency}</Text>
+                </View>
+                <View style={{ flex: 1, marginLeft: 14 }}>
+                  <Text style={styles.currencyAmount}>{formatCurrency(b.amount, b.currency)}</Text>
+                  {rates && b.currency !== 'USD' && (
+                    <Text style={styles.currencyConverted}>
+                      ≈ {formatCurrency(convert(b.amount, b.currency, 'USD', rates), 'USD')}
+                    </Text>
+                  )}
                 </View>
               </View>
-              <View style={[styles.detailRow, { borderBottomWidth: 0 }]}>
-                <Text style={styles.detailLabel}>Capacity</Text>
-                <Text style={styles.detailValue}>
-                  ${(rates && wallets[0] ? Math.round(totalUsdValue(wallets[0]) / 100) : 0).toLocaleString()} / ${(wallets[0]?.maxLimitUSD || 250000).toLocaleString()}
-                </Text>
-              </View>
-            </View>
-
-
-          </>
+            ))
+        )}
+        {(wallets.length === 0 || wallets.every(w => (w.balances || []).every((b: Balance) => b.amount === 0))) && (
+          <View style={[styles.currencyCard, { justifyContent: 'center' }]}>
+            <Text style={{ color: '#5C6E8A', fontSize: 14 }}>No balance yet. Add money to get started.</Text>
+          </View>
         )}
 
         <View style={{ height: 36 }} />
@@ -470,6 +335,23 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  notifBadge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#DC2626',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+  },
+  notifBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#fff',
   },
 
   // Balance Hero Card
@@ -611,48 +493,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: '#3D4F6E',
-  },
-
-  // Payroll Banner
-  payrollBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.93)',
-    borderRadius: 18,
-    padding: 16,
-    marginHorizontal: 20,
-    marginTop: 22,
-    marginBottom: 4,
-    shadowColor: '#1565C0',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    elevation: 3,
-    borderWidth: 1,
-    borderColor: 'rgba(21,101,192,0.08)',
-  },
-  payrollIconContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: '#DBEAFE',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  payrollContent: {
-    flex: 1,
-  },
-  payrollTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#0D1B2E',
-    marginBottom: 3,
-  },
-  payrollAmount: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#00AA4F',
   },
 
   // Section Header
@@ -847,123 +687,4 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  // Smart Insights
-  insightsCard: {
-    marginHorizontal: 20,
-    marginTop: 20,
-    marginBottom: 8,
-    backgroundColor: 'rgba(255,255,255,0.93)',
-    borderRadius: 20,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(21,101,192,0.1)',
-    shadowColor: '#1565C0',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  insightsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  insightsTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  insightsTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#0D1B2E',
-  },
-  insightsPeriod: {
-    fontSize: 12,
-    color: '#9BAEC8',
-    fontWeight: '500',
-  },
-  insightsStats: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  insightStat: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  insightDivider: {
-    width: 1,
-    height: 44,
-    backgroundColor: '#E1E8ED',
-  },
-  insightStatEmoji: {
-    fontSize: 20,
-    marginBottom: 4,
-  },
-  insightStatValue: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#0D1B2E',
-    letterSpacing: -0.5,
-  },
-  insightStatLabel: {
-    fontSize: 11,
-    color: '#9BAEC8',
-    fontWeight: '600',
-    marginTop: 2,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  insightHighlight: {
-    backgroundColor: '#EEF3FA',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginBottom: 14,
-  },
-  insightHighlightText: {
-    fontSize: 13,
-    color: '#5C6E8A',
-  },
-  flowChart: {
-    borderTopWidth: 1,
-    borderTopColor: '#F0F4F9',
-    paddingTop: 14,
-  },
-  flowChartTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#9BAEC8',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    marginBottom: 12,
-  },
-  flowBarsContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 20,
-    height: 84,
-  },
-  flowBarGroup: {
-    alignItems: 'center',
-    gap: 6,
-  },
-  flowBar: {
-    width: 52,
-    borderRadius: 8,
-  },
-  flowBarLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#657786',
-  },
-  insightNoData: {
-    fontSize: 13,
-    color: '#9BAEC8',
-    textAlign: 'center',
-    marginTop: 12,
-    fontStyle: 'italic',
-  },
 });

@@ -26,6 +26,7 @@ import QRPaymentScreen from '../screens/QRPaymentScreen';
 import EmployerDashboardScreen from '../screens/EmployerDashboardScreen';
 import DepositScreen from '../screens/DepositScreen';
 import ReceiptScreen from '../screens/ReceiptScreen';
+import NotificationsScreen from '../screens/NotificationsScreen';
 import { ToastProvider } from '../utils/toast';
 
 const Tab = createBottomTabNavigator();
@@ -140,6 +141,7 @@ export default function AppNavigator() {
               <Stack.Screen name="Request" component={RequestScreen} options={{ title: 'Request Money' }} />
               <Stack.Screen name="Deposit" component={DepositScreen} options={{ title: 'Add Money' }} />
               <Stack.Screen name="Receipt" component={ReceiptScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifications' }} />
             </>
           )}
         </Stack.Navigator>

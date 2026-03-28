@@ -22,6 +22,10 @@ export interface FxQuote {
   rate: number;
   rateDisplay: string;
   isSameCurrency: boolean;
+  // Fee-aware fields (returned when FX fee is applied server-side)
+  fxFeeAmount?: number;
+  receivedAmountMinorAfterFee?: number;
+  fxFeeRate?: number;
 }
 
 /** Get a real-time FX quote for a cross-currency transfer preview. */

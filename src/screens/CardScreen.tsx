@@ -102,7 +102,7 @@ export default function CardScreen() {
 
     Alert.alert(
       'Create Virtual Card',
-      'Create a new virtual card for online payments? Daily limit: $1,000 USD',
+      'Create a new virtual card for online purchases and digital payments.',
       [
         { text: 'Cancel', style: 'cancel' },
         {

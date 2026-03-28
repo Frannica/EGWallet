@@ -162,6 +162,66 @@ const auditLogger = winston.createLogger({
 const idempotencyStore = new Map();
 const IDEMPOTENCY_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
 
+// ==================== FEE SCHEDULE (single source of truth) ====================
+const FEES = {
+  TOPUP_FREE_LIMIT:    6,      // first N deposits are free per user
+  TOPUP_FEE_RATE:      0.005,  // 0.5% after the free limit
+  WITHDRAW_LOCAL_RATE: 0.008,  // 0.8%  local withdrawal (bank / mobile money)
+  WITHDRAW_INTL_RATE:  0.0175, // 1.75% international withdrawal
+  FX_RATE:             0.0115, // 1.15% FX conversion markup
+  SEND_RATE:           0,      // peer-to-peer sends are free
+};
+
+/**
+ * Count completed deposits for a user (across all their wallets).
+ * Used to determine whether the free top-up tier still applies.
+ */
+function getUserDepositCount(db, userId) {
+  const userWalletIds = (db.wallets || [])
+    .filter(w => w.userId === userId)
+    .map(w => w.id);
+  return (db.transactions || []).filter(t =>
+    t.type === 'deposit' &&
+    userWalletIds.includes(t.toWalletId) &&
+    t.status === 'completed'
+  ).length;
+}
+
+/** Calculate top-up fee. Returns feeAmount (minor units) and net credited. */
+function calcTopupFee(amountMinor, depositCount) {
+  const rate = depositCount >= FEES.TOPUP_FREE_LIMIT ? FEES.TOPUP_FEE_RATE : 0;
+  const feeAmount = Math.round(amountMinor * rate);
+  return {
+    feeAmount,
+    netCredited: amountMinor - feeAmount,
+    rate,
+    isFree: rate === 0,
+    depositCount,
+  };
+}
+
+/** Calculate withdrawal fee (local vs international). */
+function calcWithdrawFee(amountMinor, isInternational) {
+  const rate = isInternational ? FEES.WITHDRAW_INTL_RATE : FEES.WITHDRAW_LOCAL_RATE;
+  const feeAmount = Math.round(amountMinor * rate);
+  return {
+    feeAmount,
+    netPayout: amountMinor - feeAmount,
+    rate,
+    isInternational,
+  };
+}
+
+/** Calculate FX conversion fee on the converted (received) amount. */
+function calcFxFee(receivedAmountMinor) {
+  const feeAmount = Math.round(receivedAmountMinor * FEES.FX_RATE);
+  return {
+    feeAmount,
+    netReceived: receivedAmountMinor - feeAmount,
+    rate: FEES.FX_RATE,
+  };
+}
+
 function cleanExpiredIdempotencyKeys() {
   const now = Date.now();
   for (const [key, value] of idempotencyStore.entries()) {
@@ -562,7 +622,47 @@ const translations = {
     fraud_ticket_id: "Your security ticket: #{ticketId}",
     transaction_pending_stop: "⚠️ This transaction is PENDING — we may be able to stop it.",
     transaction_completed: "This transaction was completed. We'll investigate for potential reversal.",
-    multiple_suspicious: "⚠️ ALERT: Multiple suspicious transactions detected — possible account takeover."
+    multiple_suspicious: "⚠️ ALERT: Multiple suspicious transactions detected — possible account takeover.",
+    tx_latest: "I can help you check your recent transactions. View your transaction history in the app, or I can create a support ticket if you need detailed investigation of a specific transaction.",
+    tx_latest_s1: "View transactions", tx_latest_s2: "Report transaction issue", tx_latest_s3: "Check status",
+    tx_issue: "For transaction issues, I can help you:\n\n• Check transaction status\n• File a dispute\n• Create a support ticket for investigation\n",
+    tx_issue_note: "Note: I cannot process refunds or reversals directly, but our team can investigate within {sla}.",
+    tx_issue_s1: "File dispute", tx_issue_s2: "Create ticket", tx_issue_s3: "Transaction history",
+    tx_general: "You can view all your transactions in the Transaction History screen. I can help you:\n\n• Understand transaction statuses\n• Download receipts\n• Report issues",
+    tx_general_s1: "View transactions", tx_general_s2: "Download receipt", tx_general_s3: "Report issue",
+    balance_general: "You can check your balance on the Wallet screen in real-time.",
+    balance_incorrect: "If you believe your balance is incorrect, I can create a support ticket for investigation.",
+    balance_s1: "View balance", balance_s2: "Report discrepancy", balance_s3: "Add money",
+    balance_limit_s1: "Get verified", balance_limit_s2: "View balance", balance_limit_s3: "Learn about limits", balance_limit_s4: "Check verification",
+    card_create: "To create a virtual card:\n\n1. Go to the Cards tab\n2. Tap \"Create New Card\"\n3. Set your spending limit\n4. Card is ready instantly!\n\nVirtual cards are free and you can create up to 5 cards.",
+    card_create_s1: "Create card", card_create_s2: "Card benefits", card_create_s3: "Card limits",
+    card_frozen: "If your card is frozen, you can unfreeze it in the Cards screen. If you suspect fraud, I recommend creating a security ticket.",
+    card_frozen_s1: "Create security ticket", card_frozen_s2: "View cards", card_frozen_s3: "Freeze/unfreeze help",
+    card_general: "Virtual cards help you:\n\n• Shop online securely\n• Control spending per merchant\n• Cancel anytime without affecting your main wallet\n\nEach card has its own limit for better budgeting.",
+    card_general_s1: "Create card", card_general_s2: "View cards", card_general_s3: "Card security",
+    kyc_pending_response: "⏳ Your documents are under review.\n\nWe'll notify you within 1-2 business days. Thank you for your patience!\n\nCurrent limit: ${currentLimit}/day",
+    kyc_pending_s1: "Check status", kyc_pending_s2: "Upload additional documents", kyc_pending_s3: "Contact support",
+    kyc_unverified: "Get verified to unlock higher limits!\n\nBenefits:\n• $50,000+ transaction limits\n• Instant withdrawals\n• International transfers\n",
+    kyc_unverified_current: "Currently: ${currentLimit}/day\nAfter verification: $50,000+/day\n\nVerification takes ~5 minutes. You'll need a government-issued ID.",
+    kyc_unverified_s1: "Start verification", kyc_unverified_s2: "Required documents", kyc_unverified_s3: "Learn more",
+    security_response: "Your security is our priority! EGWallet protects you with:\n\n• Biometric authentication\n• Device tracking\n• End-to-end encryption\n• Transaction confirmations\n• 24/7 fraud monitoring\n\nEnable biometric lock in Settings for extra protection!",
+    security_s1: "Enable biometric", security_s2: "Trusted devices", security_s3: "Security tips",
+    refund_response: "I understand you need help with this transaction. I can create a support ticket for our payments team to investigate.\n\nPlease note:\n• Investigation timeline: 2-3 business days\n• Refunds depend on transaction type and our policies\n• You'll receive email updates\n\nI cannot process refunds directly, but our team will review your case.",
+    refund_s1: "Create ticket", refund_s2: "File dispute", refund_s3: "Contact support",
+    help_response: "I'm here to help! You can:\n\n• Ask about features\n• Get transaction info\n• Report issues\n• Create support tickets\n\nOur Help Center has detailed guides, or I can connect you with our support team.",
+    help_s1: "Browse FAQs", help_s2: "Create ticket", help_s3: "Feature guides",
+    fees_response: "EGWallet fee structure:\n\n✓ Add Money — first 3 top-ups: FREE, then 0.5%\n✓ Send / Receive: FREE\n• FX Conversion: 1.15% (cross-currency sends)\n• Local Withdrawal: 0.8%\n• International Withdrawal: 1.75%\n✓ Virtual Card: FREE\n✓ Monthly subscription: FREE\n\nAll fees are shown before you confirm. No hidden charges.",
+    fees_s1: "How is the fee calculated?", fees_s2: "International transfers", fees_s3: "Save on fees",
+    dispute_response: "I can help you file a formal dispute or create a support ticket. Our team will:\n\n1. Review your case within 2-3 business days\n2. Contact relevant parties\n3. Investigate thoroughly\n4. Provide regular updates\n\nNote: Investigation timelines vary by case complexity.",
+    dispute_s1: "File dispute", dispute_s2: "Create ticket", dispute_s3: "View dispute process",
+    default_response: "I can help you with:\n\n• Transaction questions & history\n• Account & balance info\n• Virtual cards\n• Identity verification\n• Security settings\n• Creating support tickets\n\nFor complex issues, I can create a support ticket for our team to investigate.",
+    default_s1: "Create ticket", default_s2: "Browse FAQs", default_s3: "View account",
+    typing_indicator: "Felisa is typing...",
+    init_s1: "Check my transaction", init_s2: "Report a problem", init_s3: "Account limits", init_s4: "How to send money",
+    qa_track: "Track Transaction", qa_track_q: "Check my latest transaction status",
+    qa_issue: "Report Issue", qa_issue_q: "I want to report a problem",
+    qa_card: "Virtual Cards", qa_card_q: "How do I create a virtual card?",
+    qa_verify: "Verify Identity", qa_verify_q: "Help me verify my identity"
   },
   es: {
     greeting: "¡Hola! 👋 Me llamo Felisa, tu asistente de EGWallet. Puedo ayudarte con:\n\n• Preguntas sobre transacciones\n• Información de cuenta\n• Guías de funciones\n• Tickets de soporte\n\n¿En qué puedo ayudarte hoy?",
@@ -603,7 +703,47 @@ const translations = {
     fraud_ticket_id: "Tu ticket de seguridad: #{ticketId}",
     transaction_pending_stop: "⚠️ Esta transacción está PENDIENTE — es posible que podamos detenerla.",
     transaction_completed: "Esta transacción se completó. Investigaremos para una posible reversión.",
-    multiple_suspicious: "⚠️ ALERTA: Múltiples transacciones sospechosas detectadas — posible toma de control de cuenta."
+    multiple_suspicious: "⚠️ ALERTA: Múltiples transacciones sospechosas detectadas — posible toma de control de cuenta.",
+    tx_latest: "Puedo ayudarte a revisar tus transacciones recientes. Consulta el historial de transacciones en la app, o puedo crear un ticket de soporte si necesitas una investigación detallada de una transacción específica.",
+    tx_latest_s1: "Ver transacciones", tx_latest_s2: "Reportar problema de transacción", tx_latest_s3: "Verificar estado",
+    tx_issue: "Para problemas con transacciones, puedo ayudarte con:\n\n• Verificar el estado de la transacción\n• Presentar una disputa\n• Crear un ticket de soporte para investigación\n",
+    tx_issue_note: "Nota: No puedo procesar reembolsos ni reversiones directamente, pero nuestro equipo puede investigar en {sla}.",
+    tx_issue_s1: "Presentar disputa", tx_issue_s2: "Crear ticket", tx_issue_s3: "Historial de transacciones",
+    tx_general: "Puedes ver todas tus transacciones en la pantalla de Historial de Transacciones. Puedo ayudarte con:\n\n• Entender los estados de las transacciones\n• Descargar recibos\n• Reportar problemas",
+    tx_general_s1: "Ver transacciones", tx_general_s2: "Descargar recibo", tx_general_s3: "Reportar problema",
+    balance_general: "Puedes verificar tu saldo en la pantalla de Billetera en tiempo real.",
+    balance_incorrect: "Si crees que tu saldo es incorrecto, puedo crear un ticket de soporte para investigación.",
+    balance_s1: "Ver saldo", balance_s2: "Reportar discrepancia", balance_s3: "Agregar dinero",
+    balance_limit_s1: "Verificarme", balance_limit_s2: "Ver saldo", balance_limit_s3: "Conocer los límites", balance_limit_s4: "Verificar estado",
+    card_create: "Para crear una tarjeta virtual:\n\n1. Ve a la pestaña de Tarjetas\n2. Toca \"Crear Nueva Tarjeta\"\n3. Establece tu límite de gasto\n4. ¡La tarjeta estará lista al instante!\n\nLas tarjetas virtuales son gratuitas y puedes crear hasta 5 tarjetas.",
+    card_create_s1: "Crear tarjeta", card_create_s2: "Beneficios de la tarjeta", card_create_s3: "Límites de la tarjeta",
+    card_frozen: "Si tu tarjeta está congelada, puedes descongelarla en la pantalla de Tarjetas. Si sospechas fraude, te recomiendo crear un ticket de seguridad.",
+    card_frozen_s1: "Crear ticket de seguridad", card_frozen_s2: "Ver tarjetas", card_frozen_s3: "Ayuda para congelar/descongelar",
+    card_general: "Las tarjetas virtuales te ayudan a:\n\n• Comprar en línea de forma segura\n• Controlar el gasto por comerciante\n• Cancelar en cualquier momento sin afectar tu billetera principal\n\nCada tarjeta tiene su propio límite para un mejor presupuesto.",
+    card_general_s1: "Crear tarjeta", card_general_s2: "Ver tarjetas", card_general_s3: "Seguridad de la tarjeta",
+    kyc_pending_response: "⏳ Tus documentos están siendo revisados.\n\nTe notificaremos en 1-2 días hábiles. ¡Gracias por tu paciencia!\n\nLímite actual: ${currentLimit}/día",
+    kyc_pending_s1: "Verificar estado", kyc_pending_s2: "Subir documentos adicionales", kyc_pending_s3: "Contactar soporte",
+    kyc_unverified: "¡Verifica tu identidad para desbloquear límites más altos!\n\nBeneficios:\n• Límites de transacción de $50,000+\n• Retiros instantáneos\n• Transferencias internacionales\n",
+    kyc_unverified_current: "Actualmente: ${currentLimit}/día\nTras la verificación: $50,000+/día\n\nLa verificación tarda ~5 minutos. Necesitarás un documento de identidad oficial.",
+    kyc_unverified_s1: "Iniciar verificación", kyc_unverified_s2: "Documentos requeridos", kyc_unverified_s3: "Saber más",
+    security_response: "¡Tu seguridad es nuestra prioridad! EGWallet te protege con:\n\n• Autenticación biométrica\n• Rastreo de dispositivos\n• Cifrado de extremo a extremo\n• Confirmaciones de transacciones\n• Monitoreo de fraude 24/7\n\n¡Activa el bloqueo biométrico en Configuración para mayor protección!",
+    security_s1: "Activar biométrico", security_s2: "Dispositivos de confianza", security_s3: "Consejos de seguridad",
+    refund_response: "Entiendo que necesitas ayuda con esta transacción. Puedo crear un ticket de soporte para que nuestro equipo de pagos lo investigue.\n\nTen en cuenta:\n• Tiempo de investigación: 2-3 días hábiles\n• Los reembolsos dependen del tipo de transacción y nuestras políticas\n• Recibirás actualizaciones por correo\n\nNo puedo procesar reembolsos directamente, pero nuestro equipo revisará tu caso.",
+    refund_s1: "Crear ticket", refund_s2: "Presentar disputa", refund_s3: "Contactar soporte",
+    help_response: "¡Estoy aquí para ayudarte! Puedes:\n\n• Preguntar sobre funciones\n• Obtener información de transacciones\n• Reportar problemas\n• Crear tickets de soporte\n\nNuestro Centro de Ayuda tiene guías detalladas, o puedo conectarte con nuestro equipo de soporte.",
+    help_s1: "Ver preguntas frecuentes", help_s2: "Crear ticket", help_s3: "Guías de funciones",
+    fees_response: "Estructura de tarifas de EGWallet:\n\n✓ Agregar dinero — primeras 3 recargas: GRATIS, luego 0.5%\n✓ Enviar / Recibir: GRATIS\n• Conversión de divisas: 1.15% (envíos entre monedas)\n• Retiro local: 0.8%\n• Retiro internacional: 1.75%\n✓ Tarjeta virtual: GRATIS\n✓ Suscripción mensual: GRATIS\n\nTodas las tarifas se muestran antes de confirmar. Sin cargos ocultos.",
+    fees_s1: "¿Cómo se calcula la tarifa?", fees_s2: "Transferencias internacionales", fees_s3: "Ahorrar en tarifas",
+    dispute_response: "Puedo ayudarte a presentar una disputa formal o crear un ticket de soporte. Nuestro equipo:\n\n1. Revisará tu caso en 2-3 días hábiles\n2. Contactará a las partes relevantes\n3. Investigará a fondo\n4. Proporcionará actualizaciones regulares\n\nNota: Los plazos de investigación varían según la complejidad del caso.",
+    dispute_s1: "Presentar disputa", dispute_s2: "Crear ticket", dispute_s3: "Ver proceso de disputa",
+    default_response: "Puedo ayudarte con:\n\n• Preguntas sobre transacciones e historial\n• Información de cuenta y saldo\n• Tarjetas virtuales\n• Verificación de identidad\n• Configuración de seguridad\n• Creación de tickets de soporte\n\nPara problemas complejos, puedo crear un ticket de soporte para que nuestro equipo lo investigue.",
+    default_s1: "Crear ticket", default_s2: "Ver preguntas frecuentes", default_s3: "Ver cuenta",
+    typing_indicator: "Felisa está escribiendo...",
+    init_s1: "Revisar mi transacción", init_s2: "Reportar un problema", init_s3: "Límites de cuenta", init_s4: "Cómo enviar dinero",
+    qa_track: "Rastrear Transacción", qa_track_q: "Verificar el estado de mi última transacción",
+    qa_issue: "Reportar Problema", qa_issue_q: "Quiero reportar un problema",
+    qa_card: "Tarjetas Virtuales", qa_card_q: "¿Cómo creo una tarjeta virtual?",
+    qa_verify: "Verificar Identidad", qa_verify_q: "Ayúdame a verificar mi identidad"
   },
   fr: {
     greeting: "Bonjour ! 👋 Je m'appelle Felisa, votre assistante EGWallet. Je peux vous aider avec :\n\n• Questions sur les transactions\n• Informations sur le compte\n• Guides des fonctionnalités\n• Tickets de support\n\nComment puis-je vous aider aujourd'hui ?",
@@ -644,7 +784,47 @@ const translations = {
     fraud_ticket_id: "Votre ticket de sécurité : #{ticketId}",
     transaction_pending_stop: "⚠️ Cette transaction est EN ATTENTE — nous pourrions l'arrêter.",
     transaction_completed: "Cette transaction a été complétée. Nous enquêterons pour un éventuel renversement.",
-    multiple_suspicious: "⚠️ ALERTE : Plusieurs transactions suspectes détectées — prise de contrôle de compte possible."
+    multiple_suspicious: "⚠️ ALERTE : Plusieurs transactions suspectes détectées — prise de contrôle de compte possible.",
+    tx_latest: "Je peux vous aider à consulter vos transactions récentes. Consultez l'historique des transactions dans l'application, ou je peux créer un ticket de support si vous avez besoin d'une investigation détaillée.",
+    tx_latest_s1: "Voir les transactions", tx_latest_s2: "Signaler un problème de transaction", tx_latest_s3: "Vérifier le statut",
+    tx_issue: "Pour les problèmes de transactions, je peux vous aider à :\n\n• Vérifier le statut de la transaction\n• Déposer une contestation\n• Créer un ticket de support pour investigation\n",
+    tx_issue_note: "Remarque : Je ne peux pas traiter les remboursements directement, mais notre équipe peut enquêter dans {sla}.",
+    tx_issue_s1: "Déposer une contestation", tx_issue_s2: "Créer un ticket", tx_issue_s3: "Historique des transactions",
+    tx_general: "Vous pouvez voir toutes vos transactions dans l'écran Historique des transactions. Je peux vous aider à :\n\n• Comprendre les statuts des transactions\n• Télécharger les reçus\n• Signaler des problèmes",
+    tx_general_s1: "Voir les transactions", tx_general_s2: "Télécharger le reçu", tx_general_s3: "Signaler un problème",
+    balance_general: "Vous pouvez vérifier votre solde sur l'écran Portefeuille en temps réel.",
+    balance_incorrect: "Si vous pensez que votre solde est incorrect, je peux créer un ticket de support pour investigation.",
+    balance_s1: "Voir le solde", balance_s2: "Signaler une divergence", balance_s3: "Ajouter de l'argent",
+    balance_limit_s1: "Se faire vérifier", balance_limit_s2: "Voir le solde", balance_limit_s3: "En savoir plus sur les limites", balance_limit_s4: "Vérifier le statut",
+    card_create: "Pour créer une carte virtuelle :\n\n1. Allez dans l'onglet Cartes\n2. Appuyez sur \"Créer une nouvelle carte\"\n3. Définissez votre limite de dépenses\n4. La carte est prête instantanément !\n\nLes cartes virtuelles sont gratuites, vous pouvez en créer jusqu'à 5.",
+    card_create_s1: "Créer une carte", card_create_s2: "Avantages de la carte", card_create_s3: "Limites de la carte",
+    card_frozen: "Si votre carte est gelée, vous pouvez la dégeler dans l'écran Cartes. Si vous suspectez une fraude, je recommande de créer un ticket de sécurité.",
+    card_frozen_s1: "Créer un ticket de sécurité", card_frozen_s2: "Voir les cartes", card_frozen_s3: "Aide pour geler/dégeler",
+    card_general: "Les cartes virtuelles vous aident à :\n\n• Faire des achats en ligne en toute sécurité\n• Contrôler les dépenses par marchand\n• Annuler à tout moment sans affecter votre portefeuille\n\nChaque carte a sa propre limite pour un meilleur budget.",
+    card_general_s1: "Créer une carte", card_general_s2: "Voir les cartes", card_general_s3: "Sécurité des cartes",
+    kyc_pending_response: "⏳ Vos documents sont en cours d'examen.\n\nNous vous notifierons dans 1-2 jours ouvrables. Merci de votre patience !\n\nLimite actuelle : ${currentLimit}/jour",
+    kyc_pending_s1: "Vérifier le statut", kyc_pending_s2: "Télécharger des documents supplémentaires", kyc_pending_s3: "Contacter le support",
+    kyc_unverified: "Faites vérifier votre identité pour débloquer des limites plus élevées !\n\nAvantages :\n• Limites de transaction de 50 000 $+\n• Retraits instantanés\n• Transferts internationaux\n",
+    kyc_unverified_current: "Actuellement : ${currentLimit}/jour\nAprès vérification : 50 000 $+/jour\n\nLa vérification prend ~5 minutes. Vous aurez besoin d'une pièce d'identité officielle.",
+    kyc_unverified_s1: "Commencer la vérification", kyc_unverified_s2: "Documents requis", kyc_unverified_s3: "En savoir plus",
+    security_response: "Votre sécurité est notre priorité ! EGWallet vous protège avec :\n\n• Authentification biométrique\n• Suivi des appareils\n• Chiffrement de bout en bout\n• Confirmations de transactions\n• Surveillance des fraudes 24/7\n\nActivez le verrouillage biométrique dans Paramètres pour une protection supplémentaire !",
+    security_s1: "Activer la biométrie", security_s2: "Appareils de confiance", security_s3: "Conseils de sécurité",
+    refund_response: "Je comprends que vous avez besoin d'aide avec cette transaction. Je peux créer un ticket de support pour que notre équipe de paiements l'examine.\n\nVeuillez noter :\n• Délai d'enquête : 2-3 jours ouvrables\n• Les remboursements dépendent du type de transaction et de nos politiques\n• Vous recevrez des mises à jour par e-mail\n\nJe ne peux pas traiter les remboursements directement, mais notre équipe examinera votre cas.",
+    refund_s1: "Créer un ticket", refund_s2: "Déposer une contestation", refund_s3: "Contacter le support",
+    help_response: "Je suis là pour vous aider ! Vous pouvez :\n\n• Poser des questions sur les fonctionnalités\n• Obtenir des informations sur les transactions\n• Signaler des problèmes\n• Créer des tickets de support\n\nNotre Centre d'aide dispose de guides détaillés, ou je peux vous connecter avec notre équipe.",
+    help_s1: "Parcourir les FAQs", help_s2: "Créer un ticket", help_s3: "Guides des fonctionnalités",
+    fees_response: "Structure des frais EGWallet :\n\n✓ Ajouter de l'argent — 3 premiers rechargements : GRATUITS, puis 0,5%\n✓ Envoyer / Recevoir : GRATUIT\n• Conversion de devises : 1,15% (envois entre devises)\n• Retrait local : 0,8%\n• Retrait international : 1,75%\n✓ Carte virtuelle : GRATUITE\n✓ Abonnement mensuel : GRATUIT\n\nTous les frais sont affichés avant confirmation. Aucun frais caché.",
+    fees_s1: "Comment les frais sont-ils calculés ?", fees_s2: "Transferts internationaux", fees_s3: "Économiser sur les frais",
+    dispute_response: "Je peux vous aider à déposer une contestation formelle ou créer un ticket de support. Notre équipe va :\n\n1. Examiner votre dossier dans 2-3 jours ouvrables\n2. Contacter les parties concernées\n3. Enquêter en profondeur\n4. Fournir des mises à jour régulières\n\nRemarque : Les délais d'investigation varient selon la complexité du dossier.",
+    dispute_s1: "Déposer une contestation", dispute_s2: "Créer un ticket", dispute_s3: "Voir le processus de contestation",
+    default_response: "Je peux vous aider avec :\n\n• Questions sur les transactions et l'historique\n• Informations sur le compte et le solde\n• Cartes virtuelles\n• Vérification d'identité\n• Paramètres de sécurité\n• Création de tickets de support\n\nPour les problèmes complexes, je peux créer un ticket de support pour que notre équipe enquête.",
+    default_s1: "Créer un ticket", default_s2: "Parcourir les FAQs", default_s3: "Voir le compte",
+    typing_indicator: "Felisa est en train d'écrire...",
+    init_s1: "Vérifier ma transaction", init_s2: "Signaler un problème", init_s3: "Limites du compte", init_s4: "Comment envoyer de l'argent",
+    qa_track: "Suivre Transaction", qa_track_q: "Vérifier le statut de ma dernière transaction",
+    qa_issue: "Signaler Problème", qa_issue_q: "Je veux signaler un problème",
+    qa_card: "Cartes Virtuelles", qa_card_q: "Comment créer une carte virtuelle ?",
+    qa_verify: "Vérifier Identité", qa_verify_q: "Aidez-moi à vérifier mon identité"
   },
   pt: {
     greeting: "Olá! 👋 Meu nome é Felisa, sua assistente da EGWallet. Posso ajudá-lo com:\n\n• Perguntas sobre transações\n• Informações da conta\n• Guias de recursos\n• Tickets de suporte\n\nComo posso ajudá-lo hoje?",
@@ -685,7 +865,47 @@ const translations = {
     fraud_ticket_id: "Seu ticket de segurança: #{ticketId}",
     transaction_pending_stop: "⚠️ Esta transação está PENDENTE — podemos conseguir pará-la.",
     transaction_completed: "Esta transação foi concluída. Investigaremos para possível reversão.",
-    multiple_suspicious: "⚠️ ALERTA: Múltiplas transações suspeitas detectadas — possível tomada de conta."
+    multiple_suspicious: "⚠️ ALERTA: Múltiplas transações suspeitas detectadas — possível tomada de conta.",
+    tx_latest: "Posso te ajudar a verificar suas transações recentes. Veja o histórico de transações no app, ou posso criar um ticket de suporte se precisar de investigação detalhada de uma transação específica.",
+    tx_latest_s1: "Ver transações", tx_latest_s2: "Reportar problema de transação", tx_latest_s3: "Verificar status",
+    tx_issue: "Para problemas com transações, posso te ajudar com:\n\n• Verificar o status da transação\n• Registrar uma contestação\n• Criar um ticket de suporte para investigação\n",
+    tx_issue_note: "Nota: Não posso processar reembolsos diretamente, mas nossa equipe pode investigar em {sla}.",
+    tx_issue_s1: "Registrar contestação", tx_issue_s2: "Criar ticket", tx_issue_s3: "Histórico de transações",
+    tx_general: "Você pode ver todas as transações na tela de Histórico de Transações. Posso te ajudar a:\n\n• Entender os status das transações\n• Baixar recibos\n• Reportar problemas",
+    tx_general_s1: "Ver transações", tx_general_s2: "Baixar recibo", tx_general_s3: "Reportar problema",
+    balance_general: "Você pode verificar seu saldo na tela de Carteira em tempo real.",
+    balance_incorrect: "Se você acha que seu saldo está incorreto, posso criar um ticket de suporte para investigação.",
+    balance_s1: "Ver saldo", balance_s2: "Reportar discrepância", balance_s3: "Adicionar dinheiro",
+    balance_limit_s1: "Verificar identidade", balance_limit_s2: "Ver saldo", balance_limit_s3: "Aprender sobre limites", balance_limit_s4: "Verificar status",
+    card_create: "Para criar um cartão virtual:\n\n1. Vá para a aba de Cartões\n2. Toque em \"Criar Novo Cartão\"\n3. Defina seu limite de gastos\n4. Cartão pronto na hora!\n\nCartões virtuais são gratuitos, você pode criar até 5 cartões.",
+    card_create_s1: "Criar cartão", card_create_s2: "Benefícios do cartão", card_create_s3: "Limites do cartão",
+    card_frozen: "Se seu cartão estiver congelado, você pode descongelá-lo na tela de Cartões. Se suspeita de fraude, recomendo criar um ticket de segurança.",
+    card_frozen_s1: "Criar ticket de segurança", card_frozen_s2: "Ver cartões", card_frozen_s3: "Ajuda para congelar/descongelar",
+    card_general: "Cartões virtuais te ajudam a:\n\n• Fazer compras online com segurança\n• Controlar gastos por comerciante\n• Cancelar a qualquer momento sem afetar sua carteira principal\n\nCada cartão tem seu próprio limite para melhor controle do orçamento.",
+    card_general_s1: "Criar cartão", card_general_s2: "Ver cartões", card_general_s3: "Segurança do cartão",
+    kyc_pending_response: "⏳ Seus documentos estão sendo analisados.\n\nVamos te notificar em 1-2 dias úteis. Obrigado pela sua paciência!\n\nLimite atual: ${currentLimit}/dia",
+    kyc_pending_s1: "Verificar status", kyc_pending_s2: "Enviar documentos adicionais", kyc_pending_s3: "Contatar suporte",
+    kyc_unverified: "Verifique sua identidade para desbloquear limites maiores!\n\nBenefícios:\n• Limites de transação de $50.000+\n• Saques instantâneos\n• Transferências internacionais\n",
+    kyc_unverified_current: "Atualmente: ${currentLimit}/dia\nApós verificação: $50.000+/dia\n\nA verificação leva ~5 minutos. Você precisará de um documento de identidade oficial.",
+    kyc_unverified_s1: "Iniciar verificação", kyc_unverified_s2: "Documentos necessários", kyc_unverified_s3: "Saber mais",
+    security_response: "Sua segurança é nossa prioridade! EGWallet te protege com:\n\n• Autenticação biométrica\n• Rastreamento de dispositivos\n• Criptografia de ponta a ponta\n• Confirmações de transações\n• Monitoramento de fraudes 24/7\n\nAtive o bloqueio biométrico nas Configurações para proteção extra!",
+    security_s1: "Ativar biometria", security_s2: "Dispositivos confiáveis", security_s3: "Dicas de segurança",
+    refund_response: "Entendo que você precisa de ajuda com esta transação. Posso criar um ticket de suporte para nossa equipe de pagamentos investigar.\n\nNote que:\n• Prazo de investigação: 2-3 dias úteis\n• Reembolsos dependem do tipo de transação e nossas políticas\n• Você receberá atualizações por e-mail\n\nNão posso processar reembolsos diretamente, mas nossa equipe revisará seu caso.",
+    refund_s1: "Criar ticket", refund_s2: "Registrar contestação", refund_s3: "Contatar suporte",
+    help_response: "Estou aqui para ajudar! Você pode:\n\n• Perguntar sobre funcionalidades\n• Obter informações sobre transações\n• Reportar problemas\n• Criar tickets de suporte\n\nNosso Centro de Ajuda tem guias detalhados, ou posso te conectar com nossa equipe de suporte.",
+    help_s1: "Ver FAQs", help_s2: "Criar ticket", help_s3: "Guias de funcionalidades",
+    fees_response: "Estrutura de taxas da EGWallet:\n\n✓ Adicionar dinheiro — primeiras 3 recargas: GRÁTIS, depois 0,5%\n✓ Enviar / Receber: GRÁTIS\n• Conversão de moeda: 1,15% (envios entre moedas)\n• Saque local: 0,8%\n• Saque internacional: 1,75%\n✓ Cartão virtual: GRÁTIS\n✓ Assinatura mensal: GRÁTIS\n\nTodas as taxas são exibidas antes de confirmar. Sem cobranças ocultas.",
+    fees_s1: "Como a taxa é calculada?", fees_s2: "Transferências internacionais", fees_s3: "Economizar em taxas",
+    dispute_response: "Posso te ajudar a registrar uma contestação formal ou criar um ticket de suporte. Nossa equipe vai:\n\n1. Analisar seu caso em 2-3 dias úteis\n2. Contatar as partes relevantes\n3. Investigar minuciosamente\n4. Fornecer atualizações regulares\n\nNota: Os prazos de investigação variam de acordo com a complexidade do caso.",
+    dispute_s1: "Registrar contestação", dispute_s2: "Criar ticket", dispute_s3: "Ver processo de contestação",
+    default_response: "Posso te ajudar com:\n\n• Perguntas sobre transações e histórico\n• Informações de conta e saldo\n• Cartões virtuais\n• Verificação de identidade\n• Configurações de segurança\n• Criação de tickets de suporte\n\nPara problemas complexos, posso criar um ticket de suporte para nossa equipe investigar.",
+    default_s1: "Criar ticket", default_s2: "Ver FAQs", default_s3: "Ver conta",
+    typing_indicator: "Felisa está digitando...",
+    init_s1: "Verificar minha transação", init_s2: "Reportar um problema", init_s3: "Limites da conta", init_s4: "Como enviar dinheiro",
+    qa_track: "Rastrear Transação", qa_track_q: "Verificar o status da minha última transação",
+    qa_issue: "Reportar Problema", qa_issue_q: "Quero reportar um problema",
+    qa_card: "Cartões Virtuais", qa_card_q: "Como crio um cartão virtual?",
+    qa_verify: "Verificar Identidade", qa_verify_q: "Me ajude a verificar minha identidade"
   },
   zh: {
     greeting: "您好！👋 我叫 Felisa，是您的 EGWallet 助手。我可以帮助您：\n\n• 交易问题\n• 账户信息\n• 功能指南\n• 支持工单\n\n今天我能帮您什么？",
@@ -726,7 +946,47 @@ const translations = {
     fraud_ticket_id: "您的安全工单：#{ticketId}",
     transaction_pending_stop: "⚠️ 此交易处于待处理状态 — 我们可能能够阻止它。",
     transaction_completed: "此交易已完成。我们将调查是否可以撤销。",
-    multiple_suspicious: "⚠️ 警报：检测到多笔可疑交易 — 可能的账户接管。"
+    multiple_suspicious: "⚠️ 警报：检测到多笔可疑交易 — 可能的账户接管。",
+    tx_latest: "我可以帮您查看最近的交易。在应用中查看交易记录，或如果您需要对特定交易进行详细调查，我可以创建支持工单。",
+    tx_latest_s1: "查看交易", tx_latest_s2: "报告交易问题", tx_latest_s3: "检查状态",
+    tx_issue: "对于交易问题，我可以帮您：\n\n• 检查交易状态\n• 提交争议\n• 创建支持工单进行调查\n",
+    tx_issue_note: "注意：我不能直接处理退款或撤销，但我们的团队可以在 {sla} 内进行调查。",
+    tx_issue_s1: "提交争议", tx_issue_s2: "创建工单", tx_issue_s3: "交易历史",
+    tx_general: "您可以在交易历史界面查看所有交易。我可以帮您：\n\n• 了解交易状态\n• 下载收据\n• 报告问题",
+    tx_general_s1: "查看交易", tx_general_s2: "下载收据", tx_general_s3: "报告问题",
+    balance_general: "您可以在钱包界面实时查看您的余额。",
+    balance_incorrect: "如果您认为余额有误，我可以创建支持工单进行调查。",
+    balance_s1: "查看余额", balance_s2: "报告差异", balance_s3: "充值",
+    balance_limit_s1: "完成认证", balance_limit_s2: "查看余额", balance_limit_s3: "了解限额", balance_limit_s4: "查看认证状态",
+    card_create: "创建虚拟卡：\n\n1. 进入卡片标签\n2. 点击\"创建新卡\"\n3. 设置消费限额\n4. 卡片立即可用！\n\n虚拟卡免费，最多可创建5张。",
+    card_create_s1: "创建卡片", card_create_s2: "卡片优势", card_create_s3: "卡片限额",
+    card_frozen: "如果您的卡被冻结，可以在卡片界面解冻。如果怀疑欺诈，建议创建安全工单。",
+    card_frozen_s1: "创建安全工单", card_frozen_s2: "查看卡片", card_frozen_s3: "冻结/解冻帮助",
+    card_general: "虚拟卡帮助您：\n\n• 安全在线购物\n• 按商户控制消费\n• 随时取消，不影响主钱包\n\n每张卡都有独立限额，更好管理预算。",
+    card_general_s1: "创建卡片", card_general_s2: "查看卡片", card_general_s3: "卡片安全",
+    kyc_pending_response: "⏳ 您的文件正在审核中。\n\n我们将在1-2个工作日内通知您。感谢您的耐心！\n\n当前限额：${currentLimit}/天",
+    kyc_pending_s1: "检查状态", kyc_pending_s2: "上传补充文件", kyc_pending_s3: "联系客服",
+    kyc_unverified: "完成身份认证以解锁更高限额！\n\n优势：\n• 每日交易限额$50,000+\n• 即时提款\n• 国际转账\n",
+    kyc_unverified_current: "目前：${currentLimit}/天\n认证后：$50,000+/天\n\n认证仅需约5分钟，需要一张政府颁发的证件。",
+    kyc_unverified_s1: "开始认证", kyc_unverified_s2: "所需文件", kyc_unverified_s3: "了解更多",
+    security_response: "您的安全是我们的首要任务！EGWallet通过以下方式保护您：\n\n• 生物特征认证\n• 设备追踪\n• 端到端加密\n• 交易确认\n• 24/7欺诈监控\n\n在设置中启用生物锁定以获得额外保护！",
+    security_s1: "启用生物识别", security_s2: "信任设备", security_s3: "安全提示",
+    refund_response: "我理解您需要帮助处理此交易。我可以创建支持工单，由我们的支付团队进行调查。\n\n请注意：\n• 调查时间：2-3个工作日\n• 退款取决于交易类型和我们的政策\n• 您将收到电子邮件更新\n\n我无法直接处理退款，但我们的团队将审查您的案例。",
+    refund_s1: "创建工单", refund_s2: "提交争议", refund_s3: "联系客服",
+    help_response: "我在这里为您提供帮助！您可以：\n\n• 询问功能相关问题\n• 获取交易信息\n• 报告问题\n• 创建支持工单\n\n我们的帮助中心有详细指南，或我可以为您联系支持团队。",
+    help_s1: "浏览常见问题", help_s2: "创建工单", help_s3: "功能指南",
+    fees_response: "EGWallet费率结构：\n\n✓ 充值 — 前3次：免费，之后0.5%\n✓ 发送/接收：免费\n• 外汇转换：1.15%（跨货币发送）\n• 本地提款：0.8%\n• 国际提款：1.75%\n✓ 虚拟卡：免费\n✓ 月度订阅：免费\n\n所有费用在确认前均会显示，没有隐藏收费。",
+    fees_s1: "费用如何计算？", fees_s2: "国际转账", fees_s3: "节省费用",
+    dispute_response: "我可以帮您提交正式争议或创建支持工单。我们的团队将：\n\n1. 在2-3个工作日内审查您的案例\n2. 联系相关方\n3. 进行彻底调查\n4. 定期提供更新\n\n注意：调查时间因案例复杂性而异。",
+    dispute_s1: "提交争议", dispute_s2: "创建工单", dispute_s3: "查看争议流程",
+    default_response: "我可以帮您处理：\n\n• 交易问题和历史记录\n• 账户和余额信息\n• 虚拟卡\n• 身份验证\n• 安全设置\n• 创建支持工单\n\n对于复杂问题，我可以创建支持工单让我们的团队进行调查。",
+    default_s1: "创建工单", default_s2: "浏览常见问题", default_s3: "查看账户",
+    typing_indicator: "Felisa 正在输入...",
+    init_s1: "查看我的交易", init_s2: "报告问题", init_s3: "账户限额", init_s4: "如何汇款",
+    qa_track: "追踪交易", qa_track_q: "查看我最近的交易状态",
+    qa_issue: "报告问题", qa_issue_q: "我想报告一个问题",
+    qa_card: "虚拟卡", qa_card_q: "如何创建虚拟卡？",
+    qa_verify: "验证身份", qa_verify_q: "帮我验证我的身份"
   },
   ja: {
     greeting: "こんにちは！👋 私はFelisaです、EGWalletのアシスタントです。以下についてサポートできます：\n\n• 取引に関する質問\n• アカウント情報\n• 機能ガイド\n• サポートチケット\n\n本日はどのようにお手伝いできますか？",
@@ -767,7 +1027,47 @@ const translations = {
     fraud_ticket_id: "セキュリティチケット：#{ticketId}",
     transaction_pending_stop: "⚠️ この取引は保留中です — 停止できる可能性があります。",
     transaction_completed: "この取引は完了しました。取り消しの可能性を調査します。",
-    multiple_suspicious: "⚠️ 警告：複数の不審な取引が検出されました — アカウント乗っ取りの可能性。"
+    multiple_suspicious: "⚠️ 警告：複数の不審な取引が検出されました — アカウント乗っ取りの可能性。",
+    tx_latest: "最近の取引を確認するお手伝いができます。アプリで取引履歴をご確認いただくか、特定の取引の詳しい調査が必要な場合はサポートチケットを作成できます。",
+    tx_latest_s1: "取引を見る", tx_latest_s2: "取引の問題を報告", tx_latest_s3: "ステータスを確認",
+    tx_issue: "取引に関する問題については、以下のお手伝いができます：\n\n• 取引ステータスの確認\n• 異議申し立て\n• 調査のためのサポートチケット作成\n",
+    tx_issue_note: "注意：返金や取り消しは直接処理できませんが、チームが {sla} 以内に調査します。",
+    tx_issue_s1: "異議を申し立てる", tx_issue_s2: "チケットを作成", tx_issue_s3: "取引履歴",
+    tx_general: "すべての取引は取引履歴画面でご確認いただけます。以下のお手伝いができます：\n\n• 取引ステータスの理解\n• 領収書のダウンロード\n• 問題の報告",
+    tx_general_s1: "取引を見る", tx_general_s2: "領収書をダウンロード", tx_general_s3: "問題を報告",
+    balance_general: "ウォレット画面でリアルタイムに残高をご確認いただけます。",
+    balance_incorrect: "残高が正しくないと思われる場合は、調査のためのサポートチケットを作成できます。",
+    balance_s1: "残高を見る", balance_s2: "差異を報告", balance_s3: "お金を追加",
+    balance_limit_s1: "本人確認をする", balance_limit_s2: "残高を見る", balance_limit_s3: "限度額について", balance_limit_s4: "確認ステータスを確認",
+    card_create: "仮想カードの作成方法：\n\n1. カードタブへ移動\n2. \"新しいカードを作成\"をタップ\n3. 利用限度額を設定\n4. カードはすぐに使用可能！\n\n仮想カードは無料で、最大5枚作成できます。",
+    card_create_s1: "カードを作成", card_create_s2: "カードの特典", card_create_s3: "カードの限度額",
+    card_frozen: "カードが凍結されている場合は、カード画面で解除できます。不正使用が疑われる場合は、セキュリティチケットの作成をお勧めします。",
+    card_frozen_s1: "セキュリティチケットを作成", card_frozen_s2: "カードを見る", card_frozen_s3: "凍結/解除のヘルプ",
+    card_general: "仮想カードは以下のことに役立ちます：\n\n• オンラインで安全に買い物\n• 加盟店ごとの支出管理\n• メインウォレットに影響せずいつでもキャンセル\n\n各カードには個別の限度額があり、予算管理に最適です。",
+    card_general_s1: "カードを作成", card_general_s2: "カードを見る", card_general_s3: "カードのセキュリティ",
+    kyc_pending_response: "⏳ 書類を審査中です。\n\n1〜2営業日以内にご連絡いたします。ご辛抱いただきありがとうございます！\n\n現在の限度額：${currentLimit}/日",
+    kyc_pending_s1: "ステータスを確認", kyc_pending_s2: "追加書類をアップロード", kyc_pending_s3: "サポートに連絡",
+    kyc_unverified: "より高い限度額を解除するために本人確認を完了してください！\n\n特典：\n• $50,000以上の取引限度額\n• 即時出金\n• 国際送金\n",
+    kyc_unverified_current: "現在：${currentLimit}/日\n確認後：$50,000以上/日\n\n確認には約5分かかります。政府発行の身分証明書が必要です。",
+    kyc_unverified_s1: "確認を開始", kyc_unverified_s2: "必要な書類", kyc_unverified_s3: "詳細を見る",
+    security_response: "お客様のセキュリティが私たちの最優先事項です！EGWalletは以下の方法でお客様を保護します：\n\n• 生体認証\n• デバイス追跡\n• エンドツーエンド暗号化\n• 取引確認\n• 24時間365日の不正監視\n\n追加の保護のために設定で生体認証ロックを有効にしてください！",
+    security_s1: "生体認証を有効にする", security_s2: "信頼できるデバイス", security_s3: "セキュリティのヒント",
+    refund_response: "この取引についてお手伝いが必要なことは理解しています。支払いチームが調査するためのサポートチケットを作成できます。\n\nご注意ください：\n• 調査期間：2〜3営業日\n• 返金は取引タイプとポリシーによって異なります\n• メールで更新情報をお送りします\n\n返金を直接処理することはできませんが、チームがケースを確認します。",
+    refund_s1: "チケットを作成", refund_s2: "異議を申し立てる", refund_s3: "サポートに連絡",
+    help_response: "お手伝いするためにここにいます！以下のことができます：\n\n• 機能についての質問\n• 取引情報の取得\n• 問題の報告\n• サポートチケットの作成\n\nヘルプセンターには詳細なガイドがあります。サポートチームに繋ぐこともできます。",
+    help_s1: "よくある質問を見る", help_s2: "チケットを作成", help_s3: "機能ガイド",
+    fees_response: "EGWallet手数料体系：\n\n✓ 入金 — 最初の3回：無料、以降0.5%\n✓ 送金/受け取り：無料\n• 外貨両替：1.15%（通貨をまたいだ送金）\n• 国内出金：0.8%\n• 国際出金：1.75%\n✓ 仮想カード：無料\n✓ 月額登録料：無料\n\nすべての手数料は確認前に表示されます。隠れた手数料はありません。",
+    fees_s1: "手数料はどのように計算されますか？", fees_s2: "国際送金", fees_s3: "手数料を節約",
+    dispute_response: "正式な異議申し立てやサポートチケットの作成をお手伝いできます。チームは以下を行います：\n\n1. 2〜3営業日以内にケースを審査\n2. 関係者に連絡\n3. 徹底的に調査\n4. 定期的に更新情報を提供\n\n注意：調査期間はケースの複雑さによって異なります。",
+    dispute_s1: "異議を申し立てる", dispute_s2: "チケットを作成", dispute_s3: "異議申し立てプロセスを見る",
+    default_response: "以下のことでお手伝いできます：\n\n• 取引の質問と履歴\n• アカウントと残高の情報\n• 仮想カード\n• 本人確認\n• セキュリティ設定\n• サポートチケットの作成\n\n複雑な問題については、チームが調査するためのサポートチケットを作成できます。",
+    default_s1: "チケットを作成", default_s2: "よくある質問を見る", default_s3: "アカウントを見る",
+    typing_indicator: "Felisa が入力中...",
+    init_s1: "取引を確認", init_s2: "問題を報告", init_s3: "アカウントの限度額", init_s4: "送金の方法",
+    qa_track: "取引を追跡", qa_track_q: "最新の取引状況を確認する",
+    qa_issue: "問題を報告", qa_issue_q: "問題を報告したい",
+    qa_card: "仮想カード", qa_card_q: "仮想カードを作成するにはどうすればいいですか？",
+    qa_verify: "身元確認", qa_verify_q: "身元確認を手伝ってください"
   },
   ru: {
     greeting: "Здравствуйте! 👋 Меня зовут Фелиса, ваш помощник EGWallet. Я могу помочь вам с:\n\n• Вопросами о транзакциях\n• Информацией об учетной записи\n• Руководствами по функциям\n• Заявками в поддержку\n\nКак я могу помочь вам сегодня?",
@@ -808,7 +1108,47 @@ const translations = {
     fraud_ticket_id: "Ваша заявка безопасности: #{ticketId}",
     transaction_pending_stop: "⚠️ Эта транзакция ОЖИДАЕТ — мы можем остановить её.",
     transaction_completed: "Эта транзакция завершена. Мы расследуем возможность отмены.",
-    multiple_suspicious: "⚠️ ТРЕВОГА: Обнаружено несколько подозрительных транзакций — возможный захват аккаунта."
+    multiple_suspicious: "⚠️ ТРЕВОГА: Обнаружено несколько подозрительных транзакций — возможный захват аккаунта.",
+    tx_latest: "Я могу помочь вам проверить последние транзакции. Просмотрите историю транзакций в приложении или я могу создать тикет поддержки для детального расследования конкретной транзакции.",
+    tx_latest_s1: "Просмотреть транзакции", tx_latest_s2: "Сообщить о проблеме", tx_latest_s3: "Проверить статус",
+    tx_issue: "По вопросам с транзакциями я могу помочь:\n\n• Проверить статус транзакции\n• Подать спор\n• Создать тикет поддержки для расследования\n",
+    tx_issue_note: "Примечание: я не могу обработать возвраты напрямую, но наша команда может расследовать в течение {sla}.",
+    tx_issue_s1: "Подать спор", tx_issue_s2: "Создать тикет", tx_issue_s3: "История транзакций",
+    tx_general: "Все транзакции можно просмотреть на экране истории транзакций. Я могу помочь:\n\n• Понять статусы транзакций\n• Скачать квитанции\n• Сообщить о проблемах",
+    tx_general_s1: "Просмотреть транзакции", tx_general_s2: "Скачать квитанцию", tx_general_s3: "Сообщить о проблеме",
+    balance_general: "Вы можете проверить баланс на экране Кошелька в режиме реального времени.",
+    balance_incorrect: "Если вы считаете, что баланс неверен, я могу создать тикет поддержки для расследования.",
+    balance_s1: "Посмотреть баланс", balance_s2: "Сообщить о расхождении", balance_s3: "Пополнить счёт",
+    balance_limit_s1: "Пройти верификацию", balance_limit_s2: "Посмотреть баланс", balance_limit_s3: "Узнать о лимитах", balance_limit_s4: "Проверить статус верификации",
+    card_create: "Чтобы создать виртуальную карту:\n\n1. Перейдите на вкладку Карты\n2. Нажмите \"Создать новую карту\"\n3. Установите лимит расходов\n4. Карта готова мгновенно!\n\nВиртуальные карты бесплатны, можно создать до 5 карт.",
+    card_create_s1: "Создать карту", card_create_s2: "Преимущества карты", card_create_s3: "Лимиты карты",
+    card_frozen: "Если карта заморожена, разморозьте её на экране Карты. При подозрении на мошенничество рекомендую создать тикет безопасности.",
+    card_frozen_s1: "Создать тикет безопасности", card_frozen_s2: "Просмотреть карты", card_frozen_s3: "Помощь с заморозкой/разморозкой",
+    card_general: "Виртуальные карты помогают:\n\n• Безопасно делать покупки онлайн\n• Контролировать расходы у каждого продавца\n• Отменить в любое время без влияния на основной кошелёк\n\nКаждая карта имеет собственный лимит для лучшего управления бюджетом.",
+    card_general_s1: "Создать карту", card_general_s2: "Просмотреть карты", card_general_s3: "Безопасность карты",
+    kyc_pending_response: "⏳ Ваши документы рассматриваются.\n\nМы уведомим вас в течение 1-2 рабочих дней. Спасибо за терпение!\n\nТекущий лимит: ${currentLimit}/день",
+    kyc_pending_s1: "Проверить статус", kyc_pending_s2: "Загрузить дополнительные документы", kyc_pending_s3: "Связаться с поддержкой",
+    kyc_unverified: "Пройдите верификацию для разблокировки более высоких лимитов!\n\nПреимущества:\n• Лимиты транзакций $50,000+\n• Мгновенный вывод\n• Международные переводы\n",
+    kyc_unverified_current: "Сейчас: ${currentLimit}/день\nПосле верификации: $50,000+/день\n\nВерификация занимает ~5 минут. Потребуется удостоверение личности государственного образца.",
+    kyc_unverified_s1: "Начать верификацию", kyc_unverified_s2: "Необходимые документы", kyc_unverified_s3: "Узнать больше",
+    security_response: "Ваша безопасность — наш приоритет! EGWallet защищает вас:\n\n• Биометрическая аутентификация\n• Отслеживание устройств\n• Сквозное шифрование\n• Подтверждения транзакций\n• Мониторинг мошенничества 24/7\n\nВключите биометрическую блокировку в Настройках для дополнительной защиты!",
+    security_s1: "Включить биометрию", security_s2: "Доверенные устройства", security_s3: "Советы по безопасности",
+    refund_response: "Я понимаю, что вам нужна помощь с этой транзакцией. Я могу создать тикет поддержки для расследования нашей командой платежей.\n\nПожалуйста, обратите внимание:\n• Срок расследования: 2-3 рабочих дня\n• Возвраты зависят от типа транзакции и наших политик\n• Вы получите обновления по электронной почте\n\nЯ не могу обработать возврат напрямую, но наша команда рассмотрит ваш случай.",
+    refund_s1: "Создать тикет", refund_s2: "Подать спор", refund_s3: "Связаться с поддержкой",
+    help_response: "Я здесь, чтобы помочь! Вы можете:\n\n• Задавать вопросы о функциях\n• Получить информацию о транзакциях\n• Сообщить о проблемах\n• Создать тикеты поддержки\n\nВ нашем Справочном центре есть подробные руководства, или я могу связать вас с нашей командой поддержки.",
+    help_s1: "Просмотреть FAQ", help_s2: "Создать тикет", help_s3: "Руководства по функциям",
+    fees_response: "Структура комиссий EGWallet:\n\n✓ Пополнение — первые 3 пополнения: БЕСПЛАТНО, затем 0,5%\n✓ Отправка / Получение: БЕСПЛАТНО\n• Конвертация валют: 1,15% (отправка между валютами)\n• Вывод внутри страны: 0,8%\n• Международный вывод: 1,75%\n✓ Виртуальная карта: БЕСПЛАТНО\n✓ Ежемесячная подписка: БЕСПЛАТНО\n\nВсе комиссии отображаются перед подтверждением. Без скрытых платежей.",
+    fees_s1: "Как рассчитывается комиссия?", fees_s2: "Международные переводы", fees_s3: "Сэкономить на комиссиях",
+    dispute_response: "Я могу помочь вам подать официальный спор или создать тикет поддержки. Наша команда:\n\n1. Рассмотрит ваше дело в течение 2-3 рабочих дней\n2. Свяжется с соответствующими сторонами\n3. Проведёт тщательное расследование\n4. Будет регулярно предоставлять обновления\n\nПримечание: Сроки расследования зависят от сложности дела.",
+    dispute_s1: "Подать спор", dispute_s2: "Создать тикет", dispute_s3: "Посмотреть процесс оспаривания",
+    default_response: "Я могу помочь вам с:\n\n• Вопросами о транзакциях и историей\n• Информацией об аккаунте и балансе\n• Виртуальными картами\n• Верификацией личности\n• Настройками безопасности\n• Созданием тикетов поддержки\n\nДля сложных вопросов я могу создать тикет поддержки для расследования нашей командой.",
+    default_s1: "Создать тикет", default_s2: "Просмотреть FAQ", default_s3: "Посмотреть аккаунт",
+    typing_indicator: "Felisa печатает...",
+    init_s1: "Проверить транзакцию", init_s2: "Сообщить о проблеме", init_s3: "Лимиты аккаунта", init_s4: "Как отправить деньги",
+    qa_track: "Отследить транзакцию", qa_track_q: "Проверить статус последней транзакции",
+    qa_issue: "Сообщить о проблеме", qa_issue_q: "Я хочу сообщить о проблеме",
+    qa_card: "Виртуальные карты", qa_card_q: "Как создать виртуальную карту?",
+    qa_verify: "Подтвердить личность", qa_verify_q: "Помогите мне подтвердить личность"
   },
   de: {
     greeting: "Hallo! 👋 Mein Name ist Felisa, Ihre EGWallet-Assistentin. Ich kann Ihnen helfen mit:\n\n• Transaktionsfragen\n• Kontoinformationen\n• Funktionsanleitungen\n• Support-Tickets\n\nWie kann ich Ihnen heute helfen?",
@@ -849,7 +1189,47 @@ const translations = {
     fraud_ticket_id: "Ihr Sicherheitsticket: #{ticketId}",
     transaction_pending_stop: "⚠️ Diese Transaktion ist AUSSTEHEND — wir können sie möglicherweise stoppen.",
     transaction_completed: "Diese Transaktion wurde abgeschlossen. Wir untersuchen eine mögliche Rückabwicklung.",
-    multiple_suspicious: "⚠️ ALARM: Mehrere verdächtige Transaktionen erkannt — mögliche Kontoübernahme."
+    multiple_suspicious: "⚠️ ALARM: Mehrere verdächtige Transaktionen erkannt — mögliche Kontoübernahme.",
+    tx_latest: "Ich kann Ihnen helfen, Ihre aktuellen Transaktionen zu überprüfen. Sehen Sie sich den Transaktionsverlauf in der App an, oder ich kann ein Support-Ticket erstellen, wenn Sie eine detaillierte Untersuchung benötigen.",
+    tx_latest_s1: "Transaktionen ansehen", tx_latest_s2: "Transaktionsproblem melden", tx_latest_s3: "Status prüfen",
+    tx_issue: "Bei Transaktionsproblemen kann ich Ihnen helfen mit:\n\n• Prüfung des Transaktionsstatus\n• Einleitung eines Widerspruchs\n• Erstellung eines Support-Tickets zur Untersuchung\n",
+    tx_issue_note: "Hinweis: Ich kann Rückerstattungen nicht direkt bearbeiten, aber unser Team kann innerhalb von {sla} ermitteln.",
+    tx_issue_s1: "Widerspruch einlegen", tx_issue_s2: "Ticket erstellen", tx_issue_s3: "Transaktionsverlauf",
+    tx_general: "Sie können alle Transaktionen im Transaktionsverlauf-Bildschirm einsehen. Ich kann Ihnen helfen mit:\n\n• Verstehen von Transaktionsstatus\n• Herunterladen von Quittungen\n• Probleme melden",
+    tx_general_s1: "Transaktionen ansehen", tx_general_s2: "Quittung herunterladen", tx_general_s3: "Problem melden",
+    balance_general: "Sie können Ihren Kontostand jederzeit in Echtzeit auf dem Wallet-Bildschirm prüfen.",
+    balance_incorrect: "Wenn Sie glauben, dass Ihr Kontostand falsch ist, kann ich ein Support-Ticket zur Untersuchung erstellen.",
+    balance_s1: "Kontostand ansehen", balance_s2: "Abweichung melden", balance_s3: "Geld hinzufügen",
+    balance_limit_s1: "Verifizierung starten", balance_limit_s2: "Kontostand ansehen", balance_limit_s3: "Über Limits informieren", balance_limit_s4: "Status prüfen",
+    card_create: "So erstellen Sie eine virtuelle Karte:\n\n1. Gehen Sie zum Karten-Tab\n2. Tippen Sie auf \"Neue Karte erstellen\"\n3. Legen Sie Ihr Ausgabenlimit fest\n4. Karte ist sofort einsatzbereit!\n\nVirtuelle Karten sind kostenlos, Sie können bis zu 5 Karten erstellen.",
+    card_create_s1: "Karte erstellen", card_create_s2: "Kartenvorteile", card_create_s3: "Kartenlimits",
+    card_frozen: "Wenn Ihre Karte eingefroren ist, können Sie sie im Karten-Bildschirm entsperren. Wenn Sie Betrug vermuten, empfehle ich die Erstellung eines Sicherheitstickets.",
+    card_frozen_s1: "Sicherheitsticket erstellen", card_frozen_s2: "Karten ansehen", card_frozen_s3: "Hilfe beim Einfrieren/Entsperren",
+    card_general: "Virtuelle Karten helfen Ihnen:\n\n• Sicher online einkaufen\n• Ausgaben pro Händler kontrollieren\n• Jederzeit kündigen ohne Auswirkungen auf Ihr Haupt-Wallet\n\nJede Karte hat ihr eigenes Limit für bessere Budgetverwaltung.",
+    card_general_s1: "Karte erstellen", card_general_s2: "Karten ansehen", card_general_s3: "Kartensicherheit",
+    kyc_pending_response: "⏳ Ihre Dokumente werden geprüft.\n\nWir werden Sie innerhalb von 1-2 Werktagen benachrichtigen. Vielen Dank für Ihre Geduld!\n\nAktuelles Limit: ${currentLimit}/Tag",
+    kyc_pending_s1: "Status prüfen", kyc_pending_s2: "Weitere Dokumente hochladen", kyc_pending_s3: "Support kontaktieren",
+    kyc_unverified: "Verifizieren Sie sich, um höhere Limits freizuschalten!\n\nVorteile:\n• Transaktionslimits von 50.000 $+\n• Sofortauszahlungen\n• Internationale Überweisungen\n",
+    kyc_unverified_current: "Aktuell: ${currentLimit}/Tag\nNach Verifizierung: 50.000 $+/Tag\n\nDie Verifizierung dauert ~5 Minuten. Sie benötigen einen amtlichen Lichtbildausweis.",
+    kyc_unverified_s1: "Verifizierung starten", kyc_unverified_s2: "Erforderliche Dokumente", kyc_unverified_s3: "Mehr erfahren",
+    security_response: "Ihre Sicherheit hat für uns oberste Priorität! EGWallet schützt Sie mit:\n\n• Biometrischer Authentifizierung\n• Geräteverfolgung\n• Ende-zu-Ende-Verschlüsselung\n• Transaktionsbestätigungen\n• 24/7-Betrugserkennung\n\nAktivieren Sie die biometrische Sperre in den Einstellungen für zusätzlichen Schutz!",
+    security_s1: "Biometrie aktivieren", security_s2: "Vertrauenswürdige Geräte", security_s3: "Sicherheitstipps",
+    refund_response: "Ich verstehe, dass Sie Hilfe bei dieser Transaktion benötigen. Ich kann ein Support-Ticket für unser Zahlungsteam zur Untersuchung erstellen.\n\nBitte beachten Sie:\n• Untersuchungszeitraum: 2-3 Werktage\n• Erstattungen hängen von der Transaktionsart und unseren Richtlinien ab\n• Sie erhalten E-Mail-Updates\n\nIch kann Erstattungen nicht direkt bearbeiten, aber unser Team wird Ihren Fall prüfen.",
+    refund_s1: "Ticket erstellen", refund_s2: "Widerspruch einlegen", refund_s3: "Support kontaktieren",
+    help_response: "Ich bin hier, um zu helfen! Sie können:\n\n• Fragen zu Funktionen stellen\n• Transaktionsinformationen erhalten\n• Probleme melden\n• Support-Tickets erstellen\n\nUnser Hilfezentrum bietet detaillierte Anleitungen, oder ich kann Sie mit unserem Support-Team verbinden.",
+    help_s1: "FAQs durchsuchen", help_s2: "Ticket erstellen", help_s3: "Funktionsleitfäden",
+    fees_response: "EGWallet Gebührenstruktur:\n\n✓ Geld hinzufügen — erste 3 Aufladungen: KOSTENLOS, danach 0,5%\n✓ Senden / Empfangen: KOSTENLOS\n• Währungsumtausch: 1,15% (währungsübergreifende Überweisungen)\n• Inland-Auszahlung: 0,8%\n• Internationale Auszahlung: 1,75%\n✓ Virtuelle Karte: KOSTENLOS\n✓ Monatsabonnement: KOSTENLOS\n\nAlle Gebühren werden vor der Bestätigung angezeigt. Keine versteckten Kosten.",
+    fees_s1: "Wie wird die Gebühr berechnet?", fees_s2: "Internationale Überweisungen", fees_s3: "Bei Gebühren sparen",
+    dispute_response: "Ich kann Ihnen helfen, einen formellen Widerspruch einzulegen oder ein Support-Ticket zu erstellen. Unser Team wird:\n\n1. Ihren Fall innerhalb von 2-3 Werktagen prüfen\n2. Relevante Parteien kontaktieren\n3. Gründlich untersuchen\n4. Regelmäßige Updates bereitstellen\n\nHinweis: Die Untersuchungszeiträume variieren je nach Komplexität des Falls.",
+    dispute_s1: "Widerspruch einlegen", dispute_s2: "Ticket erstellen", dispute_s3: "Widerspruchsprozess ansehen",
+    default_response: "Ich kann Ihnen helfen mit:\n\n• Fragen zu Transaktionen und Verlauf\n• Konto- und Kontostandinformationen\n• Virtuellen Karten\n• Identitätsverifizierung\n• Sicherheitseinstellungen\n• Erstellung von Support-Tickets\n\nBei komplexen Problemen kann ich ein Support-Ticket erstellen, damit unser Team ermitteln kann.",
+    default_s1: "Ticket erstellen", default_s2: "FAQs durchsuchen", default_s3: "Konto ansehen",
+    typing_indicator: "Felisa tippt...",
+    init_s1: "Meine Transaktion prüfen", init_s2: "Problem melden", init_s3: "Kontolimits", init_s4: "Wie sende ich Geld",
+    qa_track: "Transaktion verfolgen", qa_track_q: "Status meiner letzten Transaktion prüfen",
+    qa_issue: "Problem melden", qa_issue_q: "Ich möchte ein Problem melden",
+    qa_card: "Virtuelle Karten", qa_card_q: "Wie erstelle ich eine virtuelle Karte?",
+    qa_verify: "Identität verifizieren", qa_verify_q: "Helfen Sie mir, meine Identität zu verifizieren"
   }
 };
 
@@ -1631,20 +2011,25 @@ app.post('/transactions', authMiddleware, (req, res) => {
     ? (toUser?.preferredCurrency || receiverCurrencyByRegion || receiverWalletCurrency || currency)
     : currency;
   
-  // Deduct from sender in original currency
+  // Deduct from sender in original currency (send is FREE — only FX fee on conversion)
   fromBalance.amount -= amount;
   
   // Convert to receiver's preferred currency if different AND auto-convert is enabled
   let receivedAmount = amount;
   let receivedCurrency = currency;
   let wasConverted = false;
-  
+  let fxFeeAmount = 0;
+
   if (shouldAutoConvert && receiverCurrency !== currency) {
     // Convert: original → USD → receiver's currency
     const amountMajor = minorToMajor(amount, currency);
     const amountUSD = amountMajor / (rates[currency] || 1);
     const amountInReceiverCurrency = amountUSD * (rates[receiverCurrency] || 1);
-    receivedAmount = majorToMinor(amountInReceiverCurrency, receiverCurrency);
+    const rawConverted = majorToMinor(amountInReceiverCurrency, receiverCurrency);
+    // Apply 1.15% FX fee — deducted from the converted amount (transparent)
+    const fxFeeCalc = calcFxFee(rawConverted);
+    receivedAmount = fxFeeCalc.netReceived;
+    fxFeeAmount    = fxFeeCalc.feeAmount;
     receivedCurrency = receiverCurrency;
     wasConverted = true;
   }
@@ -1663,6 +2048,8 @@ app.post('/transactions', authMiddleware, (req, res) => {
     receivedAmount, 
     receivedCurrency,
     wasConverted,
+    fxFeeAmount,       // 0 for same-currency; 1.15% of converted amount otherwise
+    sendFeeAmount: 0,  // P2P sends are always free
     memo: memo||'', 
     status: 'completed', 
     timestamp: Date.now() 
@@ -1670,13 +2057,31 @@ app.post('/transactions', authMiddleware, (req, res) => {
   db.transactions.push(tx);
   saveDB(db);
 
-  res.json({ transaction: tx });
+  // Notify sender
+  createNotification(db, req.user.userId, 'money_sent',
+    'Payment Sent',
+    `You sent ${minorToMajor(amount, currency).toFixed(2)} ${currency}${wasConverted ? ` → ${minorToMajor(receivedAmount, receivedCurrency).toFixed(2)} ${receivedCurrency}` : ''}`,
+    { transactionId: tx.id, amount, currency });
+  saveDB(db);
+
+  res.json({
+    transaction: tx,
+    feeBreakdown: {
+      youSend: amount,
+      currency,
+      fxFee: fxFeeAmount,
+      transferFee: 0,
+      theyReceive: receivedAmount,
+      receivedCurrency,
+      wasConverted,
+    },
+  });
 });
 
 // Withdrawals to bank/mobile money
 app.post('/withdrawals', authMiddleware, (req, res) => {
   const db = loadDB();
-  const { fromWalletId, amount, currency, method, bankName, accountNumber, accountName } = req.body;
+  const { fromWalletId, amount, currency, method, bankName, accountNumber, accountName, isInternational } = req.body;
   
   if (!fromWalletId || typeof amount === 'undefined' || !currency || !method || !bankName || !accountNumber || !accountName) {
     return res.status(400).json({ error: 'Missing required fields' });
@@ -1689,8 +2094,10 @@ app.post('/withdrawals', authMiddleware, (req, res) => {
   if (!balance || balance.amount < amount) {
     return res.status(400).json({ error: 'Insufficient funds' });
   }
-  
-  // Deduct from wallet
+
+  // Calculate withdrawal fee
+  const feeCalc = calcWithdrawFee(amount, !!isInternational);
+  // Wallet is debited the full 'amount'; user receives 'netPayout' after fee
   balance.amount -= amount;
   
   // Create withdrawal transaction
@@ -1700,34 +2107,109 @@ app.post('/withdrawals', authMiddleware, (req, res) => {
     walletId: fromWalletId,
     amount,
     currency,
-    method, // 'bank' or 'mobile'
+    method, // 'bank' | 'mobile' | 'debit'
+    isInternational: !!isInternational,
+    feeAmount: feeCalc.feeAmount,
+    feeRate: feeCalc.rate,
+    netPayout: feeCalc.netPayout,
     bankName,
     accountNumber,
     accountName,
-    status: 'pending', // pending, completed, failed
+    status: 'pending',
     timestamp: Date.now(),
-    estimatedArrival: Date.now() + (3 * 24 * 60 * 60 * 1000) // 3 days
+    estimatedArrival: Date.now() + (isInternational ? 5 * 24 * 60 * 60 * 1000 : 3 * 24 * 60 * 60 * 1000),
   };
   
   if (!db.withdrawals) db.withdrawals = [];
   db.withdrawals.push(withdrawal);
   saveDB(db);
   
+  // Notify user
+  createNotification(db, req.user.userId, 'withdrawal',
+    'Withdrawal Submitted',
+    `${minorToMajor(feeCalc.netPayout, currency).toFixed(2)} ${currency} is being sent to your ${isInternational ? 'international' : 'local'} account`,
+    { withdrawalId: withdrawal.id, amount, currency });
+  saveDB(db);
+  
   logger.info('Withdrawal created', {
     userId: req.user.userId,
     withdrawalId: withdrawal.id,
     amount,
+    feeAmount: feeCalc.feeAmount,
+    netPayout: feeCalc.netPayout,
     currency,
-    method
+    method,
+    isInternational: !!isInternational,
   });
   
-  res.json({ withdrawal });
+  res.json({
+    withdrawal,
+    feeBreakdown: {
+      youSend: amount,
+      fee: feeCalc.feeAmount,
+      theyReceive: feeCalc.netPayout,
+      currency,
+      feeRate: feeCalc.rate,
+      isInternational: !!isInternational,
+    },
+  });
 });
 
 // Rates
 app.get('/rates', (req, res) => {
   const db = loadDB();
   res.json(db.rates);
+});
+
+// ==================== NOTIFICATIONS ====================
+
+/**
+ * Internal helper — write a notification record into db.notifications.
+ * Called by deposit/withdrawal/send endpoints after successful operations.
+ */
+function createNotification(db, userId, type, title, body, metadata = {}) {
+  if (!db.notifications) db.notifications = [];
+  db.notifications.unshift({
+    id: uuidv4(),
+    userId,
+    type,      // 'money_received' | 'money_sent' | 'deposit' | 'withdrawal' | 'failed'
+    title,
+    body,
+    read: false,
+    metadata,
+    createdAt: Date.now(),
+  });
+  // Keep at most 100 notifications per user in the flat-file store
+  db.notifications = db.notifications.filter(n => n.userId === userId).slice(0, 100)
+    .concat(db.notifications.filter(n => n.userId !== userId));
+}
+
+// GET /notifications — list all for authenticated user (newest first)
+app.get('/notifications', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const all = (db.notifications || []).filter(n => n.userId === req.user.userId);
+  res.json({ notifications: all, unreadCount: all.filter(n => !n.read).length });
+});
+
+// PATCH /notifications/read-all — mark every unread notification as read
+app.patch('/notifications/read-all', authMiddleware, (req, res) => {
+  const db = loadDB();
+  let changed = 0;
+  (db.notifications || []).forEach(n => {
+    if (n.userId === req.user.userId && !n.read) { n.read = true; changed++; }
+  });
+  if (changed > 0) saveDB(db);
+  res.json({ markedRead: changed });
+});
+
+// PATCH /notifications/:id/read — mark a single notification as read
+app.patch('/notifications/:id/read', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const notif = (db.notifications || []).find(n => n.id === req.params.id && n.userId === req.user.userId);
+  if (!notif) return res.status(404).json({ error: 'Notification not found' });
+  notif.read = true;
+  saveDB(db);
+  res.json({ ok: true });
 });
 
 // FX Quote — preview a cross-currency conversion before sending
@@ -1749,8 +2231,9 @@ app.get('/fx-quote', authMiddleware, (req, res) => {
     return res.json({
       fromCurrency: from, toCurrency: to,
       sentAmountMinor, receivedAmountMinor: sentAmountMinor,
+      fxFeeAmount: 0, receivedAmountMinorAfterFee: sentAmountMinor,
       rate: 1, rateDisplay: `1 ${from} = 1 ${to}`,
-      isSameCurrency: true, ratesUpdatedAt: db.rates.updatedAt,
+      isSameCurrency: true, fxFeeRate: 0, ratesUpdatedAt: db.rates.updatedAt,
     });
   }
 
@@ -1759,12 +2242,20 @@ app.get('/fx-quote', authMiddleware, (req, res) => {
   const amountUSD = amountMajorFrom / fromRate;
   const amountMajorTo = amountUSD * toRate;
   const receivedAmountMinor = majorToMinor(amountMajorTo, to);
+
+  // Apply 1.15% FX conversion fee on the received amount
+  const fxFeeCalc = calcFxFee(receivedAmountMinor);
+
   // Exchange rate: 1 unit of fromCurrency in toCurrency
   const rate = toRate / fromRate;
 
   res.json({
     fromCurrency: from, toCurrency: to,
-    sentAmountMinor, receivedAmountMinor,
+    sentAmountMinor,
+    receivedAmountMinor,                                  // before FX fee (raw)
+    fxFeeAmount: fxFeeCalc.feeAmount,
+    receivedAmountMinorAfterFee: fxFeeCalc.netReceived,   // what recipient actually gets
+    fxFeeRate: FEES.FX_RATE,
     rate, rateDisplay: `1 ${from} = ${rate.toFixed(6)} ${to}`,
     isSameCurrency: false, ratesUpdatedAt: db.rates.updatedAt,
   });
@@ -1784,6 +2275,21 @@ app.get('/wallets/:id/currency', authMiddleware, (req, res) => {
 
 // ==================== DEPOSIT / TOP-UP ENDPOINTS ====================
 
+// Fee-info endpoint — cheap call so DepositScreen can show the fee tier before the user confirms
+app.get('/deposits/fee-info', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const depositCount = getUserDepositCount(db, req.user.userId);
+  const isFree = depositCount < FEES.TOPUP_FREE_LIMIT;
+  res.json({
+    depositCount,
+    freeTopupsRemaining: Math.max(0, FEES.TOPUP_FREE_LIMIT - depositCount),
+    isFreeTopup: isFree,
+    feeRate: isFree ? 0 : FEES.TOPUP_FEE_RATE,
+    feeRatePct: isFree ? '0%' : `${(FEES.TOPUP_FEE_RATE * 100).toFixed(1)}%`,
+    freeLimit: FEES.TOPUP_FREE_LIMIT,
+  });
+});
+
 // Step 1: Create a Stripe PaymentIntent (or demo intent if Stripe not configured)
 // Returns clientSecret for use with @stripe/stripe-react-native PaymentSheet
 app.post('/deposits/create-intent', authMiddleware,
@@ -1800,21 +2306,43 @@ app.post('/deposits/create-intent', authMiddleware,
     const wallet = db.wallets.find(w => w.id === walletId && w.userId === req.user.userId);
     if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
 
+    // Compute fee BEFORE charging — so the total charged to the card includes the fee
+    const depositCount = getUserDepositCount(db, req.user.userId);
+    const feeInfo = calcTopupFee(amount, depositCount);
+    // Total card charge = amount requested + fee (user pays the fee on top)
+    const totalCharged = amount + feeInfo.feeAmount; // amount that goes to card / Stripe
+    const netCredited  = amount;                      // wallet always receives the amount entered
+
     if (stripeClient) {
-      // Real Stripe PaymentIntent
+      // Real Stripe PaymentIntent — charge total (including fee)
       try {
         const intent = await stripeClient.paymentIntents.create({
-          amount: Math.round(amount),
+          amount: Math.round(totalCharged),
           currency: currency.toLowerCase(),
-          metadata: { userId: req.user.userId, walletId },
+          metadata: {
+            userId: req.user.userId,
+            walletId,
+            netCredited: String(netCredited),
+            feeAmount: String(feeInfo.feeAmount),
+            feeRate: String(feeInfo.rate),
+          },
           automatic_payment_methods: { enabled: true },
         });
-        logger.info('Stripe PaymentIntent created', { intentId: intent.id, userId: req.user.userId, amount, currency });
+        logger.info('Stripe PaymentIntent created', { intentId: intent.id, userId: req.user.userId, amount, totalCharged, currency });
         return res.json({
           clientSecret: intent.client_secret,
           intentId: intent.id,
           publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
           mode: 'stripe',
+          feeBreakdown: {
+            youPay: totalCharged,
+            fee: feeInfo.feeAmount,
+            addedToWallet: netCredited,
+            currency,
+            isFree: feeInfo.isFree,
+            feeRate: feeInfo.rate,
+            depositCount,
+          },
         });
       } catch (err) {
         logger.error('Stripe PaymentIntent failed', { error: err.message, userId: req.user.userId });
@@ -1823,7 +2351,6 @@ app.post('/deposits/create-intent', authMiddleware,
     }
 
     // Demo / test mode — no Stripe key configured
-    // Create a fake intent ID so the confirmation step can credit the wallet
     const demoIntentId = `demo_intent_${uuidv4()}`;
     if (!db.demoIntents) db.demoIntents = [];
     db.demoIntents.push({
@@ -1832,16 +2359,28 @@ app.post('/deposits/create-intent', authMiddleware,
       walletId,
       amount,
       currency,
+      netCredited,
+      feeAmount: feeInfo.feeAmount,
+      feeRate: feeInfo.rate,
       status: 'pending',
       createdAt: Date.now(),
     });
     saveDB(db);
-    logger.info('Demo deposit intent created', { intentId: demoIntentId, userId: req.user.userId, amount, currency });
+    logger.info('Demo deposit intent created', { intentId: demoIntentId, userId: req.user.userId, amount, netCredited, feeAmount: feeInfo.feeAmount, currency });
     return res.json({
       clientSecret: `${demoIntentId}_secret`,
       intentId: demoIntentId,
       publishableKey: null,
       mode: 'demo',
+      feeBreakdown: {
+        youPay: totalCharged,
+        fee: feeInfo.feeAmount,
+        addedToWallet: netCredited,
+        currency,
+        isFree: feeInfo.isFree,
+        feeRate: feeInfo.rate,
+        depositCount,
+      },
     });
   }
 );
@@ -1861,7 +2400,7 @@ app.post('/deposits/confirm', authMiddleware,
     const wallet = db.wallets.find(w => w.id === walletId && w.userId === req.user.userId);
     if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
 
-    let amount, currency;
+    let amount, currency, netCredited, feeAmount, feeRate;
 
     if (stripeClient && !intentId.startsWith('demo_intent_')) {
       // Verify real Stripe PaymentIntent status
@@ -1873,8 +2412,12 @@ app.post('/deposits/confirm', authMiddleware,
         if (intent.metadata.walletId !== walletId || intent.metadata.userId !== req.user.userId) {
           return res.status(403).json({ error: 'Intent mismatch' });
         }
-        amount = intent.amount;
-        currency = intent.currency.toUpperCase();
+        // netCredited is stored in metadata (amount entered by user, not total charged)
+        netCredited = Number(intent.metadata.netCredited) || intent.amount;
+        feeAmount   = Number(intent.metadata.feeAmount)   || 0;
+        feeRate     = Number(intent.metadata.feeRate)     || 0;
+        amount      = netCredited; // use net credited as the canonical "deposit amount"
+        currency    = intent.currency.toUpperCase();
       } catch (err) {
         return res.status(500).json({ error: 'Failed to verify payment', message: err.message });
       }
@@ -1884,30 +2427,36 @@ app.post('/deposits/confirm', authMiddleware,
       const demo = db.demoIntents.find(d => d.id === intentId && d.userId === req.user.userId && d.walletId === walletId);
       if (!demo) return res.status(404).json({ error: 'Demo intent not found or already used' });
       if (demo.status !== 'pending') return res.status(400).json({ error: 'Intent already used' });
-      amount = demo.amount;
-      currency = demo.currency;
+      amount      = demo.amount;
+      netCredited = demo.netCredited  ?? demo.amount;
+      feeAmount   = demo.feeAmount    ?? 0;
+      feeRate     = demo.feeRate      ?? 0;
+      currency    = demo.currency;
       demo.status = 'used';
     }
 
-    // Credit wallet
+    // Credit wallet with net amount (amount the user wanted in their wallet)
     let balance = wallet.balances.find(b => b.currency === currency);
     if (!balance) {
       balance = { currency, amount: 0 };
       wallet.balances.push(balance);
     }
-    balance.amount += amount;
+    balance.amount += netCredited;
 
-    // Record transaction
+    // Record transaction with full fee breakdown
     const tx = {
       id: uuidv4(),
       type: 'deposit',
       fromWalletId: null,
       toWalletId: walletId,
-      amount,
+      amount: netCredited,
       currency,
-      receivedAmount: amount,
+      receivedAmount: netCredited,
       receivedCurrency: currency,
       wasConverted: false,
+      feeAmount,
+      feeRate,
+      grossAmount: netCredited + feeAmount, // total charged to card
       status: 'completed',
       timestamp: Date.now(),
       memo: `Deposit via ${intentId.startsWith('demo_intent_') ? 'Demo Mode' : 'Stripe'}`,
@@ -1917,8 +2466,27 @@ app.post('/deposits/confirm', authMiddleware,
     db.transactions.push(tx);
     saveDB(db);
 
-    logger.info('Deposit confirmed', { intentId, userId: req.user.userId, walletId, amount, currency });
-    return res.json({ success: true, transaction: tx, newBalance: balance.amount, currency });
+    // Notify user
+    createNotification(db, req.user.userId, 'deposit',
+      'Deposit Successful',
+      `${minorToMajor(netCredited, currency).toFixed(2)} ${currency} has been added to your wallet${feeAmount > 0 ? ` (fee: ${minorToMajor(feeAmount, currency).toFixed(2)} ${currency})` : ' (free top-up)'}`,
+      { transactionId: tx.id, netCredited, feeAmount, currency });
+    saveDB(db);
+
+    logger.info('Deposit confirmed', { intentId, userId: req.user.userId, walletId, netCredited, feeAmount, currency });
+    return res.json({
+      success: true,
+      transaction: tx,
+      newBalance: balance.amount,
+      currency,
+      feeBreakdown: {
+        youPaid: netCredited + feeAmount,
+        fee: feeAmount,
+        addedToWallet: netCredited,
+        currency,
+        feeRate,
+      },
+    });
   }
 );
 
@@ -3214,21 +3782,20 @@ app.post('/ai/chat',
   // Transaction queries
   if (lowerMessage.includes('transaction') || lowerMessage.includes('payment') || lowerMessage.includes('transfer')) {
     if (lowerMessage.includes('latest') || lowerMessage.includes('last') || lowerMessage.includes('recent')) {
-      response = `I can help you check your recent transactions. View your transaction history in the app, or I can create a support ticket if you need detailed investigation of a specific transaction.`;
-      suggestions = ['View transactions', 'Report transaction issue', 'Check status'];
+      response = t('tx_latest', lang);
+      suggestions = [t('tx_latest_s1', lang), t('tx_latest_s2', lang), t('tx_latest_s3', lang)];
     } else if (lowerMessage.includes('failed') || lowerMessage.includes('problem') || lowerMessage.includes('issue')) {
-      response = `For transaction issues, I can help you:\n\n• Check transaction status\n• File a dispute\n• Create a support ticket for investigation\n\n`;
-      response += `Note: I cannot process refunds or reversals directly, but our team can investigate within ${escalation.sla || '24-48h'}.`;
-      suggestions = ['File dispute', 'Create ticket', 'Transaction history'];
+      response = t('tx_issue', lang) + t('tx_issue_note', lang, { sla: escalation.sla || '24-48h' });
+      suggestions = [t('tx_issue_s1', lang), t('tx_issue_s2', lang), t('tx_issue_s3', lang)];
     } else {
-      response = `You can view all your transactions in the Transaction History screen. I can help you:\n\n• Understand transaction statuses\n• Download receipts\n• Report issues`;
-      suggestions = ['View transactions', 'Download receipt', 'Report issue'];
+      response = t('tx_general', lang);
+      suggestions = [t('tx_general_s1', lang), t('tx_general_s2', lang), t('tx_general_s3', lang)];
     }
   }
   
   // Balance queries (ACCOUNT-AWARE - Revolut-level)
   else if (lowerMessage.includes('balance') || lowerMessage.includes('money') || lowerMessage.includes('funds')) {
-    response = `You can check your balance on the Wallet screen in real-time.\n\n`;
+    response = t('balance_general', lang) + '\n\n';
     
     // Show personalized limit info
     if (lowerMessage.includes('limit')) {
@@ -3240,30 +3807,30 @@ app.post('/ai/chat',
       
       if (userContext.kycTier === 'unverified') {
         response += t('get_verified', lang);
-        suggestions = ['Get verified', 'View balance', 'Learn about limits'];
+        suggestions = [t('balance_limit_s1', lang), t('balance_limit_s2', lang), t('balance_limit_s3', lang)];
       } else if (userContext.kycTier === 'pending') {
         response += t('verification_pending', lang);
-        suggestions = ['Check verification', 'View balance'];
+        suggestions = [t('balance_limit_s4', lang), t('balance_limit_s2', lang)];
       } else {
-        suggestions = ['View balance', 'Transaction history'];
+        suggestions = [t('balance_limit_s2', lang), t('tx_latest_s1', lang)];
       }
     } else {
-      response += `If you believe your balance is incorrect, I can create a support ticket for investigation.`;
-      suggestions = ['View balance', 'Report discrepancy', 'Add money'];
+      response += t('balance_incorrect', lang);
+      suggestions = [t('balance_s1', lang), t('balance_s2', lang), t('balance_s3', lang)];
     }
   }
   
   // Virtual cards
   else if (lowerMessage.includes('card') || lowerMessage.includes('virtual card')) {
     if (lowerMessage.includes('create') || lowerMessage.includes('make') || lowerMessage.includes('new')) {
-      response = `To create a virtual card:\n\n1. Go to the Cards tab\n2. Tap "Create New Card"\n3. Set your spending limit\n4. Card is ready instantly!\n\nVirtual cards are free and you can create up to 5 cards.`;
-      suggestions = ['Create card', 'Card benefits', 'Card limits'];
+      response = t('card_create', lang);
+      suggestions = [t('card_create_s1', lang), t('card_create_s2', lang), t('card_create_s3', lang)];
     } else if (lowerMessage.includes('frozen') || lowerMessage.includes('locked') || lowerMessage.includes('blocked')) {
-      response = `If your card is frozen, you can unfreeze it in the Cards screen. If you suspect fraud, I recommend creating a security ticket.`;
-      suggestions = ['Create security ticket', 'View cards', 'Freeze/unfreeze help'];
+      response = t('card_frozen', lang);
+      suggestions = [t('card_frozen_s1', lang), t('card_frozen_s2', lang), t('card_frozen_s3', lang)];
     } else {
-      response = `Virtual cards help you:\n\n• Shop online securely\n• Control spending per merchant\n• Cancel anytime without affecting your main wallet\n\nEach card has its own limit for better budgeting.`;
-      suggestions = ['Create card', 'View cards', 'Card security'];
+      response = t('card_general', lang);
+      suggestions = [t('card_general_s1', lang), t('card_general_s2', lang), t('card_general_s3', lang)];
     }
   }
   
@@ -3271,71 +3838,57 @@ app.post('/ai/chat',
   else if (lowerMessage.includes('verify') || lowerMessage.includes('kyc') || lowerMessage.includes('identity')) {
     if (userContext.kycTier === 'verified') {
       response = t('verified_status', lang);
-      suggestions = ['View account', 'Transaction limits'];
+      suggestions = [t('tx_general_s1', lang), t('tx_latest_s3', lang)];
     } else if (userContext.kycTier === 'pending') {
-      response = `⏳ Your documents are under review.\n\n`;
-      response += `We'll notify you within 1-2 business days. Thank you for your patience!\n\n`;
-      response += `Current limit: $${userContext.dailyLimit.toLocaleString()}/day`;
-      suggestions = ['Check status', 'Upload additional documents', 'Contact support'];
+      response = t('kyc_pending_response', lang, { currentLimit: userContext.dailyLimit.toLocaleString() });
+      suggestions = [t('kyc_pending_s1', lang), t('kyc_pending_s2', lang), t('kyc_pending_s3', lang)];
     } else {
-      response = `Get verified to unlock higher limits!\n\n`;
-      response += `Benefits:\n• $50,000+ transaction limits\n• Instant withdrawals\n• International transfers\n\n`;
-      response += `Currently: $${userContext.dailyLimit.toLocaleString()}/day limit\n`;
-      response += `After verification: $50,000+/day\n\n`;
-      response += `Verification takes ~5 minutes. You'll need a government-issued ID.`;
-      suggestions = ['Start verification', 'Required documents', 'Learn more'];
+      response = t('kyc_unverified', lang) + t('kyc_unverified_current', lang, { currentLimit: userContext.dailyLimit.toLocaleString() });
+      suggestions = [t('kyc_unverified_s1', lang), t('kyc_unverified_s2', lang), t('kyc_unverified_s3', lang)];
     }
   }
   
   // Security concerns
   else if (lowerMessage.includes('security') || lowerMessage.includes('safe') || lowerMessage.includes('protect')) {
-    response = `Your security is our priority! EGWallet protects you with:\n\n`;
-    response += `• Biometric authentication\n• Device tracking\n• End-to-end encryption\n• Transaction confirmations\n• 24/7 fraud monitoring\n\n`;
-    response += `Enable biometric lock in Settings for extra protection!`;
-    suggestions = ['Enable biometric', 'Trusted devices', 'Security tips'];
+    response = t('security_response', lang);
+    suggestions = [t('security_s1', lang), t('security_s2', lang), t('security_s3', lang)];
   }
   
   // Refund/reversal requests (MUST NOT PROMISE)
   else if (lowerMessage.includes('refund') || lowerMessage.includes('reverse') || lowerMessage.includes('cancel')) {
-    response = `I understand you need help with this transaction. I can create a support ticket for our payments team to investigate.\n\n`;
-    response += `Please note:\n• Investigation timeline: 2-3 business days\n• Refunds depend on transaction type and our policies\n• You'll receive email updates\n\n`;
-    response += `I cannot process refunds directly, but our team will review your case.`;
-    suggestions = ['Create ticket', 'File dispute', 'Contact support'];
+    response = t('refund_response', lang);
+    suggestions = [t('refund_s1', lang), t('refund_s2', lang), t('refund_s3', lang)];
   }
   
   // Help / FAQ
   else if (lowerMessage.includes('help') || lowerMessage.includes('how') || lowerMessage.includes('what') || lowerMessage.includes('faq')) {
-    response = `I'm here to help! You can:\n\n• Ask about features\n• Get transaction info\n• Report issues\n• Create support tickets\n\nOur Help Center has detailed guides, or I can connect you with our support team.`;
-    suggestions = ['Browse FAQs', 'Create ticket', 'Feature guides'];
+    response = t('help_response', lang);
+    suggestions = [t('help_s1', lang), t('help_s2', lang), t('help_s3', lang)];
   }
   
   // Fees
   else if (lowerMessage.includes('fee') || lowerMessage.includes('charge') || lowerMessage.includes('cost')) {
-    response = `EGWallet fee structure:\n\n✓ EGWallet transfers: FREE\n• Currency conversion: 1.5%\n✓ Virtual cards: FREE\n• International transfers: 2.5%\n✓ Withdrawals: FREE\n\nNo hidden fees. All charges shown before confirmation.`;
-    suggestions = ['Currency fees', 'International fees', 'Save on fees'];
+    response = t('fees_response', lang);
+    suggestions = [t('fees_s1', lang), t('fees_s2', lang), t('fees_s3', lang)];
   }
   
   // Dispute/complaint
   else if (lowerMessage.includes('dispute') || lowerMessage.includes('complaint') || lowerMessage.includes('problem')) {
-    response = `I can help you file a formal dispute or create a support ticket. Our team will:\n\n`;
-    response += `1. Review your case within 2-3 business days\n2. Contact relevant parties\n3. Investigate thoroughly\n4. Provide regular updates\n\n`;
-    response += `Note: Investigation timelines vary by case complexity.`;
-    suggestions = ['File dispute', 'Create ticket', 'View dispute process'];
+    response = t('dispute_response', lang);
+    suggestions = [t('dispute_s1', lang), t('dispute_s2', lang), t('dispute_s3', lang)];
   }
   
   // Greeting
   else if (lowerMessage.includes('hello') || lowerMessage.includes('hi') || lowerMessage.includes('hey') || lowerMessage.includes('hola') || lowerMessage.includes('bonjour') || lowerMessage.includes('olá') || lowerMessage.includes('привет') || lowerMessage.includes('こんにちは')) {
     const hasUserHistory = (conversationHistory || []).some(m => m.sender === 'user');
     response = hasUserHistory ? t('greeting_return', lang) : t('greeting', lang);
-    suggestions = ['View transactions', 'Check account', 'Browse FAQs'];
+    suggestions = [t('tx_general_s1', lang), t('tx_latest_s3', lang), t('help_s1', lang)];
   }
   
   // Default fallback
   else {
-    response = `I can help you with:\n\n`;
-    response += `• Transaction questions & history\n• Account & balance info\n• Virtual cards\n• Identity verification\n• Security settings\n• Creating support tickets\n\n`;
-    response += `For complex issues, I can create a support ticket for our team to investigate.`;
-    suggestions = ['Create ticket', 'Browse FAQs', 'View account'];
+    response = t('default_response', lang);
+    suggestions = [t('default_s1', lang), t('default_s2', lang), t('default_s3', lang)];
   }
   
   res.json({ response, suggestions, ticketCreated });

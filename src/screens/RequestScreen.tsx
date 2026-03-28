@@ -6,7 +6,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { listWallets } from '../api/auth';
-import { getCurrencySymbol } from '../utils/currency';
+import { getCurrencySymbol, majorToMinor } from '../utils/currency';
+import { logLocalTransaction } from '../utils/localBalance';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import QRCode from 'react-native-qrcode-svg';
 import { useToast } from '../utils/toast';
@@ -165,6 +166,13 @@ export default function RequestScreen() {
         createdAt: Date.now(),
       };
       setRequests(prev => [req, ...prev]);
+      logLocalTransaction({
+        type: 'payment_request',
+        direction: 'out',
+        amount: majorToMinor(amountNum, contactCurrency),
+        currency: contactCurrency,
+        memo: `Money request to ${req.firstName} ${req.lastName}`,
+      });
       setContactFirstName('');
       setContactLastName('');
       setContactInfo('');
@@ -238,6 +246,13 @@ export default function RequestScreen() {
                 createdAt: Date.now(),
               };
               setRequests(prev => [req, ...prev]);
+              logLocalTransaction({
+                type: 'payment_request',
+                direction: 'out',
+                amount: majorToMinor(amountNum, payrollCurrency),
+                currency: payrollCurrency,
+                memo: `Payroll request to ${req.firstName} ${req.lastName}`,
+              });
               setPayrollAmount('');
               setPayrollNote('');
               setSelectedEmployee(null);

@@ -17,7 +17,7 @@ export type LocalBalances = Record<string, number>;
 
 export type LocalTransaction = {
   id: string;
-  type: 'deposit' | 'withdrawal' | 'send';
+  type: 'deposit' | 'withdrawal' | 'send' | 'receive' | 'payment_request' | 'qr_payment';
   direction: 'in' | 'out';
   amount: number; // minor units
   currency: string;

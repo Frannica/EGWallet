@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { formatCurrency } from '../utils/currency';
+import { debitLocalBalance, logLocalTransaction } from '../utils/localBalance';
 import QRCode from 'react-native-qrcode-svg';
 import { protectedApiCall, generateIdempotencyKey, showErrorAlert } from '../api/protectedClient';
 
@@ -115,10 +116,26 @@ export default function QRPaymentScreen() {
       // Success!
       setTransactionId(data.transaction.id);
       setPaymentState('success');
+      await debitLocalBalance(currency, amount);
+      await logLocalTransaction({
+        type: 'qr_payment',
+        direction: 'out',
+        amount,
+        currency,
+        memo: `QR Payment to ${employerName}`,
+      });
     } catch (error: any) {
       // Backend unavailable — simulate demo payment success
       setTransactionId(`demo-${Date.now()}`);
       setPaymentState('success');
+      await debitLocalBalance(currency, amount);
+      await logLocalTransaction({
+        type: 'qr_payment',
+        direction: 'out',
+        amount,
+        currency,
+        memo: `QR Payment to ${employerName}`,
+      });
     }
   }
 

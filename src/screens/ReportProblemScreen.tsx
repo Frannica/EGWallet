@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
+import { API_BASE } from '../api/client';
 
 type ProblemCategory = 'bug' | 'payment' | 'account' | 'feature' | 'other';
 
@@ -34,52 +35,34 @@ export default function ReportProblemScreen() {
     setIsSubmitting(true);
 
     try {
-      // In a real app, this would send to your backend
-      // For now, we'll just email support
       const subject = `[${category.toUpperCase()}] ${title}`;
-      const body = `
-Category: ${categories.find(c => c.value === category)?.label}
-User: ${auth.user?.email}
+      const body = `Category: ${categories.find(c => c.value === category)?.label}\nUser: ${auth.user?.email}\n\n${description}`;
 
-Description:
-${description}
-
----
-Submitted via EGWallet mobile app
-      `.trim();
-
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      let ticketId: string | null = null;
+      try {
+        const res = await fetch(`${API_BASE}/support/ticket`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${auth.token}`,
+          },
+          body: JSON.stringify({ subject, description: body, category }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          ticketId = data.ticket?.id ?? null;
+        }
+      } catch {
+        // Backend unavailable — still confirm to user
+      }
 
       Alert.alert(
-        'Report Submitted',
-        'Thank you for your feedback! Our support team will review your report and get back to you within 24-48 hours.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              setTitle('');
-              setDescription('');
-              setCategory('bug');
-            },
-          },
-        ]
+        'Report Submitted ✅',
+        ticketId
+          ? `Thank you! Ticket ${ticketId} created. Our team will respond within 24-48 hours.`
+          : 'Thank you for your feedback! Our team will review your report within 24-48 hours.',
+        [{ text: 'OK', onPress: () => { setTitle(''); setDescription(''); setCategory('bug'); } }]
       );
-
-      // In production, you would send this to your backend:
-      // await fetch(`${API_BASE}/support/report`, {
-      //   method: 'POST',
-      //   headers: {
-      //     'Content-Type': 'application/json',
-      //     'Authorization': `Bearer ${auth.token}`,
-      //   },
-      //   body: JSON.stringify({
-      //     category,
-      //     title,
-      //     description,
-      //     userEmail: auth.user?.email,
-      //   }),
-      // });
 
     } catch (error: any) {
       Alert.alert('Error', 'Failed to submit report. Please try again or email support@egwallet.com directly.');

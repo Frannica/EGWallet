@@ -1,6 +1,7 @@
 import React from 'react';
-import { View, Text, ScrollView } from 'react-native';
+import { View, Text } from 'react-native';
 import { getRegionalConfig } from '../config/regional';
+import { FEE_SCHEDULE } from '../config/fees';
 
 interface KYCDisclosureProps {
   region: 'GQ' | 'AF' | 'EU' | 'OTHER';
@@ -14,29 +15,8 @@ export function KYCDisclosure({ region }: KYCDisclosureProps) {
   const config = getRegionalConfig(region);
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: '#f5f5f5' }}>
+    <View style={{ backgroundColor: '#f5f5f5' }}>
       <View style={{ padding: 16 }}>
-        {/* KYC Section */}
-        {config.kyc_required && (
-          <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 16, marginBottom: 16 }}>
-            <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 12, color: '#d32f2f' }}>
-              ⚠️ Identity Verification Required
-            </Text>
-            <Text style={{ color: '#666', fontSize: 14, lineHeight: 20, marginBottom: 12 }}>
-              To comply with local regulations, you must complete identity verification (KYC) to:
-            </Text>
-            <Text style={{ color: '#666', fontSize: 14, marginBottom: 6 }}>
-              • Send money to other wallets
-            </Text>
-            <Text style={{ color: '#666', fontSize: 14, marginBottom: 6 }}>
-              • Receive funds above certain amounts
-            </Text>
-            <Text style={{ color: '#666', fontSize: 14 }}>
-              • Access premium features
-            </Text>
-          </View>
-        )}
-
         {/* Daily Limits */}
         <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 16, marginBottom: 16 }}>
           <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 12, color: '#007AFF' }}>
@@ -78,16 +58,24 @@ export function KYCDisclosure({ region }: KYCDisclosureProps) {
           <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 12, color: '#007AFF' }}>
             💳 Fees & Charges
           </Text>
-          <Text style={{ color: '#666', fontSize: 14, lineHeight: 20 }}>
-            EGWallet charges{' '}
-            <Text style={{ fontWeight: '600' }}>no transaction fees</Text> for wallet-to-wallet
-            transfers.
-          </Text>
-          <Text style={{ color: '#666', fontSize: 14, lineHeight: 20, marginTop: 12 }}>
-            Standard currency exchange rates apply when converting between different currencies.
-          </Text>
+          {FEE_SCHEDULE.map((item) => (
+            <View
+              key={item.type}
+              style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 14, color: '#333', fontWeight: '500' }}>{item.type}</Text>
+                {item.note ? (
+                  <Text style={{ fontSize: 12, color: '#999', marginTop: 2 }}>{item.note}</Text>
+                ) : null}
+              </View>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: item.fee === 'Free' ? '#2E7D32' : '#1565C0', marginLeft: 12 }}>
+                {item.fee}
+              </Text>
+            </View>
+          ))}
           <Text style={{ color: '#999', fontSize: 12, marginTop: 12, fontStyle: 'italic' }}>
-            Note: Your bank may charge additional fees for withdrawals or deposits.
+            All fees are shown before you confirm any transaction. No hidden charges.
           </Text>
         </View>
 
@@ -104,6 +92,6 @@ export function KYCDisclosure({ region }: KYCDisclosureProps) {
           </Text>
         </View>
       </View>
-    </ScrollView>
+    </View>
   );
 }

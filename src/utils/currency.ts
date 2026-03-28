@@ -182,9 +182,14 @@ export function formatCurrency(amountMinor: number, currency: string, locale = u
     const major = minorToMajor(amountMinor, currency);
     return new Intl.NumberFormat(locale || undefined, { style: 'currency', currency }).format(major);
   } catch (e) {
-    // fallback
+    // fallback with thousands separator
     const major = minorToMajor(amountMinor, currency);
-    return `${currency} ${major.toFixed(2)}`;
+    const dec = decimalsFor(currency);
+    const fixed = major.toFixed(dec);
+    const [intPart, decPart] = fixed.split('.');
+    const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    const symbol = currencySymbols[currency] || currency;
+    return decPart !== undefined ? `${symbol} ${withCommas}.${decPart}` : `${symbol} ${withCommas}`;
   }
 }
 
