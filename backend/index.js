@@ -14,6 +14,9 @@ const winston = require('winston');
 const { body, validationResult } = require('express-validator');
 const multer = require('multer');
 const { parse } = require('csv-parse/sync');
+const { createWithdrawal, advanceToProcessing } = require('./withdrawalEngine');
+const { router: adminWithdrawalsRouter, adminLoginHandler } = require('./adminWithdrawals');
+const { executePayout } = require('./payoutProviders');
 
 // Stripe — only initialise when secret key is present
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || null;
@@ -166,7 +169,7 @@ const IDEMPOTENCY_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
 const FEES = {
   TOPUP_FREE_LIMIT:    6,      // first N deposits are free per user
   TOPUP_FEE_RATE:      0.005,  // 0.5% after the free limit
-  WITHDRAW_LOCAL_RATE: 0.008,  // 0.8%  local withdrawal (bank / mobile money)
+  WITHDRAW_LOCAL_RATE: 0.0125, // 1.25% local withdrawal (bank / mobile money)
   WITHDRAW_INTL_RATE:  0.0175, // 1.75% international withdrawal
   FX_RATE:             0.0115, // 1.15% FX conversion markup
   SEND_RATE:           0,      // peer-to-peer sends are free
@@ -1479,6 +1482,11 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 
+// Expose shared utilities to routers (adminWithdrawals.js uses these)
+app.locals.loadDB = loadDB;
+app.locals.saveDB = saveDB;
+app.locals.logger = logger;
+
 // IP tracking middleware
 app.use((req, res, next) => {
   req.clientIP = getClientIP(req);
@@ -1673,9 +1681,21 @@ app.post('/auth/register',
   ]),
   (req, res) => {
   const db = loadDB();
-  const { email, password, region, deviceInfo } = req.body;
+  const { email, password, region, deviceInfo, username } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
   if (findUserByEmail(db, email)) return res.status(400).json({ error: 'User exists' });
+
+  // Optional username — validate format and uniqueness
+  let normalizedUsername = null;
+  if (username) {
+    normalizedUsername = username.replace(/^@/, '').toLowerCase();
+    if (!/^[a-z0-9_]{3,20}$/.test(normalizedUsername)) {
+      return res.status(400).json({ error: 'Username must be 3-20 characters (letters, numbers, underscores only)' });
+    }
+    if ((db.users || []).some(u => u.username === normalizedUsername)) {
+      return res.status(400).json({ error: 'Username already taken' });
+    }
+  }
 
   const id = uuidv4();
   const passwordHash = bcrypt.hashSync(password, 8);
@@ -1686,6 +1706,7 @@ app.post('/auth/register',
   const user = { 
     id, 
     email, 
+    username: normalizedUsername,
     region: region || 'US', 
     role: 'individual',
     preferredCurrency, 
@@ -1694,12 +1715,16 @@ app.post('/auth/register',
     kycTier: 0,
     kycStatus: 'pending',
     kycDocuments: {},
-    kycLimits: {
-      dailyLimit: 100,
-      totalLimit: 500
-    },
     dailySpent: 0,
     lastResetDate: new Date().toISOString().split('T')[0],
+    limitTracking: {
+      dailyUsedUSD:   0,
+      weeklyUsedUSD:  0,
+      monthlyUsedUSD: 0,
+      dayKey:   new Date().toISOString().slice(0, 10),
+      weekKey:  getWeekKey(),
+      monthKey: new Date().toISOString().slice(0, 7),
+    },
     linkedEmployers: []
   };
   db.users.push({ ...user, passwordHash });
@@ -1802,7 +1827,7 @@ app.post('/auth/login',
   res.json({ 
     token, 
     refreshToken, 
-    user: { id: u.id, email: u.email, region: u.region, preferredCurrency: u.preferredCurrency || 'USD', autoConvertIncoming: u.autoConvertIncoming !== false },
+    user: { id: u.id, email: u.email, region: u.region, preferredCurrency: u.preferredCurrency || 'USD', autoConvertIncoming: u.autoConvertIncoming !== false, kycTier: u.kycTier || 0, kycStatus: u.kycStatus || 'pending', tierLimits: KYC_TIERS[u.kycTier || 0] },
     newDevice: isNewDevice,
     deviceName: deviceInfo?.name || 'Unknown Device'
   });
@@ -1812,7 +1837,7 @@ app.get('/auth/me', authMiddleware, (req, res) => {
   const db = loadDB();
   const user = db.users.find(u => u.id === req.user.userId);
   if (!user) return res.status(404).json({ error: 'User not found' });
-  res.json({ id: user.id, email: user.email, preferredCurrency: user.preferredCurrency || 'USD', autoConvertIncoming: user.autoConvertIncoming !== false });
+  res.json({ id: user.id, email: user.email, preferredCurrency: user.preferredCurrency || 'USD', autoConvertIncoming: user.autoConvertIncoming !== false, kycTier: user.kycTier || 0, kycStatus: user.kycStatus || 'pending', tierLimits: KYC_TIERS[user.kycTier || 0] });
 });
 
 // Refresh token endpoint
@@ -1944,12 +1969,60 @@ app.get('/transactions', authMiddleware, (req, res) => {
   res.json(txs);
 });
 
-// Send money (simple internal transfer between wallets by walletId)
+// Resolve @username OR email to { userId, walletId }
+// Supports: "@frank" (username), "frank@email.com" (email)
+// Auto-creates wallet if user exists but wallet is missing.
+function resolveRecipient(db, input) {
+  if (typeof input !== 'string' || !input.trim()) return null;
+  const trimmed = input.trim();
+  let user = null;
+
+  if (trimmed.startsWith('@')) {
+    // @username lookup
+    const uname = trimmed.slice(1).toLowerCase();
+    user = (db.users || []).find(u => u.username && u.username === uname);
+    // Also try email-prefix match if no username hit (e.g. @frank → frank@...)
+    if (!user) {
+      user = (db.users || []).find(u => u.email && u.email.toLowerCase().startsWith(uname + '@'));
+    }
+  } else if (trimmed.includes('@') && trimmed.includes('.')) {
+    // Email lookup (contains @ and . → likely an email)
+    user = (db.users || []).find(u => u.email && u.email.toLowerCase() === trimmed.toLowerCase());
+  } else {
+    return null; // Not an @-identifier or email — caller handles as wallet ID
+  }
+
+  if (!user) return null;
+
+  // Find or auto-create wallet
+  let wallet = (db.wallets || []).find(w => w.userId === user.id);
+  if (!wallet) {
+    const preferredCurrency = user.preferredCurrency || 'USD';
+    wallet = { id: uuidv4(), userId: user.id, balances: [{ currency: preferredCurrency, amount: 0 }], createdAt: Date.now(), maxLimitUSD: 250000 };
+    if (!db.wallets) db.wallets = [];
+    db.wallets.push(wallet);
+    saveDB(db);
+    logger.info('Auto-created wallet for user', { userId: user.id, walletId: wallet.id });
+  }
+
+  return { userId: user.id, walletId: wallet.id };
+}
+
+// Send money (simple internal transfer between wallets by walletId or @username)
 app.post('/transactions', authMiddleware, (req, res) => {
   const db = loadDB();
-  const { fromWalletId, toWalletId, amount, currency, memo } = req.body; // amount is expected in minor units (integer)
-  if (!fromWalletId || !toWalletId || typeof amount === 'undefined' || !currency) return res.status(400).json({ error: 'missing fields' });
-  
+  const { fromWalletId, toWalletId: rawToId, amount, currency, memo } = req.body; // amount is expected in minor units (integer)
+  if (!fromWalletId || !rawToId || typeof amount === 'undefined' || !currency) return res.status(400).json({ error: 'missing fields' });
+
+  // @username / email resolution — resolve to walletId before all other logic
+  let toWalletId = rawToId;
+  if (typeof rawToId === 'string' && (rawToId.startsWith('@') || (rawToId.includes('@') && rawToId.includes('.')))) {
+    const resolved = resolveRecipient(db, rawToId);
+    if (!resolved) return res.status(404).json({ error: 'User not found' });
+    if (resolved.userId === req.user.userId) return res.status(400).json({ error: 'Cannot send money to yourself' });
+    toWalletId = resolved.walletId;
+  }
+
   const fromWallet = db.wallets.find(w => w.id === fromWalletId && w.userId === req.user.userId);
   if (!fromWallet) return res.status(404).json({ error: 'Source wallet not found' });
   const toWallet = db.wallets.find(w => w.id === toWalletId);
@@ -1962,26 +2035,28 @@ app.post('/transactions', authMiddleware, (req, res) => {
   const rates = db.rates.values;
   const amountMajor = minorToMajor(amount, currency);
   const toAmountInUSD = amountMajor / (rates[currency] || 1);
-  
-  // CHECK #1: Daily sending limit ($5,000 USD per 24 hours)
-  const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
-  const recentTxs = db.transactions.filter(t => t.fromWalletId === fromWalletId && t.timestamp > oneDayAgo && t.status === 'completed');
-  const dailySentUSD = recentTxs.reduce((sum, t) => {
-    const txMajor = minorToMajor(t.amount, t.currency);
-    const txUSD = txMajor / (rates[t.currency] || 1);
-    return sum + txUSD;
-  }, 0);
-  
-  const newDailyTotal = dailySentUSD + toAmountInUSD;
-  const DAILY_SEND_LIMIT_USD = 5000;
-  if (newDailyTotal > DAILY_SEND_LIMIT_USD) {
-    return res.status(400).json({ 
-      error: `Daily sending limit exceeded. You have sent ${dailySentUSD.toFixed(2)} USD today. Limit is ${DAILY_SEND_LIMIT_USD} USD per 24 hours.`,
-      dailySent: dailySentUSD,
-      dailyLimit: DAILY_SEND_LIMIT_USD
+
+  // CHECK #1: KYC tier limits (daily / weekly / monthly rolling windows)
+  const senderUser = db.users.find(u => u.id === req.user.userId);
+  if (!senderUser) return res.status(404).json({ error: 'Sender account not found' });
+
+  const limitCheck = checkKYCLimits(senderUser, toAmountInUSD, db);
+  if (!limitCheck.allowed) {
+    const upgradeMsg = limitCheck.nextTier
+      ? ` Upgrade to ${limitCheck.nextTier.name} to unlock higher limits.`
+      : '';
+    return res.status(403).json({
+      code:                'LIMIT_EXCEEDED',
+      error:               limitCheck.message + upgradeMsg,
+      limitType:           limitCheck.limitType,
+      remainingDailyUSD:   limitCheck.remainingDailyUSD,
+      remainingWeeklyUSD:  limitCheck.remainingWeeklyUSD,
+      remainingMonthlyUSD: limitCheck.remainingMonthlyUSD,
+      tierLevel:           limitCheck.tierLevel,
+      nextTier:            limitCheck.nextTier,
     });
   }
-  
+
   // CHECK #2: Max wallet capacity ($250,000 USD) for destination
   const destTotalUSD = toWallet.balances.reduce((s,b)=>{
     const bMajor = minorToMajor(b.amount, b.currency);
@@ -2055,6 +2130,11 @@ app.post('/transactions', authMiddleware, (req, res) => {
     timestamp: Date.now() 
   };
   db.transactions.push(tx);
+
+  // Increment stored USD usage for the sender (calendar-based daily/weekly/monthly buckets)
+  updateLimitTracking(senderUser, toAmountInUSD);
+  // senderUser is a reference to the object already in db.users — saveDB below persists it
+
   saveDB(db);
 
   // Notify sender
@@ -2062,6 +2142,12 @@ app.post('/transactions', authMiddleware, (req, res) => {
     'Payment Sent',
     `You sent ${minorToMajor(amount, currency).toFixed(2)} ${currency}${wasConverted ? ` → ${minorToMajor(receivedAmount, receivedCurrency).toFixed(2)} ${receivedCurrency}` : ''}`,
     { transactionId: tx.id, amount, currency });
+
+  // Notify receiver
+  createNotification(db, toWallet.userId, 'money_received',
+    'Payment Received',
+    `You received ${minorToMajor(receivedAmount, receivedCurrency).toFixed(2)} ${receivedCurrency} from ${senderUser.fullName || senderUser.username || senderUser.email || 'someone'}`,
+    { transactionId: tx.id, amount: receivedAmount, currency: receivedCurrency });
   saveDB(db);
 
   res.json({
@@ -2075,84 +2161,111 @@ app.post('/transactions', authMiddleware, (req, res) => {
       receivedCurrency,
       wasConverted,
     },
+    limits: {
+      remainingDailyUSD:   limitCheck.remainingDailyUSD,
+      remainingWeeklyUSD:  limitCheck.remainingWeeklyUSD,
+      remainingMonthlyUSD: limitCheck.remainingMonthlyUSD,
+      tierLevel:           limitCheck.tierLevel,
+    },
   });
 });
 
+// ==================== ADMIN ROUTES ====================
+app.post('/admin/login', adminLoginHandler);
+app.use('/admin/withdrawals', adminWithdrawalsRouter);
+
 // Withdrawals to bank/mobile money
 app.post('/withdrawals', authMiddleware, (req, res) => {
-  const db = loadDB();
-  const { fromWalletId, amount, currency, method, bankName, accountNumber, accountName, isInternational } = req.body;
-  
-  if (!fromWalletId || typeof amount === 'undefined' || !currency || !method || !bankName || !accountNumber || !accountName) {
+  const {
+    fromWalletId, amount, currency, method, isInternational,
+    country, bankName, accountNumber, accountHolderName,
+    bankCode, branchCode, iban, swiftBic,
+  } = req.body;
+
+  if (!fromWalletId || typeof amount === 'undefined' || !currency || !method)
     return res.status(400).json({ error: 'Missing required fields' });
-  }
-  
-  const wallet = db.wallets.find(w => w.id === fromWalletId && w.userId === req.user.userId);
-  if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
-  
-  const balance = wallet.balances.find(b => b.currency === currency);
-  if (!balance || balance.amount < amount) {
-    return res.status(400).json({ error: 'Insufficient funds' });
+
+  // ── Client-supplied idempotency key (optional header) ──────────────────────
+  const clientKey = req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
+  if (clientKey) {
+    const cached = idempotencyStore.get(clientKey);
+    if (cached && Date.now() - cached.timestamp < IDEMPOTENCY_EXPIRY)
+      return res.status(200).json(cached.response);
   }
 
-  // Calculate withdrawal fee
+  const db = loadDB();
   const feeCalc = calcWithdrawFee(amount, !!isInternational);
-  // Wallet is debited the full 'amount'; user receives 'netPayout' after fee
-  balance.amount -= amount;
-  
-  // Create withdrawal transaction
-  const withdrawal = {
-    id: uuidv4(),
-    type: 'withdrawal',
-    walletId: fromWalletId,
-    amount,
-    currency,
-    method, // 'bank' | 'mobile' | 'debit'
-    isInternational: !!isInternational,
-    feeAmount: feeCalc.feeAmount,
-    feeRate: feeCalc.rate,
-    netPayout: feeCalc.netPayout,
-    bankName,
-    accountNumber,
-    accountName,
-    status: 'pending',
-    timestamp: Date.now(),
-    estimatedArrival: Date.now() + (isInternational ? 5 * 24 * 60 * 60 * 1000 : 3 * 24 * 60 * 60 * 1000),
-  };
-  
-  if (!db.withdrawals) db.withdrawals = [];
-  db.withdrawals.push(withdrawal);
+
+  let withdrawal;
+  try {
+    withdrawal = createWithdrawal(db, req.user.userId, {
+      walletId:          fromWalletId,
+      amount,
+      currency,
+      method,
+      isInternational,
+      country:           country           || null,
+      bankName:          bankName          || null,
+      accountNumber:     accountNumber     || null,
+      accountHolderName: accountHolderName || null,
+      bankCode:          bankCode          || null,
+      branchCode:        branchCode        || null,
+      iban:              iban              || null,
+      swiftBic:          swiftBic          || null,
+      feeAmount:  feeCalc.feeAmount,
+      feeRate:    feeCalc.rate,
+      netPayout:  feeCalc.netPayout,
+    });
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message });
+  }
+
+  // Advance synchronously to "processing" state, then respond to client
+  advanceToProcessing(db, withdrawal.id);
   saveDB(db);
-  
+
   // Notify user
-  createNotification(db, req.user.userId, 'withdrawal',
+  const db2 = loadDB();
+  createNotification(db2, req.user.userId, 'withdrawal',
     'Withdrawal Submitted',
     `${minorToMajor(feeCalc.netPayout, currency).toFixed(2)} ${currency} is being sent to your ${isInternational ? 'international' : 'local'} account`,
     { withdrawalId: withdrawal.id, amount, currency });
-  saveDB(db);
-  
+  saveDB(db2);
+
+  const responseBody = {
+    withdrawal,
+    feeBreakdown: {
+      youSend:      amount,
+      fee:          feeCalc.feeAmount,
+      theyReceive:  feeCalc.netPayout,
+      currency,
+      feeRate:      feeCalc.rate,
+      isInternational: !!isInternational,
+    },
+  };
+
+  // Cache response under client key for 24 h
+  if (clientKey) {
+    idempotencyStore.set(clientKey, { response: responseBody, timestamp: Date.now() });
+  }
+
   logger.info('Withdrawal created', {
-    userId: req.user.userId,
+    userId:       req.user.userId,
     withdrawalId: withdrawal.id,
     amount,
-    feeAmount: feeCalc.feeAmount,
-    netPayout: feeCalc.netPayout,
+    feeAmount:    feeCalc.feeAmount,
+    netPayout:    feeCalc.netPayout,
     currency,
     method,
     isInternational: !!isInternational,
   });
-  
-  res.json({
-    withdrawal,
-    feeBreakdown: {
-      youSend: amount,
-      fee: feeCalc.feeAmount,
-      theyReceive: feeCalc.netPayout,
-      currency,
-      feeRate: feeCalc.rate,
-      isInternational: !!isInternational,
-    },
-  });
+
+  res.json(responseBody);
+
+  // Fire the real payout asynchronously — AFTER the HTTP response is sent.
+  // executePayout loads a fresh DB, calls Stripe or Kora, then marks paid or failed.
+  const capturedId = withdrawal.id;
+  setImmediate(() => executePayout(capturedId, loadDB, saveDB, logger));
 });
 
 // Rates
@@ -2265,7 +2378,14 @@ app.get('/fx-quote', authMiddleware, (req, res) => {
 // Only returns currency code — no balance or owner data exposed.
 app.get('/wallets/:id/currency', authMiddleware, (req, res) => {
   const db = loadDB();
-  const wallet = db.wallets.find(w => w.id === req.params.id);
+  let wallet = db.wallets.find(w => w.id === req.params.id);
+
+  // If not a direct wallet ID, try resolving as @username or email
+  if (!wallet) {
+    const resolved = resolveRecipient(db, req.params.id);
+    if (resolved) wallet = db.wallets.find(w => w.id === resolved.walletId);
+  }
+
   if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
   const owner = db.users.find(u => u.id === wallet.userId);
   // Prefer user's explicitly set preferredCurrency, then first balance currency
@@ -2495,7 +2615,7 @@ app.get('/me', authMiddleware, (req, res) => {
   const db = loadDB();
   const u = db.users.find(x=>x.id===req.user.userId);
   if (!u) return res.status(404).json({ error: 'Not found' });
-  res.json({ id: u.id, email: u.email, region: u.region });
+  res.json({ id: u.id, email: u.email, region: u.region, kycTier: u.kycTier || 0, kycStatus: u.kycStatus || 'pending', tierLimits: KYC_TIERS[u.kycTier || 0] });
 });
 
 // ==================== PAYMENT REQUESTS ====================
@@ -4788,69 +4908,283 @@ const upload = multer({
   }
 });
 
-// KYC TIER LIMITS CONFIGURATION
+// ════════════════════════════════════════════════════════════════
+// KYC TIER LIMIT SYSTEM
+// ════════════════════════════════════════════════════════════════
+//
+// All limits are stored and enforced in USD.
+//
+// Storage:  user.limitTracking  — persisted to db.json per user.
+//   {
+//     dailyUsedUSD:    number,   // USD sent in current calendar day (UTC)
+//     weeklyUsedUSD:   number,   // USD sent in current Mon-Sun week (UTC)
+//     monthlyUsedUSD:  number,   // USD sent in current calendar month (UTC)
+//     dayKey:          string,   // 'YYYY-MM-DD'  — resets daily bucket when changed
+//     weekKey:         string,   // 'YYYY-WW'     — resets weekly bucket when changed
+//     monthKey:        string,   // 'YYYY-MM'     — resets monthly bucket when changed
+//   }
+//
+// Conversion: amount (minor units, any currency) → major → USD
+//   amountUSD = minorToMajor(amount, currency) / rates[currency]
+//   This conversion is done by the caller before calling checkKYCLimits.
+
 const KYC_TIERS = {
-  0: { dailyLimit: 100, totalLimit: 500, name: 'Trial' },
-  1: { dailyLimit: 5000, totalLimit: 50000, name: 'Worker' },
-  2: { dailyLimit: 25000, totalLimit: 250000, name: 'Small Business' },
-  3: { dailyLimit: Infinity, totalLimit: Infinity, name: 'Enterprise' }
+  0: { name: 'Starter',   dailyLimit: 300,   weeklyLimit: 1000,  monthlyLimit: 2000  },
+  1: { name: 'Basic KYC', dailyLimit: 2000,  weeklyLimit: 5000,  monthlyLimit: 10000 },
+  2: { name: 'Verified',  dailyLimit: 10000, weeklyLimit: 25000, monthlyLimit: 50000 },
 };
 
-// Helper: Check KYC tier limits
-function checkKYCLimits(user, amountUSD) {
-  if (!user.kycTier) user.kycTier = 0;
-  if (user.kycStatus !== 'approved' && user.kycTier > 0) {
-    return { allowed: false, reason: 'KYC verification pending' };
-  }
-  
-  const tier = KYC_TIERS[user.kycTier] || KYC_TIERS[0];
-  const today = new Date().toISOString().split('T')[0];
-  
-  // Reset daily spent if new day
-  if (user.lastResetDate !== today) {
-    user.dailySpent = 0;
-    user.lastResetDate = today;
-  }
-  
-  // Check daily limit
-  if (user.dailySpent + amountUSD > tier.dailyLimit) {
-    return { 
-      allowed: false, 
-      reason: `Daily limit exceeded. Tier ${user.kycTier} limit: $${tier.dailyLimit}/day`,
-      currentSpent: user.dailySpent,
-      limit: tier.dailyLimit
+/** Returns today's UTC calendar key: 'YYYY-MM-DD' */
+function getDayKey()   { return new Date().toISOString().slice(0, 10); }
+/** Returns current ISO week key: 'YYYY-WW' (Monday anchor) */
+function getWeekKey() {
+  const d = new Date();
+  const day = d.getUTCDay() || 7; // Sunday=7
+  d.setUTCDate(d.getUTCDate() + 4 - day); // nearest Thursday
+  const year = d.getUTCFullYear();
+  const week = Math.ceil((((d - Date.UTC(year, 0, 1)) / 86400000) + 1) / 7);
+  return `${year}-${String(week).padStart(2, '0')}`;
+}
+/** Returns current UTC month key: 'YYYY-MM' */
+function getMonthKey() { return new Date().toISOString().slice(0, 7); }
+
+/**
+ * Initialise limitTracking on a user object if missing.
+ * Mutates the user object in place — caller must saveDB.
+ */
+function ensureLimitTracking(user) {
+  if (!user.limitTracking) {
+    user.limitTracking = {
+      dailyUsedUSD:   0,
+      weeklyUsedUSD:  0,
+      monthlyUsedUSD: 0,
+      dayKey:         getDayKey(),
+      weekKey:        getWeekKey(),
+      monthKey:       getMonthKey(),
     };
   }
-  
-  // Check total wallet capacity (simplified - checking against one value)
-  const maxCapacity = tier.totalLimit;
-  // In real app, would sum all wallet balances
-  if (amountUSD > maxCapacity) {
-    return { 
-      allowed: false, 
-      reason: `Amount exceeds tier ${user.kycTier} capacity: $${maxCapacity}`,
-      limit: maxCapacity
-    };
-  }
-  
-  return { allowed: true };
 }
 
-// Helper: Update daily spent
-function updateDailySpent(user, amountUSD) {
-  const today = new Date().toISOString().split('T')[0];
-  if (user.lastResetDate !== today) {
-    user.dailySpent = 0;
-    user.lastResetDate = today;
+/**
+ * Apply calendar resets to limitTracking.
+ * If the day/week/month key has changed since last transaction, the
+ * corresponding bucket resets to 0.
+ * Mutates user.limitTracking in place — caller must saveDB.
+ */
+function applyLimitResets(user) {
+  ensureLimitTracking(user);
+  const lt = user.limitTracking;
+  const dk = getDayKey(), wk = getWeekKey(), mk = getMonthKey();
+  if (lt.dayKey   !== dk) { lt.dailyUsedUSD   = 0; lt.dayKey   = dk; }
+  if (lt.weekKey  !== wk) { lt.weeklyUsedUSD  = 0; lt.weekKey  = wk; }
+  if (lt.monthKey !== mk) { lt.monthlyUsedUSD = 0; lt.monthKey = mk; }
+}
+
+/**
+ * Check KYC tier limits for a prospective send of `amountUSD`.
+ * Does NOT mutate the user record — call updateLimitTracking on success.
+ *
+ * Returns on BLOCK:
+ *   { allowed: false, code: 'LIMIT_EXCEEDED', limitType, message,
+ *     remainingDailyUSD, remainingWeeklyUSD, remainingMonthlyUSD,
+ *     tierLevel, nextTier }
+ *
+ * Returns on ALLOW:
+ *   { allowed: true,
+ *     remainingDailyUSD, remainingWeeklyUSD, remainingMonthlyUSD,
+ *     tierLevel }
+ */
+function checkKYCLimits(user, amountUSD, _db) {
+  // _db kept for signature compatibility; not needed with stored tracking
+  applyLimitResets(user); // apply calendar resets (read-only side-effect on in-memory object)
+
+  const tierLevel = user.kycTier || 0;
+  const tier      = KYC_TIERS[tierLevel] || KYC_TIERS[0];
+  const lt        = user.limitTracking;
+
+  const dailyUsed   = lt.dailyUsedUSD   || 0;
+  const weeklyUsed  = lt.weeklyUsedUSD  || 0;
+  const monthlyUsed = lt.monthlyUsedUSD || 0;
+
+  const remDay   = Math.max(0, tier.dailyLimit   - dailyUsed);
+  const remWeek  = Math.max(0, tier.weeklyLimit  - weeklyUsed);
+  const remMonth = Math.max(0, tier.monthlyLimit - monthlyUsed);
+
+  const nextTier = KYC_TIERS[tierLevel + 1] || null;
+
+  if (dailyUsed + amountUSD > tier.dailyLimit) {
+    return {
+      allowed: false,
+      code: 'LIMIT_EXCEEDED',
+      limitType: 'daily',
+      message: `You have reached your daily limit of $${tier.dailyLimit.toLocaleString()}. You can send $${remDay.toFixed(2)} more today.`,
+      remainingDailyUSD:   remDay,
+      remainingWeeklyUSD:  remWeek,
+      remainingMonthlyUSD: remMonth,
+      tierLevel,
+      nextTier,
+    };
   }
-  user.dailySpent += amountUSD;
+
+  if (weeklyUsed + amountUSD > tier.weeklyLimit) {
+    return {
+      allowed: false,
+      code: 'LIMIT_EXCEEDED',
+      limitType: 'weekly',
+      message: `You have reached your weekly limit of $${tier.weeklyLimit.toLocaleString()}. You can send $${remWeek.toFixed(2)} more this week.`,
+      remainingDailyUSD:   remDay,
+      remainingWeeklyUSD:  remWeek,
+      remainingMonthlyUSD: remMonth,
+      tierLevel,
+      nextTier,
+    };
+  }
+
+  if (monthlyUsed + amountUSD > tier.monthlyLimit) {
+    return {
+      allowed: false,
+      code: 'LIMIT_EXCEEDED',
+      limitType: 'monthly',
+      message: `You have reached your monthly limit of $${tier.monthlyLimit.toLocaleString()}. You can send $${remMonth.toFixed(2)} more this month.`,
+      remainingDailyUSD:   remDay,
+      remainingWeeklyUSD:  remWeek,
+      remainingMonthlyUSD: remMonth,
+      tierLevel,
+      nextTier,
+    };
+  }
+
+  // Allowed — report remaining AFTER this transaction
+  return {
+    allowed: true,
+    remainingDailyUSD:   Math.max(0, remDay   - amountUSD),
+    remainingWeeklyUSD:  Math.max(0, remWeek  - amountUSD),
+    remainingMonthlyUSD: Math.max(0, remMonth - amountUSD),
+    tierLevel,
+  };
+}
+
+/**
+ * Increment stored USD usage buckets after a successful send.
+ * Applies calendar resets first, then adds amountUSD.
+ * Mutates user.limitTracking in place — caller must saveDB.
+ */
+function updateLimitTracking(user, amountUSD) {
+  applyLimitResets(user);
+  const lt = user.limitTracking;
+  lt.dailyUsedUSD   = (lt.dailyUsedUSD   || 0) + amountUSD;
+  lt.weeklyUsedUSD  = (lt.weeklyUsedUSD  || 0) + amountUSD;
+  lt.monthlyUsedUSD = (lt.monthlyUsedUSD || 0) + amountUSD;
 }
 
 // Helper: Convert amount to USD for limit checking
 function convertToUSD(amount, currency, rates) {
-  const rate = rates.values[currency] || 1;
+  const rate = (rates && rates.values) ? (rates.values[currency] || 1) : 1;
   return amount / rate;
 }
+
+// ════════════════════════════════════════════════════════════════
+// PAYROLL LIMIT SYSTEM — separate from personal KYC tier limits
+// ════════════════════════════════════════════════════════════════
+//
+// Payroll transactions use a dedicated daily/monthly limit tied to the
+// employer record, NOT the sender's personal KYC tier limits.
+// Personal sends still use checkKYCLimits() / KYC_TIERS as before.
+
+const PAYROLL_DAILY_LIMIT_USD  = parseInt(process.env.PAYROLL_DAILY_LIMIT_USD)  || 50000;
+const PAYROLL_MONTHLY_LIMIT_USD = parseInt(process.env.PAYROLL_MONTHLY_LIMIT_USD) || 500000;
+
+/**
+ * Ensure payroll limit tracking fields exist on an employer record.
+ * Mutates employer in place — caller must saveDB.
+ */
+function ensurePayrollLimitTracking(employer) {
+  if (!employer.payrollLimitTracking) {
+    employer.payrollLimitTracking = {
+      dailyUsedUSD:   0,
+      monthlyUsedUSD: 0,
+      dayKey:         getDayKey(),
+      monthKey:       getMonthKey(),
+    };
+  }
+}
+
+/**
+ * Apply calendar resets to payroll limit tracking.
+ * Mutates employer.payrollLimitTracking in place.
+ */
+function applyPayrollLimitResets(employer) {
+  ensurePayrollLimitTracking(employer);
+  const plt = employer.payrollLimitTracking;
+  const dk  = getDayKey(), mk = getMonthKey();
+  if (plt.dayKey   !== dk) { plt.dailyUsedUSD   = 0; plt.dayKey   = dk; }
+  if (plt.monthKey !== mk) { plt.monthlyUsedUSD = 0; plt.monthKey = mk; }
+}
+
+/**
+ * Check payroll-specific limits for a prospective batch of `amountUSD`.
+ *
+ * Conditions for payroll limits to apply (ALL must be true):
+ *   1. Transaction is initiated from a payroll flow (employer/bulk-payment endpoint)
+ *   2. Sender is a registered employer (db.employers record exists)
+ *   3. Employer has verificationStatus === 'verified'
+ *
+ * Returns { allowed, code?, limitType?, message?, remainingDailyUSD, remainingMonthlyUSD }
+ */
+function checkPayrollLimits(employer, amountUSD) {
+  applyPayrollLimitResets(employer);
+  const plt = employer.payrollLimitTracking;
+
+  const dailyUsed   = plt.dailyUsedUSD   || 0;
+  const monthlyUsed = plt.monthlyUsedUSD || 0;
+
+  const dailyLimit  = employer.payrollDailyLimitUSD  || PAYROLL_DAILY_LIMIT_USD;
+  const monthlyLimit = employer.payrollMonthlyLimitUSD || PAYROLL_MONTHLY_LIMIT_USD;
+
+  const remDay   = Math.max(0, dailyLimit   - dailyUsed);
+  const remMonth = Math.max(0, monthlyLimit - monthlyUsed);
+
+  if (dailyUsed + amountUSD > dailyLimit) {
+    return {
+      allowed: false,
+      code: 'PAYROLL_LIMIT_EXCEEDED',
+      limitType: 'daily',
+      message: `Payroll daily limit of $${dailyLimit.toLocaleString()} exceeded. You can send $${remDay.toFixed(2)} more today.`,
+      remainingDailyUSD:   remDay,
+      remainingMonthlyUSD: remMonth,
+    };
+  }
+
+  if (monthlyUsed + amountUSD > monthlyLimit) {
+    return {
+      allowed: false,
+      code: 'PAYROLL_LIMIT_EXCEEDED',
+      limitType: 'monthly',
+      message: `Payroll monthly limit of $${monthlyLimit.toLocaleString()} exceeded. You can send $${remMonth.toFixed(2)} more this month.`,
+      remainingDailyUSD:   remDay,
+      remainingMonthlyUSD: remMonth,
+    };
+  }
+
+  return {
+    allowed: true,
+    remainingDailyUSD:   Math.max(0, remDay   - amountUSD),
+    remainingMonthlyUSD: Math.max(0, remMonth - amountUSD),
+  };
+}
+
+/**
+ * Increment payroll usage buckets after a successful batch.
+ * Mutates employer.payrollLimitTracking — caller must saveDB.
+ */
+function updatePayrollLimitTracking(employer, amountUSD) {
+  applyPayrollLimitResets(employer);
+  const plt = employer.payrollLimitTracking;
+  plt.dailyUsedUSD   = (plt.dailyUsedUSD   || 0) + amountUSD;
+  plt.monthlyUsedUSD = (plt.monthlyUsedUSD || 0) + amountUSD;
+}
+
+// ════════════════════════════════════════════════════════════════
 
 // Register employer
 app.post('/employer/register',
@@ -5104,196 +5438,233 @@ app.post('/employer/bulk-payment',
   ]),
   async (req, res) => {
     const db = loadDB();
-    
+
     const employer = db.employers.find(e => e.userId === req.user.userId);
-    if (!employer) {
-      return res.status(404).json({ error: 'Employer account not found' });
-    }
-    
-    if (employer.verificationStatus !== 'verified') {
-      return res.status(403).json({ error: 'Employer not verified' });
-    }
-    
+    if (!employer) return res.status(404).json({ error: 'Employer account not found' });
+    if (employer.verificationStatus !== 'verified') return res.status(403).json({ error: 'Employer not verified' });
+
     const { payrollItems, payPeriod, notes } = req.body;
-    
-    // Get funding wallet
+
     const fundingWallet = db.wallets.find(w => w.id === employer.fundingWalletId);
-    if (!fundingWallet) {
-      return res.status(500).json({ error: 'Funding wallet not found' });
-    }
-    
-    // Calculate total needed per currency
-    const totalsNeeded = {};
+    if (!fundingWallet) return res.status(500).json({ error: 'Funding wallet not found' });
+
+    // ── PHASE 1: PRE-VALIDATE ALL ITEMS (no money moves yet) ──────────────────
+    // Resolve every worker wallet up-front. If any are missing, reject the
+    // entire batch before touching a single balance.
+    const resolvedItems = [];
+    const validationErrors = [];
+
+    const employerUser = db.users.find(u => u.id === employer.userId);
+    const employerCountry = employerUser?.region || 'GQ';
+
     for (const item of payrollItems) {
-      if (!totalsNeeded[item.currency]) totalsNeeded[item.currency] = 0;
-      totalsNeeded[item.currency] += item.amount;
+      const workerWallet = db.wallets.find(w => w.id === item.walletId);
+      if (!workerWallet) {
+        validationErrors.push(`Worker ${item.workerEmail || item.workerId}: wallet ${item.walletId} not found`);
+        continue;
+      }
+      resolvedItems.push({ ...item, workerWallet });
     }
-    
-    // Check funding wallet has sufficient balance
+
+    if (validationErrors.length > 0) {
+      logger.error('Payroll batch rejected — validation failed', {
+        employerId: employer.id,
+        validationErrors,
+      });
+      return res.status(400).json({
+        error: 'Payroll validation failed — no money was sent',
+        validationErrors,
+      });
+    }
+
+    // Check total funding balance per currency — all at once, before any debit
+    const totalsNeeded = {};
+    for (const item of resolvedItems) {
+      totalsNeeded[item.currency] = (totalsNeeded[item.currency] || 0) + item.amount;
+    }
     for (const [currency, total] of Object.entries(totalsNeeded)) {
       const balance = fundingWallet.balances.find(b => b.currency === currency);
       if (!balance || balance.amount < total) {
-        return res.status(400).json({ 
-          error: 'Insufficient funds',
-          message: `Need ${total} ${currency}, but only have ${balance?.amount || 0} ${currency}`,
+        logger.error('Payroll batch rejected — insufficient funds', {
+          employerId: employer.id, currency, needed: total, available: balance?.amount || 0,
+        });
+        return res.status(400).json({
+          error: 'Insufficient funds — no money was sent',
           currency,
           needed: total,
-          available: balance?.amount || 0
+          available: balance?.amount || 0,
         });
       }
     }
-    
-    // Create payroll batch
+
+    // ── PAYROLL LIMIT CHECK ─────────────────────────────────────────────────
+    // Uses the separate payroll daily/monthly limit (NOT personal KYC limits).
+    // All three conditions are already met at this point:
+    //   1. This is the payroll flow (employer/bulk-payment endpoint)
+    //   2. Sender is a registered employer (employer record found above)
+    //   3. Employer is verified (verificationStatus check above)
+    const batchTotalUSD = resolvedItems.reduce((sum, item) => {
+      return sum + convertToUSD(item.amount, item.currency, db.rates);
+    }, 0);
+
+    const payrollLimitCheck = checkPayrollLimits(employer, batchTotalUSD);
+    if (!payrollLimitCheck.allowed) {
+      logger.error('Payroll batch rejected — payroll limit exceeded', {
+        employerId: employer.id,
+        batchTotalUSD: batchTotalUSD.toFixed(2),
+        limitType: payrollLimitCheck.limitType,
+        remainingDailyUSD: payrollLimitCheck.remainingDailyUSD,
+        remainingMonthlyUSD: payrollLimitCheck.remainingMonthlyUSD,
+      });
+      return res.status(403).json({
+        code:                payrollLimitCheck.code,
+        error:               payrollLimitCheck.message,
+        limitType:           payrollLimitCheck.limitType,
+        remainingDailyUSD:   payrollLimitCheck.remainingDailyUSD,
+        remainingMonthlyUSD: payrollLimitCheck.remainingMonthlyUSD,
+      });
+    }
+
+    // ── PHASE 2: EXECUTE ALL PAYMENTS ATOMICALLY ──────────────────────────────
+    // All validations passed. Apply every debit and credit in memory using the
+    // same logic as POST /transactions, then write to disk exactly once.
     const batchId = `BATCH-${Date.now()}-${uuidv4().substring(0, 8)}`;
     const batch = {
       id: batchId,
       employerId: employer.id,
       employerName: employer.companyName,
-      payPeriod: payPeriod || new Date().toISOString().substring(0, 7), // YYYY-MM
-      status: 'processing',
-      totalItems: payrollItems.length,
+      payPeriod: payPeriod || new Date().toISOString().substring(0, 7),
+      status: 'completed',
+      totalItems: resolvedItems.length,
       successCount: 0,
       failureCount: 0,
       createdAt: Date.now(),
       completedAt: null,
       transactions: [],
-      notes: notes || null
+      notes: notes || null,
     };
-    
+
     const results = [];
-    
-    // Process each payment
-    for (const item of payrollItems) {
-      try {
-        // Get worker details for international payroll detection
-        const worker = db.users.find(u => u.id === item.workerId);
-        const employerUser = db.users.find(u => u.id === employer.userId);
-        
-        const employerCountry = employerUser?.region || 'GQ';
-        const workerCountry = worker?.region || 'GQ';
-        const isCrossBorder = employerCountry !== workerCountry;
-        
-        // Detect currency conversion
-        const workerWallet = db.wallets.find(w => w.id === item.walletId);
-        const wasConverted = item.currency !== (item.workerPreferredCurrency || item.currency);
-        const receivedCurrency = item.workerPreferredCurrency || item.currency;
-        const receivedAmount = wasConverted 
-          ? Math.round(item.amount / (db.rates.values[item.currency] || 1) * (db.rates.values[receivedCurrency] || 1))
-          : item.amount;
-        
-        // Create transaction with international payroll support
-        const txn = {
-          id: `TXN-${uuidv4()}`,
-          type: 'payroll',
-          fromWalletId: fundingWallet.id,
-          toWalletId: item.walletId,
-          amount: item.amount,
-          currency: item.currency,
-          receivedAmount: receivedAmount,
-          receivedCurrency: receivedCurrency,
-          wasConverted: wasConverted,
-          status: 'completed',
-          createdAt: Date.now(),
-          memo: item.memo,
-          // Payroll-specific metadata with international support
-          payrollMetadata: {
-            employerId: employer.id,
-            employerName: employer.companyName,
-            employerCountry: employerCountry,
-            workerCountry: workerCountry,
-            isCrossBorder: isCrossBorder,
-            taxTreaty: isCrossBorder ? 'CEMAC' : null, // Auto-detect tax treaty for Central Africa
-            payPeriod: batch.payPeriod,
-            payrollBatchId: batchId,
-            workerId: item.workerId,
-            workerEmail: item.workerEmail,
-            isRecurring: false
-          },
-          complianceFlags: {
-            taxable: true,
-            reportable: true,
-            category: 'wages',
-            crossBorder: isCrossBorder,
-            currencyConverted: wasConverted
-          }
-        };
-        
-        // Deduct from funding wallet
-        const fundingBalance = fundingWallet.balances.find(b => b.currency === item.currency);
-        fundingBalance.amount -= item.amount;
-        
-        // Add to worker wallet (reuse workerWallet from above)
-        let workerBalance = workerWallet.balances.find(b => b.currency === item.currency);
-        if (!workerBalance) {
-          workerBalance = { currency: item.currency, amount: 0 };
-          workerWallet.balances.push(workerBalance);
-        }
-        workerBalance.amount += item.amount;
-        
-        db.transactions.push(txn);
-        batch.transactions.push(txn.id);
-        batch.successCount++;
-        
-        results.push({
-          workerId: item.workerId,
-          workerEmail: item.workerEmail,
-          status: 'success',
-          transactionId: txn.id,
-          amount: item.amount,
-          currency: item.currency
-        });
-        
-        logger.info('Payroll payment processed', {
-          batchId,
-          employerId: employer.id,
-          workerId: item.workerId,
-          transactionId: txn.id,
-          amount: item.amount,
-          currency: item.currency
-        });
-        
-      } catch (error) {
-        batch.failureCount++;
-        results.push({
-          workerId: item.workerId,
-          workerEmail: item.workerEmail,
-          status: 'failed',
-          error: error.message
-        });
-        
-        logger.error('Payroll payment failed', {
-          batchId,
-          employerId: employer.id,
-          workerId: item.workerId,
-          error: error.message
-        });
+
+    logger.info('Payroll batch starting', {
+      batchId, employerId: employer.id, itemCount: resolvedItems.length,
+    });
+
+    for (const item of resolvedItems) {
+      // Debit employer funding wallet (same as fromBalance.amount -= amount in /transactions)
+      const fundingBalance = fundingWallet.balances.find(b => b.currency === item.currency);
+      fundingBalance.amount -= item.amount;
+
+      // Credit worker wallet — same currency (FX conversion not applied in payroll; employer
+      // chooses the currency explicitly). Matches the receivedAmount logic in /transactions.
+      const { workerWallet } = item;
+      const worker = db.users.find(u => u.id === item.workerId);
+      const workerCountry = worker?.region || 'GQ';
+      const isCrossBorder = employerCountry !== workerCountry;
+
+      let workerBalance = workerWallet.balances.find(b => b.currency === item.currency);
+      if (!workerBalance) {
+        workerBalance = { currency: item.currency, amount: 0 };
+        workerWallet.balances.push(workerBalance);
       }
+      workerBalance.amount += item.amount;
+
+      // Build transaction record — same shape as POST /transactions output
+      const txn = {
+        id: uuidv4(),
+        type: 'payroll',
+        fromWalletId: fundingWallet.id,
+        toWalletId: item.walletId,
+        amount: item.amount,
+        currency: item.currency,
+        receivedAmount: item.amount,
+        receivedCurrency: item.currency,
+        wasConverted: false,
+        fxFeeAmount: 0,
+        sendFeeAmount: 0,
+        memo: item.memo || notes || '',
+        status: 'completed',
+        timestamp: Date.now(),
+        payrollMetadata: {
+          employerId: employer.id,
+          employerName: employer.companyName,
+          employerCountry,
+          workerCountry,
+          isCrossBorder,
+          taxTreaty: isCrossBorder ? 'CEMAC' : null,
+          payPeriod: batch.payPeriod,
+          payrollBatchId: batchId,
+          workerId: item.workerId,
+          workerEmail: item.workerEmail,
+          isRecurring: false,
+        },
+        complianceFlags: {
+          taxable: true,
+          reportable: true,
+          category: 'wages',
+          crossBorder: isCrossBorder,
+          currencyConverted: false,
+        },
+      };
+
+      db.transactions.push(txn);
+      batch.transactions.push(txn.id);
+      batch.successCount++;
+
+      results.push({
+        workerId: item.workerId,
+        workerEmail: item.workerEmail,
+        status: 'success',
+        transactionId: txn.id,
+        amount: item.amount,
+        currency: item.currency,
+      });
+
+      logger.info('Payroll payment applied', {
+        batchId,
+        employerId: employer.id,
+        workerId: item.workerId,
+        transactionId: txn.id,
+        amount: item.amount,
+        currency: item.currency,
+      });
     }
-    
-    // Update batch status
-    batch.status = batch.failureCount === 0 ? 'completed' : 'partial';
+
     batch.completedAt = Date.now();
-    
+
     // Update employer stats
-    employer.totalBatches++;
-    const totalUSD = payrollItems.reduce((sum, item) => {
+    employer.totalBatches = (employer.totalBatches || 0) + 1;
+    const totalUSD = resolvedItems.reduce((sum, item) => {
       return sum + convertToUSD(item.amount, item.currency, db.rates);
     }, 0);
-    employer.totalPayrollSent += totalUSD;
-    
+    employer.totalPayrollSent = (employer.totalPayrollSent || 0) + totalUSD;
+
+    // Update payroll limit tracking (separate from personal limits)
+    updatePayrollLimitTracking(employer, totalUSD);
+
+    if (!db.payrollBatches) db.payrollBatches = [];
     db.payrollBatches.push(batch);
+
+    // Single atomic write — all debits and credits committed together
     saveDB(db);
-    
+
+    logger.info('Payroll batch completed and saved', {
+      batchId,
+      employerId: employer.id,
+      successCount: batch.successCount,
+      totalAmountUSD: totalUSD.toFixed(2),
+    });
+
     logAIInteraction(req.user.userId, 'BULK_PAYROLL_SENT', [batchId, batch.successCount], null, req);
-    
+
     res.json({
-      success: batch.failureCount === 0,
+      success: true,
       batchId: batch.id,
       totalItems: batch.totalItems,
       successCount: batch.successCount,
-      failureCount: batch.failureCount,
-      status: batch.status,
-      results
+      failureCount: 0,
+      status: 'completed',
+      results,
     });
   }
 );
@@ -5716,11 +6087,7 @@ app.post('/admin/update-kyc-tier',
     
     user.kycTier = kycTier;
     user.kycStatus = kycStatus;
-    user.kycLimits = {
-      dailyLimit: KYC_TIERS[kycTier].dailyLimit,
-      totalLimit: KYC_TIERS[kycTier].totalLimit
-    };
-    
+
     saveDB(db);
     logAIInteraction(req.user.userId, 'KYC_TIER_UPDATED', [userId, kycTier], null, req);
     
