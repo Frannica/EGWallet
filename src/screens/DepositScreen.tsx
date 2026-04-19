@@ -218,6 +218,7 @@ export default function DepositScreen() {
     setCardNumber('');
     setCardHolder('');
     setCardExpiry('');
+    setCardCvc('');
     setBankAccountNum('');
     setBankRoutingNum('');
     setShowAddCardForm(false);
@@ -238,8 +239,8 @@ export default function DepositScreen() {
       setShowPaymentMethodModal(false);
       handleDeposit();
     } else {
-      if (!cardNumber.trim() || !cardHolder.trim() || !cardExpiry.trim()) {
-        Alert.alert('Missing Info', 'Please fill in all card fields.');
+      if (!cardNumber.trim() || !cardHolder.trim() || !cardExpiry.trim() || !cardCvc.trim()) {
+        Alert.alert('Missing Info', 'Please fill in all card fields including CVC.');
         return;
       }
       const last4 = cardNumber.replace(/\s/g, '').slice(-4);
@@ -567,6 +568,17 @@ export default function DepositScreen() {
                         placeholderTextColor="#AAB8C2"
                         keyboardType="number-pad"
                         maxLength={5}
+                        style={pmStyles.input}
+                      />
+                      <Text style={pmStyles.fieldLabel}>CVC / CVV</Text>
+                      <TextInput
+                        value={cardCvc}
+                        onChangeText={v => setCardCvc(v.replace(/\D/g, '').slice(0, 4))}
+                        placeholder="123"
+                        placeholderTextColor="#AAB8C2"
+                        keyboardType="number-pad"
+                        maxLength={4}
+                        secureTextEntry
                         style={pmStyles.input}
                       />
                     </>

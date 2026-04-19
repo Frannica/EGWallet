@@ -22,26 +22,26 @@ module.exports = function phase11(check) {
   // ════════════════════════════════════════════════════════════════════════════
 
   check(
-    '[Deposit] CVC / CVV TextInput not rendered in deposit card modal',
-    !DEPOSIT.includes("fieldLabel}>CVC / CVV</Text>") &&
-    !DEPOSIT.includes('value={cardCvc}'),
+    '[Deposit] CVC / CVV TextInput rendered in deposit card modal (required for real card processing)',
+    DEPOSIT.includes("fieldLabel}>CVC / CVV</Text>") &&
+    DEPOSIT.includes('value={cardCvc}'),
   );
   check(
-    '[Deposit] handleAddDepositMethod does not gate on cardCvc',
-    !DEPOSIT.includes('cardCvc.trim()'),
+    '[Deposit] handleAddDepositMethod gates on cardCvc (required field)',
+    DEPOSIT.includes('cardCvc.trim()'),
   );
   check(
-    '[Deposit] resetAddCardForm does not clear cardCvc',
-    !DEPOSIT.includes("setCardCvc('');"),
+    '[Deposit] resetAddCardForm clears cardCvc on form reset',
+    DEPOSIT.includes("setCardCvc('');"),
   );
   check(
-    '[Deposit] No raw CVC value sent to any fetch body in DepositScreen',
+    '[Deposit] CVC is NOT sent raw in any fetch body (must go through payment processor only)',
     !DEPOSIT.includes('"cvc"') && !DEPOSIT.includes("'cvc'") &&
     !DEPOSIT.includes('"cvv"') && !DEPOSIT.includes("'cvv'"),
   );
   check(
-    '[Deposit] Card form still validates cardNumber, cardHolder, cardExpiry',
-    DEPOSIT.includes('!cardNumber.trim() || !cardHolder.trim() || !cardExpiry.trim()'),
+    '[Deposit] Card form validates cardNumber, cardHolder, cardExpiry, cardCvc',
+    DEPOSIT.includes('!cardNumber.trim() || !cardHolder.trim() || !cardExpiry.trim() || !cardCvc.trim()'),
   );
 
   // ════════════════════════════════════════════════════════════════════════════
