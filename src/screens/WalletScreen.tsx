@@ -3,12 +3,12 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, RefreshControl, A
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../auth/AuthContext';
 import { listWallets } from '../api/auth';
-import { fetchRates, Rates, DEMO_RATES } from '../api/client';
+import { fetchRates, Rates, DEMO_RATES, API_BASE } from '../api/client';
 import { formatCurrency, convert } from '../utils/currency';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { Ionicons } from '@expo/vector-icons';
-import { getLocalBalances, mergeWithLocalBalances } from '../utils/localBalance';
+import { getLocalBalances, mergeWithLocalBalances, syncLocalBalancesFromBackend } from '../utils/localBalance';
 
 type Balance = { currency: string; amount: number };
 
@@ -52,6 +52,10 @@ export default function WalletScreen() {
     setApiError(null);
     try {
       const res = await listWallets(auth.token);
+      // Sync backend balances to local — backend is authoritative when reachable.
+      // This overwrites any stale local values so a server-side refund or
+      // admin correction is always reflected on the next successful fetch.
+      await syncLocalBalancesFromBackend(res.wallets || []);
       const localBalances = await getLocalBalances();
       const mergedWallets = mergeWithLocalBalances(res.wallets || [], localBalances);
       setWallets(mergedWallets);
@@ -100,12 +104,10 @@ export default function WalletScreen() {
   useFocusEffect(
     React.useCallback(() => {
       if (auth.token) {
-        import('../api/client').then(({ API_BASE }) => {
-          fetch(`${API_BASE}/notifications`, { headers: { Authorization: `Bearer ${auth.token}` } })
-            .then(r => r.ok ? r.json() : null)
-            .then(d => { if (d) setUnreadNotifCount(d.unreadCount ?? 0); })
-            .catch(() => {});
-        });
+        fetch(`${API_BASE}/notifications`, { headers: { Authorization: `Bearer ${auth.token}` } })
+          .then(r => r.ok ? r.json() : null)
+          .then(d => { if (d) setUnreadNotifCount(d.unreadCount ?? 0); })
+          .catch(() => {});
       }
     }, [auth.token])
   );
@@ -212,6 +214,11 @@ export default function WalletScreen() {
           </TouchableOpacity>
         </LinearGradient>
 
+        {/* Test Mode Label */}
+        <Text style={{ textAlign: 'center', fontSize: 11, color: '#94a3b8', marginTop: 6, marginBottom: 2, letterSpacing: 0.5 }}>
+          TEST MODE — No real money is used
+        </Text>
+
         {/* Currency Picker */}
         {showCurrencyPicker && (
           <View style={styles.currencySelector}>
@@ -245,11 +252,11 @@ export default function WalletScreen() {
           contentContainerStyle={styles.quickActions}
         >
           {([
-            { icon: 'send' as const, label: 'Send', bg: '#DBEAFE', color: '#1565C0', onPress: () => { console.log('[Wallet] Quick action: Send'); (navigation as any).navigate('Send'); } },
-            { icon: 'download' as const, label: 'Request', bg: '#DCFCE7', color: '#15803D', onPress: () => { console.log('[Wallet] Quick action: Request'); (navigation as any).navigate('Request'); } },
-            { icon: 'add-circle' as const, label: 'Add Money', bg: '#FEF9C3', color: '#A16207', onPress: () => { console.log('[Wallet] Quick action: Add Money'); (navigation as any).navigate('Deposit', { walletId: wallets[0]?.id }); } },
-            { icon: 'card' as const, label: 'Card', bg: '#F3E8FF', color: '#7E22CE', onPress: () => { console.log('[Wallet] Quick action: Card'); (navigation as any).navigate('Card'); } },
-            { icon: 'sparkles' as const, label: 'AI Support', bg: '#EDE9FE', color: '#7C3AED', onPress: () => { console.log('[Wallet] Quick action: AI Support'); (navigation as any).navigate('AIChat'); } },
+            { icon: 'send' as const, label: 'Send', bg: '#DBEAFE', color: '#1565C0', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Send'); (navigation as any).navigate('Send'); } },
+            { icon: 'download' as const, label: 'Request', bg: '#DCFCE7', color: '#15803D', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Request'); (navigation as any).navigate('Request'); } },
+            { icon: 'add-circle' as const, label: 'Add Money', bg: '#FEF9C3', color: '#A16207', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Add Money'); (navigation as any).navigate('Deposit', { walletId: wallets[0]?.id }); } },
+            { icon: 'card' as const, label: 'Card', bg: '#F3E8FF', color: '#7E22CE', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Card'); (navigation as any).navigate('Card'); } },
+            { icon: 'sparkles' as const, label: 'AI Support', bg: '#EDE9FE', color: '#7C3AED', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: AI Support'); (navigation as any).navigate('AIChat'); } },
           ]).map(({ icon, label, bg, color, onPress }) => (
             <TouchableOpacity key={label} style={styles.quickActionBtn} onPress={onPress} activeOpacity={0.75}>
               <View style={[styles.quickActionIcon, { backgroundColor: bg }]}>
@@ -268,6 +275,7 @@ export default function WalletScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Balance cards — show currencies with balance */}
         {wallets.flatMap(wallet =>
           (wallet.balances || [])
             .filter((b: Balance) => b.amount > 0)

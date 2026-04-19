@@ -46,6 +46,13 @@ export default function BudgetScreen() {
   const [currency, setCurrency] = useState('USD');
   const [showCurrencyModal, setShowCurrencyModal] = useState(false);
 
+  function formatAmount(text: string): string {
+    const cleaned = text.replace(/[^0-9.]/g, '');
+    const parts = cleaned.split('.');
+    const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return parts.length > 1 ? intPart + '.' + parts[1] : intPart;
+  }
+
   const BUDGET_CURRENCIES = ['USD', 'EUR', 'GBP', 'XAF', 'NGN', 'GHS', 'ZAR', 'KES', 'INR', 'CNY', 'BRL'];
 
   useEffect(() => {
@@ -110,15 +117,15 @@ export default function BudgetScreen() {
   };
 
   const handleCreate = async () => {
-    console.log('[Budget] Create Budget button pressed — amount:', amount, currency);
-    if (!amount || parseFloat(amount) <= 0) {
+    if (__DEV__) console.log('[Budget] Create Budget button pressed');
+    if (!amount || parseFloat(amount.replace(/,/g, '')) <= 0) {
       Alert.alert('Error', 'Please enter a valid amount');
       return;
     }
 
     if (isCreating) return; // Prevent duplicates
 
-    const amountValue = parseFloat(amount);
+    const amountValue = parseFloat(amount.replace(/,/g, ''));
     const amountMinor = Math.round(amountValue * 100);
 
     Alert.alert(
@@ -135,7 +142,7 @@ export default function BudgetScreen() {
               const walletId = wallets[0]?.id || 'demo';
 
               await createBudget(auth.token!, walletId, currency, amountMinor);
-              console.log('[Budget] Created via API:', currency, amountMinor);
+              if (__DEV__) console.log('[Budget] Created via API');
               toast.show('Budget created ✅');
               setAmount('');
               setShowCreateForm(false);
@@ -151,7 +158,7 @@ export default function BudgetScreen() {
               const updated = [...budgets, localBudget];
               setBudgets(updated);
               try { await AsyncStorage.setItem(BUDGETS_STORAGE_KEY, JSON.stringify(updated)); } catch {}
-              console.log('[Budget] Created demo budget:', currency, amountMinor);
+              if (__DEV__) console.log('[Budget] Created demo budget');
               toast.show('Budget saved ✅');
               setAmount('');
               setShowCreateForm(false);
@@ -209,7 +216,7 @@ export default function BudgetScreen() {
             <TextInput
               style={styles.input}
               value={amount}
-              onChangeText={setAmount}
+              onChangeText={v => setAmount(formatAmount(v))}
               keyboardType="decimal-pad"
               placeholder="0.00"
               placeholderTextColor="#b0c4de"

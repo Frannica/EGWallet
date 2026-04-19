@@ -4,6 +4,8 @@ import { Alert } from 'react-native';
 import { login as apiLogin, register as apiRegister, me as apiMe, listWallets } from '../api/auth';
 import { API_BASE } from '../api/client';
 import { getDeviceFingerprint, getDeviceDisplayName, getDeviceType } from '../utils/deviceInfo';
+import { clearLocalUserData } from '../utils/localBalance';
+import { detectCountryCode } from '../config/regional';
 
 type AuthState = {
   user: { id: string; email: string; preferredCurrency?: string; autoConvertIncoming?: boolean; region?: string } | null;
@@ -143,10 +145,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const rt = res.refreshToken;
       await SecureStore.setItemAsync(TOKEN_KEY, t);
       if (rt) await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, rt);
+      await clearLocalUserData();
       setToken(t);
       
       try {
         const profile = await apiMe(t);
+        // If the user has no preferredCurrency stored (old account), infer from device locale
+        if (!profile.preferredCurrency) {
+          const code = detectCountryCode();
+          if (code) {
+            // Minimal inline map for the login-time fallback — full map lives on backend
+            const FALLBACK: Record<string, string> = {
+              GQ: 'XAF', CM: 'XAF', CF: 'XAF', TD: 'XAF', CG: 'XAF', GA: 'XAF',
+              SN: 'XOF', CI: 'XOF', ML: 'XOF', BF: 'XOF', BJ: 'XOF', NE: 'XOF', TG: 'XOF', GW: 'XOF',
+              NG: 'NGN', GH: 'GHS', ZA: 'ZAR', KE: 'KES', TZ: 'TZS', ET: 'ETB',
+              EG: 'EGP', MA: 'MAD', DZ: 'DZD', TN: 'TND',
+              BR: 'BRL', AR: 'ARS', CL: 'CLP', CO: 'COP', MX: 'MXN', PE: 'PEN',
+              CN: 'CNY', JP: 'JPY', KR: 'KRW', IN: 'INR', ID: 'IDR', PH: 'PHP',
+              SG: 'SGD', MY: 'MYR', TH: 'THB', VN: 'VND', PK: 'PKR',
+              AU: 'AUD', NZ: 'NZD', CA: 'CAD',
+              GB: 'GBP', CH: 'CHF', SE: 'SEK', NO: 'NOK', DK: 'DKK',
+              SA: 'SAR', AE: 'AED', QA: 'QAR', KW: 'KWD',
+              RU: 'RUB', TR: 'TRY', UA: 'UAH',
+            };
+            profile.preferredCurrency = FALLBACK[code] ?? 'USD';
+          } else {
+            profile.preferredCurrency = 'USD';
+          }
+        }
         setUser(profile);
       } catch (profileError) {
         // Token saved but profile fetch failed - still allow login
@@ -191,6 +217,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const rt = res.refreshToken;
     await SecureStore.setItemAsync(TOKEN_KEY, t);
     if (rt) await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, rt);
+    await clearLocalUserData();
     setToken(t);
     
     try {
@@ -234,6 +261,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     
     await SecureStore.deleteItemAsync(TOKEN_KEY);
     await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+    await clearLocalUserData();
     setToken(null);
     setUser(null);
   }

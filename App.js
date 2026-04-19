@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, ActivityIndicator } from 'react-native';
 import { AuthProvider } from './src/auth/AuthContext';
 import { BiometricProvider, useBiometric } from './src/auth/BiometricContext';
+import { LanguageProvider } from './src/i18n/LanguageContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import BiometricLock from './src/components/BiometricLock';
 import config from './src/config/env';
@@ -73,11 +74,13 @@ export default function App() {
   return (
     <React.StrictMode>
       <ErrorBoundary>
-        <BiometricProvider>
-          <AuthProvider>
-            <AppContent />
-          </AuthProvider>
-        </BiometricProvider>
+        <LanguageProvider>
+          <BiometricProvider>
+            <AuthProvider>
+              <AppContent />
+            </AuthProvider>
+          </BiometricProvider>
+        </LanguageProvider>
       </ErrorBoundary>
     </React.StrictMode>
   );

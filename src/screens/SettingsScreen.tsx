@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, Alert, TouchableOpacity, Modal, FlatList, Switch, StyleSheet, TextInput } from 'react-native';
+import { View, Text, ScrollView, Alert, TouchableOpacity, Modal, FlatList, Switch, StyleSheet, TextInput, Linking, Platform, Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,7 +8,8 @@ import { useBiometric } from '../auth/BiometricContext';
 import { useNavigation } from '@react-navigation/native';
 import { getCurrencySymbol, getCurrencyName, CURRENCY_INFO, formatCurrency, convert } from '../utils/currency';
 import { listWallets } from '../api/auth';
-import { fetchRates, DEMO_RATES, Rates } from '../api/client';
+import { fetchRates, DEMO_RATES, Rates, API_BASE } from '../api/client';
+import { useLanguage, SupportedLanguage } from '../i18n/LanguageContext';
 
 // Full list ordered: popular first, then alphabetical by code
 const CURRENCIES = Object.keys(CURRENCY_INFO).sort((a, b) => {
@@ -20,11 +21,22 @@ const CURRENCIES = Object.keys(CURRENCY_INFO).sort((a, b) => {
   return a.localeCompare(b);
 });
 
+const LANGUAGES: { code: SupportedLanguage; name: string; flag: string }[] = [
+  { code: 'en', name: 'English',    flag: '🇬🇧' },
+  { code: 'fr', name: 'Français',   flag: '🇫🇷' },
+  { code: 'es', name: 'Español',    flag: '🇪🇸' },
+  { code: 'pt', name: 'Português',  flag: '🇧🇷' },
+  { code: 'ar', name: 'العربية',    flag: '🇸🇦' },
+  { code: 'zh', name: '中文',        flag: '🇨🇳' },
+  { code: 'ja', name: '日本語',      flag: '🇯🇵' },
+];
+
 export default function SettingsScreen() {
   const auth = useAuth();
   const biometric = useBiometric();
   const navigation = useNavigation();
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
+  const [currencySearch, setCurrencySearch] = useState('');
   const [username, setUsername] = useState('');
   const [usernameInput, setUsernameInput] = useState('');
   const [showUsernameModal, setShowUsernameModal] = useState(false);
@@ -32,10 +44,19 @@ export default function SettingsScreen() {
   const [faceId, setFaceId] = useState(false);
   const [trustedDevice, setTrustedDevice] = useState(false);
   const [walletInfo, setWalletInfo] = useState<{ id: string; maxLimitUSD: number; usdValue: number } | null>(null);
+  const [bugDescription, setBugDescription] = useState('');
+  const [showBugModal, setShowBugModal] = useState(false);
+  const [showWalletIdModal, setShowWalletIdModal] = useState(false);
+  const { language: appLanguage, setLanguage: setContextLanguage } = useLanguage();
+  const [showLanguagePicker, setShowLanguagePicker] = useState(false);
 
   useEffect(() => {
-    AsyncStorage.getItem('@egwallet:username').then(v => { if (v) setUsername(v); });
-  }, []);
+    if (!auth.token) return;
+    fetch(`${API_BASE}/auth/me`, { headers: { Authorization: `Bearer ${auth.token}` } })
+      .then(r => r.json())
+      .then(d => { if (d.username) setUsername(d.username); })
+      .catch(() => {});
+  }, [auth.token]);
 
   useEffect(() => {
     if (!auth.token) return;
@@ -52,18 +73,31 @@ export default function SettingsScreen() {
     }).catch(() => {});
   }, [auth.token]);
 
+  useEffect(() => {
+  }, []);
+
   const saveUsername = async () => {
     const clean = usernameInput.trim();
-    console.log('[Settings] Save Username pressed:', clean);
-    if (!clean) return;
-    await AsyncStorage.setItem('@egwallet:username', clean);
-    setUsername(clean);
-    setShowUsernameModal(false);
-    Alert.alert('Username Set', `Your handle is now @${clean}. Others can send you money using @${clean}.`);
+    if (__DEV__) console.log('[Settings] Save Username pressed:', clean);
+    if (!clean || !auth.token) return;
+    try {
+      const res = await fetch(`${API_BASE}/auth/username`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth.token}` },
+        body: JSON.stringify({ username: clean }),
+      });
+      const data = await res.json();
+      if (!res.ok) { Alert.alert('Error', data.error || 'Could not set username'); return; }
+      setUsername(data.username);
+      setShowUsernameModal(false);
+      Alert.alert('Username Set', `Your handle is now @${data.username}. Others can send you money using @${data.username}.`);
+    } catch (e: any) {
+      Alert.alert('Error', 'Network error. Please try again.');
+    }
   };
 
   const handleSignOut = async () => {
-    console.log('[Settings] Sign Out pressed');
+    if (__DEV__) console.log('[Settings] Sign Out pressed');
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -77,7 +111,7 @@ export default function SettingsScreen() {
   };
 
   const handleDeleteAccount = async () => {
-    console.log('[Settings] Delete Account pressed');
+    if (__DEV__) console.log('[Settings] Delete Account pressed');
     Alert.alert(
       'Delete Account',
       'Are you sure you want to delete your account? This action cannot be undone. All your data will be permanently deleted.',
@@ -102,21 +136,48 @@ export default function SettingsScreen() {
     navigation.navigate('About');
   };
 
+  const handleBugReport = () => {
+    const desc = bugDescription.trim();
+    if (!desc) { Alert.alert('Error', 'Please describe the issue.'); return; }
+    const subject = encodeURIComponent('Bug Report — EGWallet');
+    const body = encodeURIComponent(
+      `${desc}\n\n` +
+      `--- Device Info ---\n` +
+      `User ID: ${auth.user?.id || 'N/A'}\n` +
+      `Email: ${auth.user?.email || 'N/A'}\n` +
+      `Username: ${username ? '@' + username : 'Not set'}\n` +
+      `Platform: ${Platform.OS} ${Platform.Version}\n` +
+      `App Version: 1.1.0\n` +
+      `Timestamp: ${new Date().toISOString()}\n`
+    );
+    Linking.openURL(`mailto:support@egwalletfinance.com?subject=${subject}&body=${body}`);
+    setBugDescription('');
+    setShowBugModal(false);
+  };
+
   const handleChangeCurrency = async (currency: string) => {
-    console.log('[Settings] Preferred currency changed to:', currency);
+    if (__DEV__) console.log('[Settings] Preferred currency changed to:', currency);
     try {
       await auth.updatePreferredCurrency(currency);
       setShowCurrencyPicker(false);
-      Alert.alert('Success', `Your preferred receiving currency is now ${currency}. All incoming payments will be automatically converted to ${currency}.`);
+      setCurrencySearch('');
+      Alert.alert('Currency Updated ✅', `Your preferred currency is now ${currency} ${getCurrencySymbol(currency)}. All incoming payments will be converted to ${currency}.`);
     } catch (e: any) {
-      // Setting is stored locally — show success even if backend sync fails
       setShowCurrencyPicker(false);
+      setCurrencySearch('');
       Alert.alert('Currency Updated ✅', `Preferred currency set to ${currency}.`);
     }
   };
 
+  const handleChangeLanguage = async (code: SupportedLanguage) => {
+    await setContextLanguage(code);
+    setShowLanguagePicker(false);
+    const lang = LANGUAGES.find(l => l.code === code);
+    Alert.alert('Language Updated', `App language set to ${lang?.name || code}.`);
+  };
+
   const handleToggleAutoConvert = async (enabled: boolean) => {
-    console.log('[Settings] Auto-convert toggled:', enabled);
+    if (__DEV__) console.log('[Settings] Auto-convert toggled:', enabled);
     try {
       await auth.updateAutoConvert(enabled);
       if (enabled) {
@@ -135,7 +196,7 @@ export default function SettingsScreen() {
   };
 
   const handleToggleBiometric = async (enabled: boolean) => {
-    console.log('[Settings] Biometric lock toggled:', enabled);
+    if (__DEV__) console.log('[Settings] Biometric lock toggled:', enabled);
     try {
       if (enabled) {
         await biometric.enableBiometric();
@@ -199,6 +260,9 @@ export default function SettingsScreen() {
               <Text style={styles.helpText}>
                 All incoming payments will be automatically converted to this currency
               </Text>
+              <Text style={[styles.helpText, { color: '#888', marginTop: 4 }]}>
+                Not your currency? Tap above to manually select the right one.
+              </Text>
             </View>
             
             {/* Auto-Convert Toggle */}
@@ -238,12 +302,15 @@ export default function SettingsScreen() {
             <Text style={styles.sectionTitle}>WALLET DETAILS</Text>
           </View>
           <View style={styles.cardContent}>
-            <View style={styles.wdRow}>
+            <TouchableOpacity style={styles.wdRow} onPress={() => walletInfo && setShowWalletIdModal(true)} activeOpacity={0.7}>
               <Text style={styles.wdLabel}>Wallet ID</Text>
-              <Text style={styles.wdValue}>
-                {walletInfo ? `${walletInfo.id.substring(0, 14)}...` : '—'}
-              </Text>
-            </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={styles.wdValue}>
+                  {walletInfo ? `${walletInfo.id.substring(0, 14)}...` : '—'}
+                </Text>
+                {walletInfo && <Ionicons name="share-social-outline" size={14} color="#007AFF" />}
+              </View>
+            </TouchableOpacity>
             <View style={styles.wdRow}>
               <Text style={styles.wdLabel}>Status</Text>
               <View style={styles.wdStatusBadge}>
@@ -411,6 +478,28 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Language Section */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="language" size={24} color="#007AFF" />
+            <Text style={styles.sectionTitle}>LANGUAGE</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.supportButton}
+            onPress={() => setShowLanguagePicker(true)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="globe-outline" size={20} color="#007AFF" />
+            <View style={styles.settingTextContainer}>
+              <Text style={styles.supportButtonText}>App Language</Text>
+              <Text style={styles.settingSubtitle}>
+                {(() => { const l = LANGUAGES.find(l => l.code === appLanguage); return l ? `${l.flag} ${l.name}` : 'English'; })()}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#007AFF" />
+          </TouchableOpacity>
+        </View>
+
         {/* Support Info */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
@@ -451,6 +540,17 @@ export default function SettingsScreen() {
 
           <View style={styles.divider} />
 
+          <TouchableOpacity 
+            style={styles.supportButton} 
+            onPress={() => setShowBugModal(true)}
+          >
+            <Ionicons name="mail-unread" size={20} color="#007AFF" />
+            <Text style={styles.supportButtonText}>Report a Bug (Email)</Text>
+            <Ionicons name="chevron-forward" size={20} color="#007AFF" />
+          </TouchableOpacity>
+
+          <View style={styles.divider} />
+
           <View style={styles.supportContent}>
             <Ionicons name="mail" size={20} color="#657786" />
             <Text style={styles.supportText}>
@@ -461,6 +561,43 @@ export default function SettingsScreen() {
       </View>
 
     </ScrollView>
+
+    {/* Bug Report Modal */}
+    <Modal visible={showBugModal} transparent animationType="fade">
+      <View style={styles.modalOverlay}>
+        <View style={styles.usernameModal}>
+          <Text style={styles.usernameModalTitle}>Report a Bug</Text>
+          <Text style={styles.usernameModalSub}>Describe what went wrong. Device info will be attached automatically.</Text>
+          <TextInput
+            style={{
+              height: 120,
+              borderWidth: 1.5,
+              borderColor: '#1565C0',
+              borderRadius: 12,
+              fontSize: 16,
+              color: '#0D1B2E',
+              padding: 12,
+              textAlignVertical: 'top',
+              marginBottom: 20,
+            }}
+            value={bugDescription}
+            onChangeText={setBugDescription}
+            placeholder="Describe the issue..."
+            placeholderTextColor="#9BAEC8"
+            multiline
+            numberOfLines={5}
+          />
+          <View style={styles.usernameModalBtns}>
+            <TouchableOpacity style={styles.umCancelBtn} onPress={() => { setBugDescription(''); setShowBugModal(false); }}>
+              <Text style={styles.umCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.umSaveBtn} onPress={handleBugReport}>
+              <Text style={styles.umSaveText}>Send</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
 
     {/* Username Modal */}
     <Modal visible={showUsernameModal} transparent animationType="fade">
@@ -494,20 +631,44 @@ export default function SettingsScreen() {
       </Modal>
 
       {/* Currency Picker Modal */}
-      <Modal visible={showCurrencyPicker} transparent animationType="slide">
+      <Modal visible={showCurrencyPicker} transparent animationType="slide" onRequestClose={() => { setShowCurrencyPicker(false); setCurrencySearch(''); }}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Preferred Currency</Text>
-              <TouchableOpacity onPress={() => setShowCurrencyPicker(false)}>
+              <Text style={styles.modalTitle}>Select Currency</Text>
+              <TouchableOpacity onPress={() => { setShowCurrencyPicker(false); setCurrencySearch(''); }}>
                 <Ionicons name="close" size={28} color="#007AFF" />
               </TouchableOpacity>
             </View>
             <Text style={styles.modalDescription}>
-              All incoming payments will be automatically converted to your selected currency
+              If your country wasn't auto-detected, search and select your currency manually.
             </Text>
+            <TextInput
+              style={{
+                borderWidth: 1.5,
+                borderColor: '#C8D8ED',
+                borderRadius: 10,
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+                fontSize: 14,
+                color: '#0D1B2E',
+                marginBottom: 10,
+                backgroundColor: '#F0F6FF',
+              }}
+              placeholder="Search currency or country..."
+              placeholderTextColor="#9BAEC8"
+              value={currencySearch}
+              onChangeText={setCurrencySearch}
+              autoCorrect={false}
+              autoCapitalize="characters"
+              clearButtonMode="while-editing"
+            />
             <FlatList
-              data={CURRENCIES}
+              data={CURRENCIES.filter(c => {
+                const q = currencySearch.toUpperCase().trim();
+                if (!q) return true;
+                return c.includes(q) || getCurrencyName(c).toUpperCase().includes(q);
+              })}
               keyExtractor={(item) => item}
               renderItem={({ item }) => {
                 const selected = auth.user?.preferredCurrency === item;
@@ -536,6 +697,87 @@ export default function SettingsScreen() {
             />
           </View>
         </View>
+    </Modal>
+
+    {/* Wallet ID Modal */}
+    <Modal visible={showWalletIdModal} transparent animationType="fade">
+      <View style={styles.modalOverlay}>
+        <View style={styles.usernameModal}>
+          <Text style={styles.usernameModalTitle}>Your Wallet ID</Text>
+          <Text style={styles.usernameModalSub}>Share this ID so others can send you money</Text>
+          <TextInput
+            style={{
+              borderWidth: 1.5,
+              borderColor: '#1565C0',
+              borderRadius: 12,
+              fontSize: 11,
+              color: '#0D1B2E',
+              padding: 12,
+              marginBottom: 16,
+              textAlign: 'center',
+            }}
+            value={walletInfo?.id || ''}
+            editable={false}
+            selectTextOnFocus={true}
+          />
+          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 4 }}>
+            <TouchableOpacity
+              style={[styles.umSaveBtn, { flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', alignItems: 'center' }]}
+              onPress={() => {
+                Share.share({ message: `My EGWallet ID: ${walletInfo?.id || ''}`, title: 'EGWallet ID' });
+              }}
+            >
+              <Ionicons name="share-social" size={18} color="#fff" />
+              <Text style={styles.umSaveText}>Share</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.umCancelBtn, { flex: 1 }]} onPress={() => setShowWalletIdModal(false)}>
+              <Text style={styles.umCancelText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={{ fontSize: 11, color: '#9BAEC8', textAlign: 'center', marginTop: 8 }}>
+            Long-press the ID above to select and copy it
+          </Text>
+        </View>
+      </View>
+    </Modal>
+
+    {/* Language Picker Modal */}
+    <Modal visible={showLanguagePicker} transparent animationType="slide">
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>DISPLAY LANGUAGE</Text>
+            <TouchableOpacity onPress={() => setShowLanguagePicker(false)}>
+              <Ionicons name="close" size={28} color="#007AFF" />
+            </TouchableOpacity>
+          </View>
+          <Text style={{ fontSize: 13, color: '#657786', paddingHorizontal: 16, paddingBottom: 8 }}>
+            Choose your preferred display language
+          </Text>
+          <FlatList
+            data={LANGUAGES}
+            keyExtractor={(item) => item.code}
+            renderItem={({ item }) => {
+              const selected = appLanguage === item.code;
+              return (
+                <TouchableOpacity
+                  onPress={() => handleChangeLanguage(item.code)}
+                  style={[styles.currencyOption, selected && styles.currencyOptionSelected]}
+                >
+                  <Text style={{ fontSize: 28, marginRight: 12 }}>{item.flag}</Text>
+                  <View style={styles.currencyOptionContent}>
+                    <Text style={[styles.currencyOptionText, selected && styles.currencyOptionTextSelected]}>
+                      {item.name}
+                    </Text>
+                    <Text style={{ fontSize: 12, color: '#9BAEC8' }}>{item.code.toUpperCase()}</Text>
+                  </View>
+                  {selected && <Ionicons name="checkmark" size={24} color="#007AFF" />}
+                </TouchableOpacity>
+              );
+            }}
+          />
+        </View>
+      </View>
     </Modal>
     </LinearGradient>
   );

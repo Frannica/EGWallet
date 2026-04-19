@@ -51,6 +51,10 @@ export const currencyDecimals: Record<string, number> = {
   GMD: 2, // Gambian Dalasi
   MUR: 2, // Mauritian Rupee
   SCR: 2, // Seychellois Rupee
+  SLE: 2, // Sierra Leonean Leone
+  CDF: 2, // Congolese Franc
+  CVE: 2, // Cape Verdean Escudo
+  MWK: 2, // Malawian Kwacha
 };
 
 // Currency symbols map
@@ -152,6 +156,20 @@ export const CURRENCY_INFO: Record<string, { name: string; symbol: string }> = {
   ZMW: { name: 'Zambian Kwacha',          symbol: 'ZK'   },
   AOA: { name: 'Angolan Kwanza',          symbol: 'Kz'   },
   GMD: { name: 'Gambian Dalasi',          symbol: 'D'    },
+  LYD: { name: 'Libyan Dinar',            symbol: 'ل.د'  },
+  NAD: { name: 'Namibian Dollar',         symbol: 'N$'   },
+  LSL: { name: 'Lesotho Loti',            symbol: 'L'    },
+  MZN: { name: 'Mozambican Metical',      symbol: 'MT'   },
+  SDG: { name: 'Sudanese Pound',          symbol: 'ج.س'  },
+  SOS: { name: 'Somali Shilling',         symbol: 'Sh'   },
+  ZWL: { name: 'Zimbabwean Dollar',       symbol: 'Z$'   },
+  SCR: { name: 'Seychellois Rupee',       symbol: '₨'    },
+  ERN: { name: 'Eritrean Nakfa',          symbol: 'Nkf'  },
+  SLE: { name: 'Sierra Leonean Leone',    symbol: 'Le'   },
+  CDF: { name: 'Congolese Franc',         symbol: 'FC'   },
+  CVE: { name: 'Cape Verdean Escudo',     symbol: '$'    },
+  MWK: { name: 'Malawian Kwacha',         symbol: 'MK'   },
+  HTG: { name: 'Haitian Gourde',          symbol: 'G'    },
 };
 
 export function decimalsFor(currency: string) {
@@ -180,7 +198,13 @@ export function majorToMinor(amountMajor: number, currency: string) {
 export function formatCurrency(amountMinor: number, currency: string, locale = undefined) {
   try {
     const major = minorToMajor(amountMinor, currency);
-    return new Intl.NumberFormat(locale || undefined, { style: 'currency', currency }).format(major);
+    const dec = decimalsFor(currency);
+    return new Intl.NumberFormat(locale || undefined, {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: dec,
+      maximumFractionDigits: dec,
+    }).format(major);
   } catch (e) {
     // fallback with thousands separator
     const major = minorToMajor(amountMinor, currency);

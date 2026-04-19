@@ -28,11 +28,11 @@ const ACTIONS = [
   {
     key: 'qr',
     icon: 'qr-code' as const,
-    label: 'QR Payment',
-    subtitle: 'Scan or generate a QR code',
+    label: 'Scan QR to Pay',
+    subtitle: 'Scan someone\'s QR and pay instantly',
     gradientColors: ['#7B3FA0', '#5A2D7A'] as [string, string],
     iconBg: 'rgba(255,255,255,0.18)',
-    route: 'QRPayment',
+    route: 'QRScanner',
   },
 ];
 

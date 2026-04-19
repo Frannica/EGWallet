@@ -7,6 +7,7 @@ import { formatCurrency } from '../utils/currency';
 import { debitLocalBalance, logLocalTransaction } from '../utils/localBalance';
 import QRCode from 'react-native-qrcode-svg';
 import { protectedApiCall, generateIdempotencyKey, showErrorAlert } from '../api/protectedClient';
+import { API_BASE } from '../api/client';
 
 type PaymentState = 'idle' | 'processing' | 'success' | 'error';
 
@@ -76,8 +77,6 @@ export default function QRPaymentScreen() {
     setErrorMessage('');
     
     try {
-      const { API_BASE } = await import('../api/client');
-      
       const { data, error } = await protectedApiCall<PaymentResponse>(
         `${API_BASE}/payroll/confirm-payment`,
         {
@@ -117,13 +116,6 @@ export default function QRPaymentScreen() {
       setTransactionId(data.transaction.id);
       setPaymentState('success');
       await debitLocalBalance(currency, amount);
-      await logLocalTransaction({
-        type: 'qr_payment',
-        direction: 'out',
-        amount,
-        currency,
-        memo: `QR Payment to ${employerName}`,
-      });
     } catch (error: any) {
       // Backend unavailable — simulate demo payment success
       setTransactionId(`demo-${Date.now()}`);

@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { listWallets } from '../api/auth';
+import { API_BASE } from '../api/client';
 import { getCurrencySymbol, majorToMinor } from '../utils/currency';
 import { logLocalTransaction } from '../utils/localBalance';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
@@ -16,6 +17,7 @@ import { useToast } from '../utils/toast';
 
 interface LocalRequest {
   id: string;
+  backendId?: string;  // backend-assigned ID — used for the shareable deep link
   type: 'contact' | 'employer';
   firstName: string;
   lastName: string;
@@ -74,6 +76,13 @@ export default function RequestScreen() {
   const [contactCurrency, setContactCurrency] = useState('USD');
   const [contactNote, setContactNote] = useState('');
   const [isSendingContact, setIsSendingContact] = useState(false);
+
+  function formatAmountInput(text: string): string {
+    const cleaned = text.replace(/[^0-9.]/g, '');
+    const parts = cleaned.split('.');
+    const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return parts.length > 1 ? intPart + '.' + parts[1] : intPart;
+  }
 
   // ── Employer tab ──────────────────────────────────────────────────────────
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -134,8 +143,8 @@ export default function RequestScreen() {
 
   // ── Contact submit ────────────────────────────────────────────────────────
 
-  const handleContactSubmit = () => {
-    console.log('[Request] Contact submit pressed —', contactFirstName, contactAmount, contactCurrency);
+  const handleContactSubmit = async () => {
+    if (__DEV__) console.log('[Request] Contact submit pressed');
     if (!contactFirstName.trim()) {
       return Alert.alert('Missing Info', 'Please enter a first name.');
     }
@@ -145,47 +154,72 @@ export default function RequestScreen() {
     if (!contactInfo.trim()) {
       return Alert.alert('Missing Info', 'Please enter an email or phone number.');
     }
-    const amountNum = parseFloat(contactAmount);
+    const amountNum = parseFloat(contactAmount.replace(/,/g, ''));
     if (!contactAmount || isNaN(amountNum) || amountNum <= 0) {
       return Alert.alert('Invalid Amount', 'Please enter a valid amount greater than 0.');
     }
     if (isSendingContact) return;
 
     setIsSendingContact(true);
-    setTimeout(() => {
-      const req: LocalRequest = {
-        id: uid(),
-        type: 'contact',
-        firstName: contactFirstName.trim(),
-        lastName: contactLastName.trim(),
-        contactInfo: contactInfo.trim(),
-        amount: amountNum,
-        currency: contactCurrency,
-        note: contactNote.trim(),
-        status: 'pending',
-        createdAt: Date.now(),
-      };
-      setRequests(prev => [req, ...prev]);
-      logLocalTransaction({
-        type: 'payment_request',
-        direction: 'out',
-        amount: majorToMinor(amountNum, contactCurrency),
-        currency: contactCurrency,
-        memo: `Money request to ${req.firstName} ${req.lastName}`,
-      });
-      setContactFirstName('');
-      setContactLastName('');
-      setContactInfo('');
-      setContactAmount('');
-      setContactNote('');
-      setIsSendingContact(false);
-      console.log('[Request] Contact request created:', req.id);
-      toast.show('Request sent ✅');
-      Alert.alert(
-        '✅ Request Sent',
-        `Your request to ${req.firstName} ${req.lastName} for ${getCurrencySymbol(req.currency)}${amountNum.toFixed(2)} ${req.currency} has been sent successfully.`
-      );
-    }, 600);
+
+    const req: LocalRequest = {
+      id: uid(),
+      type: 'contact',
+      firstName: contactFirstName.trim(),
+      lastName: contactLastName.trim(),
+      contactInfo: contactInfo.trim(),
+      amount: amountNum,
+      currency: contactCurrency,
+      note: contactNote.trim(),
+      status: 'pending',
+      createdAt: Date.now(),
+    };
+
+    // Persist to backend so the share link resolves when recipient taps it
+    if (auth.token && realWalletId !== DEMO_WALLET_ID) {
+      try {
+        const res = await fetch(`${API_BASE}/payment-requests`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${auth.token}`,
+          },
+          body: JSON.stringify({
+            walletId: realWalletId,
+            amount: majorToMinor(amountNum, contactCurrency),
+            currency: contactCurrency,
+            memo: req.note || `Request from ${req.firstName} ${req.lastName}`,
+          }),
+        });
+        const data = await res.json();
+        if (res.ok && data.request?.id) {
+          req.backendId = data.request.id;
+        }
+      } catch (_) {
+        // Network unavailable — link will use local ID (non-resolvable by recipient)
+      }
+    }
+
+    setRequests(prev => [req, ...prev]);
+    logLocalTransaction({
+      type: 'payment_request',
+      direction: 'out',
+      amount: majorToMinor(amountNum, contactCurrency),
+      currency: contactCurrency,
+      memo: `Money request to ${req.firstName} ${req.lastName}`,
+    });
+    setContactFirstName('');
+    setContactLastName('');
+    setContactInfo('');
+    setContactAmount('');
+    setContactNote('');
+    setIsSendingContact(false);
+    if (__DEV__) console.log('[Request] Contact request created:', req.id);
+    toast.show('Request sent ✅');
+    Alert.alert(
+      '✅ Request Sent',
+      `Your request to ${req.firstName} ${req.lastName} for ${getCurrencySymbol(req.currency)}${amountNum.toFixed(2)} ${req.currency} has been sent successfully.`
+    );
   };
 
   // ── Add Employee ──────────────────────────────────────────────────────────
@@ -213,11 +247,11 @@ export default function RequestScreen() {
   // ── Payroll request ───────────────────────────────────────────────────────
 
   const handlePayrollSubmit = () => {
-    console.log('[Request] Payroll/Employer submit pressed —', selectedEmployee?.firstName, payrollAmount, payrollCurrency);
+    if (__DEV__) console.log('[Request] Payroll submit pressed');
     if (!selectedEmployee) {
       return Alert.alert('Select Employee', 'Please select an employee first.');
     }
-    const amountNum = parseFloat(payrollAmount);
+    const amountNum = parseFloat(payrollAmount.replace(/,/g, ''));
     if (!payrollAmount || isNaN(amountNum) || amountNum <= 0) {
       return Alert.alert('Invalid Amount', 'Please enter a valid amount.');
     }
@@ -257,7 +291,7 @@ export default function RequestScreen() {
               setPayrollNote('');
               setSelectedEmployee(null);
               setIsSendingPayroll(false);
-              console.log('[Request] Employer request created:', req.id);
+              if (__DEV__) console.log('[Request] Employer request created:', req.id);
               toast.show('Request sent ✅');
               Alert.alert('✅ Request Sent', `Payment request sent to ${req.firstName} ${req.lastName}.`);
             }, 600);
@@ -281,7 +315,8 @@ export default function RequestScreen() {
   };
 
   const handleShare = async (req: LocalRequest) => {
-    const link = `egwallet://pay/${req.id}`;
+    const id = req.backendId || req.id;
+    const link = `egwallet://pay/${id}`;
     const msg = `Hi ${req.firstName}, I'm requesting ${getCurrencySymbol(req.currency)}${req.amount.toFixed(2)} ${req.currency}${req.note ? ` for "${req.note}"` : ''}.\n\nPay via EGWallet: ${link}`;
     try { await Share.share({ message: msg }); } catch (_) {}
   };
@@ -289,8 +324,8 @@ export default function RequestScreen() {
   // ── Dynamic QR ────────────────────────────────────────────────────────────
 
   const handleGenerateDynamicQR = () => {
-    console.log('[Request] Generate QR pressed —', qrAmount, qrCurrency);
-    const amountNum = parseFloat(qrAmount);
+    if (__DEV__) console.log('[Request] Generate QR pressed');
+    const amountNum = parseFloat(qrAmount.replace(/,/g, ''));
     if (!qrAmount || isNaN(amountNum) || amountNum <= 0) {
       return Alert.alert('Invalid Amount', 'Please enter a valid amount.');
     }
@@ -392,7 +427,7 @@ export default function RequestScreen() {
                 <TextInput
                   style={styles.input}
                   value={contactAmount}
-                  onChangeText={setContactAmount}
+                  onChangeText={v => setContactAmount(formatAmountInput(v))}
                   keyboardType="decimal-pad"
                   placeholder="0.00"
                   placeholderTextColor="#999"
@@ -591,7 +626,7 @@ export default function RequestScreen() {
                   <TextInput
                     style={styles.input}
                     value={payrollAmount}
-                    onChangeText={setPayrollAmount}
+                    onChangeText={v => setPayrollAmount(formatAmountInput(v))}
                     keyboardType="decimal-pad"
                     placeholder="0.00"
                     placeholderTextColor="#999"
@@ -692,9 +727,13 @@ export default function RequestScreen() {
               <Text style={styles.qrCardTitle}>Your Wallet QR Code</Text>
             </View>
             <Text style={styles.qrCardSub}>
-              Show this to anyone — they scan and pay you instantly. Perfect for grocery stores, bars, open markets and more.
+              Show this to anyone with EGWallet — they scan and pay you instantly. Perfect for grocery stores, bars, and open markets.
             </Text>
-            <View style={styles.qrCenter}>
+            <View style={[styles.qrCenter, { marginTop: 4 }]}>
+              <View style={styles.egwalletOnlyBadge}>
+                <Ionicons name="phone-portrait-outline" size={13} color="#1565C0" />
+                <Text style={styles.egwalletOnlyText}> Requires EGWallet app to scan</Text>
+              </View>
               {staticQRValue ? (
                 <QRCode value={staticQRValue} size={200} backgroundColor="white" />
               ) : (
@@ -736,7 +775,7 @@ export default function RequestScreen() {
               <TextInput
                 style={styles.input}
                 value={qrAmount}
-                onChangeText={setQrAmount}
+                onChangeText={v => setQrAmount(formatAmountInput(v))}
                 keyboardType="decimal-pad"
                 placeholder="0.00"
                 placeholderTextColor="#999"
@@ -943,6 +982,17 @@ const styles = StyleSheet.create({
   qrCardSub: { fontSize: 14, color: '#657786', lineHeight: 20, marginBottom: 16 },
   qrCenter: { alignItems: 'center', paddingVertical: 8 },
   qrPermanentLabel: { marginTop: 12, fontSize: 13, color: '#2E7D32', fontWeight: '500' },
+  egwalletOnlyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E3F2FD',
+    borderRadius: 8,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    marginBottom: 14,
+    alignSelf: 'center',
+  },
+  egwalletOnlyText: { fontSize: 12, color: '#1565C0', fontWeight: '600' },
   qrExpiryLabel: { textAlign: 'center', marginTop: 10, fontSize: 14, color: '#F57C00', fontWeight: '600' },
   orDivider: { flexDirection: 'row', alignItems: 'center', marginVertical: 20 },
   orLine: { flex: 1, height: 1, backgroundColor: '#E1E8ED' },

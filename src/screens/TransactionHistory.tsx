@@ -57,15 +57,6 @@ export default function TransactionHistory() {
     fetchRates().then(setRates).catch(() => setRates(DEMO_RATES));
   }, []);
 
-  const DEMO_TXS = [
-    { id: 'dtx-1', type: 'receive', direction: 'in', amount: 50000, currency: 'XAF', status: 'completed', timestamp: Date.now() - 1 * 3600000, memo: 'Salary payment' },
-    { id: 'dtx-2', type: 'send', direction: 'out', amount: 12500, currency: 'XAF', status: 'completed', timestamp: Date.now() - 26 * 3600000 },
-    { id: 'dtx-3', type: 'payroll', direction: 'in', amount: 150000, currency: 'XAF', status: 'completed', timestamp: Date.now() - 3 * 86400000, payrollMetadata: { employerName: 'Acme Corp', payPeriod: 'March 2026' } },
-    { id: 'dtx-4', type: 'send', direction: 'out', amount: 25000, currency: 'XAF', status: 'completed', timestamp: Date.now() - 5 * 86400000 },
-    { id: 'dtx-5', type: 'withdrawal', direction: 'out', amount: 30000, currency: 'XAF', status: 'completed', timestamp: Date.now() - 10 * 86400000 },
-    { id: 'dtx-6', type: 'receive', direction: 'in', amount: 8000, currency: 'USD', status: 'completed', timestamp: Date.now() - 14 * 86400000 },
-  ];
-
   async function loadTransactions() {
     setLoading(true);
     try {
@@ -80,11 +71,11 @@ export default function TransactionHistory() {
       const backendIds = new Set(backendTxs.map((t: any) => t.id));
       const uniqueLocal = localTxs.filter(t => !backendIds.has(t.id));
       const combined = [...uniqueLocal, ...backendTxs];
-      setTxs(combined.length > 0 ? combined : DEMO_TXS);
+      setTxs(combined);
     } catch (e) {
-      if (__DEV__) console.warn('Fetch tx failed — using local+demo data', e);
+      if (__DEV__) console.warn('Fetch tx failed — using local data', e);
       const localTxs = await getLocalTransactions();
-      setTxs(localTxs.length > 0 ? localTxs : DEMO_TXS);
+      setTxs(localTxs);
     } finally {
       setLoading(false);
     }
@@ -456,7 +447,7 @@ export default function TransactionHistory() {
                       {!isPayroll && (
                         <TouchableOpacity
                           style={styles.disputeButton}
-                          onPress={() => (navigation as any).navigate('DisputeTransaction')}
+                          onPress={() => (navigation as any).navigate('DisputeTransaction', { transactionId: item.id, transaction: item })}
                         >
                           <Ionicons name="alert-circle" size={16} color="#FF9500" />
                           <Text style={styles.disputeButtonText}>Dispute</Text>

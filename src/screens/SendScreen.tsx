@@ -1,14 +1,15 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, TextInput, Alert, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, Alert, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { listWallets } from '../api/auth';
 import { sendTransaction, getWalletCurrency, fetchFxQuote, FxQuote } from '../api/transactions';
+import { API_BASE } from '../api/client';
 import { useNavigation } from '@react-navigation/native';
-import { majorToMinor, decimalsFor, formatCurrency, CURRENCY_INFO } from '../utils/currency';
+import { majorToMinor, minorToMajor, decimalsFor, formatCurrency, CURRENCY_INFO } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { useToast } from '../utils/toast';
-import { getLocalBalances, debitLocalBalance, logLocalTransaction } from '../utils/localBalance';
+import { getLocalBalances, debitLocalBalance, syncLocalBalancesFromBackend, mergeWithLocalBalances, logLocalTransaction } from '../utils/localBalance';
 import { WITHDRAW_LOCAL_RATE, WITHDRAW_INTL_RATE, FX_CONVERSION_RATE } from '../config/fees';
 
 interface PaymentMethod {
@@ -42,10 +43,11 @@ export default function SendScreen() {
   const [bankName, setBankName] = useState<string>('');
   const [accountNumber, setAccountNumber] = useState<string>('');
   const [accountName, setAccountName] = useState<string>('');
-  const [withdrawalMethod, setWithdrawalMethod] = useState<'bank' | 'mobile' | 'debit'>('bank');
+  const [withdrawalMethod, setWithdrawalMethod] = useState<'bank' | 'mobile' | 'debit' | 'credit'>('bank');
   const [isIntlWithdrawal, setIsIntlWithdrawal] = useState(false);
   const [withdrawalCardNumber, setWithdrawalCardNumber] = useState<string>('');
   const [withdrawalCardExpiry, setWithdrawalCardExpiry] = useState<string>('');
+  const [withdrawalCardCvc, setWithdrawalCardCvc] = useState<string>('');
 
   // Payment method (for send-without-balance flow)
   const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
@@ -56,12 +58,14 @@ export default function SendScreen() {
   const [cardNumber, setCardNumber] = useState('');
   const [cardHolder, setCardHolder] = useState('');
   const [cardExpiry, setCardExpiry] = useState('');
+  const [cardCvc, setCardCvc] = useState('');
   const [bankAccountNum, setBankAccountNum] = useState('');
   const [bankRoutingNum, setBankRoutingNum] = useState('');
   
   // FX state — receiver currency preview
   const [receiverCurrency, setReceiverCurrency] = useState<string | null>(null);
   const [fxQuote, setFxQuote] = useState<FxQuote | null>(null);
+  const [showAllCurrencies, setShowAllCurrencies] = useState(false);
   const fxDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   const navigation = useNavigation();
@@ -73,11 +77,12 @@ export default function SendScreen() {
     if (fxDebounceRef.current) clearTimeout(fxDebounceRef.current);
     setFxQuote(null);
     setReceiverCurrency(null);
-    if (!toWalletId.trim() || toWalletId.length < 8 || !auth.token) return;
+    const isAtUsername = toWalletId.trim().startsWith('@');
+    if (!toWalletId.trim() || (!isAtUsername && toWalletId.length < 8) || !auth.token) return;
     fxDebounceRef.current = setTimeout(async () => {
       const toCurrency = await getWalletCurrency(auth.token!, toWalletId.trim());
       setReceiverCurrency(toCurrency);
-      const amt = parseFloat(amount);
+      const amt = parseFloat(amount.replace(/,/g, ''));
       if (amt > 0 && toCurrency !== currency) {
         const amtMinor = majorToMinor(amt, currency);
         const quote = await fetchFxQuote(auth.token!, currency, toCurrency, amtMinor);
@@ -91,8 +96,24 @@ export default function SendScreen() {
     setLoading(true);
     try {
       const res = await listWallets(auth.token);
-      setWallets(res.wallets || []);
-      if ((res.wallets || []).length > 0) setFromWalletId((res.wallets || [])[0].id);
+      await syncLocalBalancesFromBackend(res.wallets || []);
+      const localBalances = await getLocalBalances();
+      const mergedWallets = mergeWithLocalBalances(res.wallets || [], localBalances);
+      setWallets(mergedWallets);
+      if (mergedWallets.length > 0) {
+        setFromWalletId(mergedWallets[0].id);
+        // Auto-set send currency: prefer user's preferredCurrency if they have a balance, else highest balance
+        const primaryWallet = mergedWallets[0];
+        const balances: Array<{currency: string; amount: number}> = primaryWallet.balances || [];
+        const prefCurr = auth.user?.preferredCurrency;
+        const hasPref = prefCurr && balances.find((b: any) => b.currency === prefCurr && b.amount > 0);
+        if (hasPref && prefCurr) {
+          setCurrency(prefCurr);
+        } else {
+          const sorted = [...balances].sort((a: any, b: any) => b.amount - a.amount);
+          if (sorted[0]?.currency) setCurrency(sorted[0].currency);
+        }
+      }
     } catch (e) {
       if (__DEV__) console.warn(e);
       // Demo fallback — show a placeholder wallet so the form is usable
@@ -103,10 +124,10 @@ export default function SendScreen() {
   }
 
   async function onSend() {
-    console.log('[Send] Send button pressed — amount:', amount, currency, 'mode:', activeTab, 'to:', toWalletId);
+    if (__DEV__) console.log('[Send] Send button pressed — amount:', amount, currency, 'mode:', activeTab, 'to:', toWalletId);
     if (!auth.token) return Alert.alert('Error', 'Not authenticated');
     if (!fromWalletId) return Alert.alert('Error', 'Select source wallet');
-    const amt = parseFloat(amount);
+    const amt = parseFloat(amount.replace(/,/g, ''));
     if (!amt || amt <= 0) return Alert.alert('Error', 'Enter valid amount');
     
     if (activeTab === 'transfer') {
@@ -130,20 +151,29 @@ export default function SendScreen() {
   async function checkBalanceAndProceed(amt: number) {
     const wallet = wallets.find(w => w.id === fromWalletId);
     const balance = wallet?.balances?.find((b: any) => b.currency === currency);
-    // balances are in minor units (cents); convert to major
+    // balances are in minor units; convert to major
     const backendMajor = balance ? balance.amount / Math.pow(10, decimalsFor(currency)) : 0;
-    // Also check local balance (in minor units)
+    // Also check local balance (in minor units) — use the lower value to prevent overdraft
     const localBalances = await getLocalBalances();
     const localMinor = localBalances[currency] || 0;
     const localMajor = localMinor / Math.pow(10, decimalsFor(currency));
-    const balanceMajor = Math.max(backendMajor, localMajor);
+    // Conservative: if local balance data exists, take the minimum to prevent spending stale funds
+    const balanceMajor = localMinor > 0 ? Math.min(backendMajor, localMajor) : backendMajor;
 
     if (balanceMajor >= amt) {
       setScamAcknowledged(false);
       setShowConfirmation(true);
     } else {
-      // Insufficient balance — offer payment method modal
-      setShowPaymentMethodModal(true);
+      // Insufficient balance — direct user to add money instead of a non-functional card form
+      const shortfall = (amt - balanceMajor).toFixed(2);
+      Alert.alert(
+        'Insufficient Balance',
+        `You only have ${balanceMajor.toFixed(2)} ${currency} available.\n\nAdd ${shortfall} ${currency} more to complete this transfer.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Add Money', onPress: () => (navigation as any).navigate('Deposit', { walletId: fromWalletId }) },
+        ]
+      );
     }
   }
 
@@ -201,6 +231,7 @@ export default function SendScreen() {
     setCardNumber('');
     setCardHolder('');
     setCardExpiry('');
+    setCardCvc('');
     setBankAccountNum('');
     setBankRoutingNum('');
     setShowAddCardForm(false);
@@ -208,42 +239,64 @@ export default function SendScreen() {
     setShowPaymentMethodModal(false);
   }
 
-  function completeSendWithPaymentMethod(method: PaymentMethod) {
-    console.log('[Send] completeSendWithPaymentMethod — method:', method.label, '****' + method.last4);
+  async function completeSendWithPaymentMethod(method: PaymentMethod) {
+    if (__DEV__) console.log('[Send] completeSendWithPaymentMethod — method:', method.label);
+    if (!auth.token || !fromWalletId) return Alert.alert('Error', 'Not authenticated');
+    const amt = parseFloat(amount.replace(/,/g, ''));
+    if (!amt || amt <= 0) return Alert.alert('Error', 'Enter valid amount');
+    const amountMinor = majorToMinor(amt, currency);
+    if (!toWalletId) return Alert.alert('Error', 'Enter destination wallet ID');
     setLoading(true);
-    const recipientId = toWalletId;
-    const sendAmt = amount;
-    const sendCurrency = currency;
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      const res = await sendTransaction(auth.token, fromWalletId, toWalletId, amountMinor, currency);
+      await debitLocalBalance(currency, amountMinor);
+      await loadWallets();
       setAmount('');
       setToWalletId('');
       setSelectedPaymentMethod(method);
       setShowPaymentMethodModal(false);
       toast.show('Payment Sent \u2705');
       (navigation as any).navigate('Receipt', {
-        amount: majorToMinor(parseFloat(sendAmt) || 0, sendCurrency),
-        currency: sendCurrency,
-        senderCurrency: sendCurrency,
-        recipientName: recipientId || 'Recipient',
-        recipientId,
+        amount: amountMinor,
+        currency,
+        senderCurrency: currency,
+        recipientName: toWalletId || 'Recipient',
+        recipientId: toWalletId,
         timestamp: Date.now(),
+        transactionId: (res as any)?.transaction?.id,
         type: 'send',
         status: 'completed',
       });
-    }, 1200);
+    } catch (e: any) {
+      Alert.alert('Transaction Failed', e?.message || 'Backend unavailable. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   }
   
   async function onWithdrawConfirmed() {
-    console.log('[Send] Withdraw confirmed — amount:', amount, currency, 'method:', withdrawalMethod);
+    if (__DEV__) console.log('[Send] Withdraw confirmed — currency:', currency, 'method:', withdrawalMethod);
     if (!auth.token || !fromWalletId) return;
     
-    const amt = parseFloat(amount);
+    const amt = parseFloat(amount.replace(/,/g, ''));
     const amountMinor = majorToMinor(amt, currency);
+
+    // Client-side balance guard — prevents submission when local balance is known-insufficient.
+    // This is defence-in-depth; the backend enforces the real check.
+    const localBals = await getLocalBalances();
+    const localAvailable = localBals[currency] ?? 0;
+    const walletBalance = wallets[0]?.balances?.find((b: any) => b.currency === currency)?.amount ?? 0;
+    const effectiveBalance = localAvailable > 0 ? localAvailable : walletBalance;
+    if (effectiveBalance > 0 && amountMinor > effectiveBalance) {
+      Alert.alert(
+        'Insufficient Funds',
+        `You only have ${minorToMajor(effectiveBalance, currency).toFixed(2)} ${currency} available.`
+      );
+      return;
+    }
     
     setLoading(true);
     try {
-      const { API_BASE } = await import('../api/client');
       const response = await fetch(`${API_BASE}/withdrawals`, {
         method: 'POST',
         headers: {
@@ -256,10 +309,10 @@ export default function SendScreen() {
           currency,
           method: withdrawalMethod,
           isInternational: isIntlWithdrawal,
-          bankName: withdrawalMethod === 'debit' ? 'Debit Card' : bankName,
-          accountNumber: withdrawalMethod === 'debit' ? withdrawalCardNumber.replace(/\s/g, '') : accountNumber,
-          accountName,
-          ...(withdrawalMethod === 'debit' && { cardExpiry: withdrawalCardExpiry }),
+          bankName: withdrawalMethod === 'credit' ? 'Credit Card' : withdrawalMethod === 'debit' ? 'Debit Card' : bankName,
+          accountNumber: (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? withdrawalCardNumber.replace(/\s/g, '') : accountNumber,
+          accountHolderName: accountName,
+          ...((withdrawalMethod === 'debit' || withdrawalMethod === 'credit') && { cardExpiry: withdrawalCardExpiry }),
         }),
       });
       
@@ -268,12 +321,19 @@ export default function SendScreen() {
         throw new Error(error.error || 'Withdrawal failed');
       }
       
-      // Debit local balance to keep it in sync with backend
+      // Debit local balance and log locally (backend stores withdrawals
+      // in db.withdrawals, NOT db.transactions, so we must log here)
       await debitLocalBalance(currency, amountMinor);
-      await logLocalTransaction({ type: 'withdrawal', direction: 'out', amount: amountMinor, currency, memo: `Withdrawal to ${withdrawalMethod === 'debit' ? 'card' : 'bank account'}` });
+      await logLocalTransaction({
+        type: 'withdrawal',
+        direction: 'out',
+        amount: amountMinor,
+        currency,
+        memo: `Withdrawal to ${withdrawalMethod === 'debit' ? 'Debit Card' : withdrawalMethod === 'credit' ? 'Credit Card' : bankName}`,
+      });
       const wData = await response.json();
       const feeCalc = wData.feeBreakdown;
-      loadWallets();
+      await loadWallets();
       setAmount('');
       setBankName('');
       setAccountNumber('');
@@ -284,42 +344,24 @@ export default function SendScreen() {
         currency,
         senderCurrency: currency,
         fee: feeCalc?.fee ?? Math.round(amountMinor * (isIntlWithdrawal ? WITHDRAW_INTL_RATE : WITHDRAW_LOCAL_RATE)),
-        feeLabel: `Withdrawal Fee (${isIntlWithdrawal ? '1.75%' : '0.8%'})`,
-        recipientName: accountName || (withdrawalMethod === 'debit' ? 'Debit Card' : bankName),
-        recipientId: withdrawalMethod === 'debit' ? `Card ending ${withdrawalCardNumber.replace(/\s/g, '').slice(-4)}` : accountNumber,
+        feeLabel: `Withdrawal Fee (${isIntlWithdrawal ? '1.75%' : '1.28%'})`,
+        recipientName: accountName || (withdrawalMethod === 'credit' ? 'Credit Card' : withdrawalMethod === 'debit' ? 'Debit Card' : bankName),
+        recipientId: (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? `Card ending ${withdrawalCardNumber.replace(/\s/g, '').slice(-4)}` : accountNumber,
         timestamp: Date.now(),
         transactionId: wData.withdrawal?.id,
         type: 'withdrawal',
         status: 'pending',
       });
     } catch (e: any) {
-      // Backend unavailable — debit local balance so wallet reflects the withdrawal
-      await debitLocalBalance(currency, amountMinor);
-      await logLocalTransaction({ type: 'withdrawal', direction: 'out', amount: amountMinor, currency, memo: `Withdrawal to ${withdrawalMethod === 'debit' ? 'card' : 'bank account'}` });
-      setShowConfirmation(false);
-      setAmount('');
-      setBankName('');
-      setAccountNumber('');
-      setAccountName('');
-      (navigation as any).navigate('Receipt', {
-        amount: amountMinor,
-        currency,
-        senderCurrency: currency,
-        fee: Math.round(amountMinor * (isIntlWithdrawal ? WITHDRAW_INTL_RATE : WITHDRAW_LOCAL_RATE)),
-        feeLabel: `Withdrawal Fee (${isIntlWithdrawal ? '1.75%' : '0.8%'})`,
-        recipientName: accountName || (withdrawalMethod === 'debit' ? 'Debit Card' : bankName),
-        recipientId: withdrawalMethod === 'debit' ? `Card ending ${withdrawalCardNumber.replace(/\s/g, '').slice(-4)}` : accountNumber,
-        timestamp: Date.now(),
-        type: 'withdrawal',
-        status: 'pending',
-      });
+      Alert.alert('Transaction Failed', e?.message || 'Backend unavailable. Please try again.');
+      return;
     } finally {
       setLoading(false);
     }
   }
 
   function calculatePreview() {
-    const amt = parseFloat(amount);
+    const amt = parseFloat(amount.replace(/,/g, ''));
     if (!amt || amt <= 0) return null;
 
     // Transfers: FREE (0 sender fee). FX fee is deducted on the received side by backend.
@@ -364,7 +406,7 @@ export default function SendScreen() {
   }
 
   function isHighAmount(): boolean {
-    const amt = parseFloat(amount);
+    const amt = parseFloat(amount.replace(/,/g, ''));
     if (!amt) return false;
     // High amount thresholds (in major currency units)
     const thresholds: Record<string, number> = {
@@ -385,10 +427,10 @@ export default function SendScreen() {
   }
 
   async function onSendConfirmed() {
-    console.log('[Send] Confirm & Send pressed — amount:', amount, currency, 'from:', fromWalletId, '→ to:', toWalletId);
+    if (__DEV__) console.log('[Send] Confirm & Send pressed — currency:', currency);
     if (!auth.token) return Alert.alert('Error', 'Not authenticated');
     if (!fromWalletId) return Alert.alert('Error', 'Select source wallet');
-    const amt = parseFloat(amount);
+    const amt = parseFloat(amount.replace(/,/g, ''));
     if (!amt || amt <= 0) return Alert.alert('Error', 'Enter valid amount');
     const amountMinor = majorToMinor(amt, currency);
     if (!toWalletId) return Alert.alert('Error', 'Enter destination wallet ID');
@@ -402,7 +444,6 @@ export default function SendScreen() {
     try {
       const res = await sendTransaction(auth.token, fromWalletId, toWalletId, amountMinor, currency);
       await debitLocalBalance(currency, amountMinor);
-      await logLocalTransaction({ type: 'send', direction: 'out', amount: amountMinor, currency });
       await loadWallets();
       setAmount('');
       setShowConfirmation(false);
@@ -424,32 +465,21 @@ export default function SendScreen() {
       });
       setToWalletId('');
     } catch (e: any) {
-      // Demo mode — simulate success and track locally so balance + insights update
-      await debitLocalBalance(currency, amountMinor);
-      await logLocalTransaction({ type: 'send', direction: 'out', amount: amountMinor, currency });
-      const recip = toWalletId;
-      setAmount('');
-      setToWalletId('');
-      setShowConfirmation(false);
-      toast.show('Payment Sent \u2705');
-      (navigation as any).navigate('Receipt', {
-        amount: amountMinor,
-        currency,
-        senderCurrency: currency,
-        receiverCurrency: preview?.receiverCurrency ?? currency,
-        fee: preview?.fxFeeAmount ?? 0,
-        feeLabel: preview?.isCrossCurrency ? 'FX Conversion Fee (1.15%)' : undefined,
-        fxRate: preview?.rateDisplay ?? undefined,
-        recipientName: recip || 'Recipient',
-        recipientId: recip,
-        timestamp: Date.now(),
-        type: 'send',
-        status: 'completed',
-      });
+      Alert.alert('Transaction Failed', e?.message || 'Backend unavailable. Please try again.');
       return;
     } finally {
       setLoading(false);
     }
+  }
+
+  /** Strip commas, reformat with thousands separators. Preserves one decimal point. */
+  function formatAmount(text: string): string {
+    // Allow digits and at most one decimal point
+    const cleaned = text.replace(/[^0-9.]/g, '');
+    const parts = cleaned.split('.');
+    const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    if (parts.length > 1) return intPart + '.' + parts[1];
+    return intPart;
   }
 
   const preview = calculatePreview();
@@ -464,7 +494,7 @@ export default function SendScreen() {
   });
 
   // Payment Method Modal (for insufficient balance flow)
-  const PaymentMethodModal = () => (
+  const paymentMethodModal = (
     <Modal
       visible={showPaymentMethodModal}
       transparent
@@ -640,7 +670,7 @@ export default function SendScreen() {
   );
 
   // Scam Tips Modal
-  const ScamTipsModal = () => (
+  const scamTipsModal = (
     <Modal
       visible={showScamTips}
       transparent
@@ -728,8 +758,8 @@ export default function SendScreen() {
   if (showConfirmation && preview) {
     return (
       <View style={styles.container}>
-        <ScamTipsModal />
-        <PaymentMethodModal />
+        {scamTipsModal}
+        {paymentMethodModal}
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.confirmHeader}>
             <Text style={styles.confirmTitle}>{activeTab === 'transfer' ? 'Review Transaction' : 'Review Withdrawal'}</Text>
@@ -754,7 +784,7 @@ export default function SendScreen() {
                 <Text style={styles.summaryLabel}>To Wallet</Text>
                 <Text style={styles.summaryValue}>{toWalletId.substring(0, 12)}...</Text>
               </View>
-            ) : withdrawalMethod === 'debit' ? (
+            ) : (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? (
               <>
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLabel}>Card Number</Text>
@@ -854,7 +884,7 @@ export default function SendScreen() {
           <View style={styles.infoBox}>
             <Text style={styles.infoText}>
               {activeTab === 'withdraw'
-                ? `ℹ️ ${isIntlWithdrawal ? 'International' : 'Local'} withdrawal fee: ${isIntlWithdrawal ? '1.75%' : '0.8%'} deducted from the amount.`
+                ? `ℹ️ ${isIntlWithdrawal ? 'International' : 'Local'} withdrawal fee: ${isIntlWithdrawal ? '1.75%' : '1.28%'} deducted from the amount.`
                 : preview.isCrossCurrency
                   ? `ℹ️ A 1.15% FX conversion fee is deducted from the converted amount (${preview.receiverCurrency}).`
                   : 'ℹ️ Same-currency transfers are free. No fees apply.'
@@ -930,8 +960,8 @@ export default function SendScreen() {
   return (
     <View style={styles.container}>
       <OfflineErrorBanner visible={!isOnline} onRetry={() => loadWallets()} />
-      <ScamTipsModal />
-      <PaymentMethodModal />
+      {scamTipsModal}
+      {paymentMethodModal}
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
           <Text style={styles.title}>Send Money</Text>
@@ -994,6 +1024,13 @@ export default function SendScreen() {
                           </Text>
                         );
                       })()}
+                      <TouchableOpacity
+                        onPress={() => Share.share({ message: `My EGWallet ID: ${w.id}`, title: 'Share Wallet ID' })}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={{ marginTop: 6, alignSelf: 'flex-start' }}
+                      >
+                        <Ionicons name="share-social-outline" size={18} color={fromWalletId === w.id ? '#1565C0' : '#9BAEC8'} />
+                      </TouchableOpacity>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -1003,12 +1040,13 @@ export default function SendScreen() {
             {activeTab === 'transfer' ? (
               <>
                 <View style={styles.section}>
-                  <Text style={styles.label}>To Wallet ID</Text>
+                  <Text style={styles.label}>Recipient (Wallet ID or @username)</Text>
                   <TextInput
                     value={toWalletId}
                     onChangeText={setToWalletId}
-                    placeholder="Enter destination wallet ID"
+                    placeholder="Enter wallet ID or @username"
                     placeholderTextColor="#AAB8C2"
+                    autoCapitalize="none"
                     editable={!loading}
                     style={styles.input}
                   />
@@ -1040,6 +1078,13 @@ export default function SendScreen() {
                       <Ionicons name="card" size={20} color={withdrawalMethod === 'debit' ? '#1565C0' : '#657786'} />
                       <Text style={[styles.methodText, withdrawalMethod === 'debit' && styles.methodTextActive]}>Debit Card</Text>
                     </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.methodOption, withdrawalMethod === 'credit' && styles.methodOptionActive]}
+                      onPress={() => setWithdrawalMethod('credit')}
+                    >
+                      <Ionicons name="card-outline" size={20} color={withdrawalMethod === 'credit' ? '#1565C0' : '#657786'} />
+                      <Text style={[styles.methodText, withdrawalMethod === 'credit' && styles.methodTextActive]}>Credit Card</Text>
+                    </TouchableOpacity>
                   </View>
                 </View>
 
@@ -1058,13 +1103,13 @@ export default function SendScreen() {
                       <Text style={styles.intlToggleHint}>
                         {isIntlWithdrawal
                           ? 'Fee: 1.75% — overseas bank account'
-                          : 'Fee: 0.8% — local bank or mobile money'}
+                          : 'Fee: 1.28% — local bank or mobile money'}
                       </Text>
                     </View>
                   </TouchableOpacity>
                 </View>
 
-                {withdrawalMethod === 'debit' ? (
+                {(withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? (
                   <>
                     <View style={styles.section}>
                       <Text style={styles.label}>Card Number</Text>
@@ -1156,7 +1201,7 @@ export default function SendScreen() {
               <View style={styles.amountInputContainer}>
                 <TextInput
                   value={amount}
-                  onChangeText={setAmount}
+                  onChangeText={v => setAmount(formatAmount(v))}
                   placeholder="0.00"
                   placeholderTextColor="#AAB8C2"
                   keyboardType="decimal-pad"
@@ -1170,20 +1215,68 @@ export default function SendScreen() {
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.label}>Currency</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.currencyScroll}>
-                {CURRENCIES.map(c => (
-                  <TouchableOpacity
-                    key={c}
-                    onPress={() => setCurrency(c)}
-                    style={[styles.currencyButton, currency === c && styles.currencyButtonActive]}
-                  >
-                    <Text style={[styles.currencyButtonText, currency === c && styles.currencyButtonTextActive]}>
-                      {c}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+              <Text style={styles.label}>Send Currency</Text>
+
+              {/* Wallet balance currencies — shown as chips with amounts */}
+              {(() => {
+                const wallet = wallets.find(w => w.id === fromWalletId);
+                const ownedBalances = (wallet?.balances || [])
+                  .filter((b: any) => b.amount > 0)
+                  .sort((a: any, z: any) => z.amount - a.amount);
+                if (ownedBalances.length === 0) return null;
+                return (
+                  <View style={{ marginBottom: 10 }}>
+                    <Text style={{ fontSize: 11, color: '#9BAEC8', marginBottom: 6 }}>Your balances</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      {ownedBalances.map((b: any) => (
+                        <TouchableOpacity
+                          key={b.currency}
+                          onPress={() => setCurrency(b.currency)}
+                          style={[styles.balanceChip, currency === b.currency && styles.balanceChipActive]}
+                        >
+                          <Text style={[styles.balanceChipCurrency, currency === b.currency && styles.balanceChipCurrencyActive]}>
+                            {b.currency}
+                          </Text>
+                          <Text style={[styles.balanceChipAmount, currency === b.currency && styles.balanceChipAmountActive]}>
+                            {formatCurrency(b.amount, b.currency)}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                );
+              })()}
+
+              {/* "Send in a different currency" expander */}
+              <TouchableOpacity
+                onPress={() => setShowAllCurrencies(v => !v)}
+                style={{ flexDirection: 'row', alignItems: 'center', marginBottom: showAllCurrencies ? 8 : 0 }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name={showAllCurrencies ? 'chevron-up' : 'chevron-down'} size={14} color="#1565C0" style={{ marginRight: 4 }} />
+                <Text style={{ fontSize: 12, color: '#1565C0', fontWeight: '600' }}>
+                  {showAllCurrencies ? 'Hide other currencies' : 'Send in a different currency'}
+                </Text>
+              </TouchableOpacity>
+              {showAllCurrencies && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[styles.currencyScroll, { marginTop: 4 }]}>
+                  {CURRENCIES.filter(c => {
+                    const wallet = wallets.find(w => w.id === fromWalletId);
+                    const ownedCurrencies = (wallet?.balances || []).filter((b: any) => b.amount > 0).map((b: any) => b.currency);
+                    return !ownedCurrencies.includes(c);
+                  }).map(c => (
+                    <TouchableOpacity
+                      key={c}
+                      onPress={() => { setCurrency(c); setShowAllCurrencies(false); }}
+                      style={[styles.currencyButton, currency === c && styles.currencyButtonActive]}
+                    >
+                      <Text style={[styles.currencyButtonText, currency === c && styles.currencyButtonTextActive]}>
+                        {c}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
             </View>
 
             {isInternational && activeTab === 'transfer' && (
@@ -1192,10 +1285,43 @@ export default function SendScreen() {
               </View>
             )}
 
+            {/* Live FX conversion preview: You send X → They receive Y */}
+            {activeTab === 'transfer' && receiverCurrency && parseFloat(amount.replace(/,/g, '')) > 0 && (
+              <View style={styles.fxPreviewCard}>
+                <View style={styles.fxPreviewRow}>
+                  <View style={styles.fxPreviewItem}>
+                    <Text style={styles.fxPreviewLabel}>You send</Text>
+                    <Text style={styles.fxPreviewAmountText}>
+                      {formatCurrency(majorToMinor(parseFloat(amount.replace(/,/g, '')), currency), currency)}
+                    </Text>
+                    <Text style={styles.fxPreviewCurr}>{currency}</Text>
+                  </View>
+                  <Ionicons name="arrow-forward-circle" size={30} color="#7C3AED" />
+                  <View style={styles.fxPreviewItem}>
+                    <Text style={styles.fxPreviewLabel}>They receive</Text>
+                    <Text style={[styles.fxPreviewAmountText, { color: '#2E7D32' }]}>
+                      {preview?.isCrossCurrency && fxQuote
+                        ? formatCurrency((fxQuote as any).receivedAmountMinorAfterFee ?? fxQuote.receivedAmountMinor, receiverCurrency)
+                        : formatCurrency(majorToMinor(parseFloat(amount.replace(/,/g, '')) || 0, currency), receiverCurrency)
+                      }
+                    </Text>
+                    <Text style={styles.fxPreviewCurr}>{receiverCurrency}</Text>
+                  </View>
+                </View>
+                {preview?.isCrossCurrency ? (
+                  <Text style={styles.fxPreviewNote}>
+                    {preview.rateDisplay ? `Rate: ${preview.rateDisplay}  ·  ` : ''}1.15% FX fee included
+                  </Text>
+                ) : (
+                  <Text style={styles.fxPreviewNote}>Same currency · No conversion fee ✓</Text>
+                )}
+              </View>
+            )}
+
             <View style={styles.infoBox}>
               <Text style={styles.infoText}>
                 {activeTab === 'withdraw'
-                  ? `ℹ️ Fee: ${isIntlWithdrawal ? '1.75% (international)' : '0.8% (local)'} — deducted from withdrawal.`
+                  ? `ℹ️ Fee: ${isIntlWithdrawal ? '1.75% (international)' : '1.28% (local)'} — deducted from withdrawal.`
                   : 'ℹ️ Transfers are free. A 1.15% FX fee applies only on cross-currency sends.'
                 }
               </Text>
@@ -1220,8 +1346,8 @@ export default function SendScreen() {
                   loading || 
                   !isOnline || 
                   (activeTab === 'transfer' && !toWalletId) ||
-                  (activeTab === 'withdraw' && withdrawalMethod !== 'debit' && (!bankName || !accountNumber || !accountName)) ||
-                  (activeTab === 'withdraw' && withdrawalMethod === 'debit' && (!withdrawalCardNumber || !withdrawalCardExpiry || !accountName))
+                  (activeTab === 'withdraw' && withdrawalMethod !== 'debit' && withdrawalMethod !== 'credit' && (!bankName || !accountNumber || !accountName)) ||
+                  (activeTab === 'withdraw' && (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') && (!withdrawalCardNumber || !withdrawalCardExpiry || !accountName))
                 ) && styles.sendButtonDisabled
               ]}
               onPress={onSend}
@@ -1230,8 +1356,8 @@ export default function SendScreen() {
                 loading || 
                 !isOnline || 
                 (activeTab === 'transfer' && !toWalletId) ||
-                (activeTab === 'withdraw' && withdrawalMethod !== 'debit' && (!bankName || !accountNumber || !accountName)) ||
-                (activeTab === 'withdraw' && withdrawalMethod === 'debit' && (!withdrawalCardNumber || !withdrawalCardExpiry || !accountName))
+                (activeTab === 'withdraw' && withdrawalMethod !== 'debit' && withdrawalMethod !== 'credit' && (!bankName || !accountNumber || !accountName)) ||
+                (activeTab === 'withdraw' && (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') && (!withdrawalCardNumber || !withdrawalCardExpiry || !accountName))
               }
             >
               <Text style={styles.sendButtonText}>
@@ -1491,6 +1617,80 @@ const styles = StyleSheet.create({
   },
   currencyButtonTextActive: {
     color: '#FFFFFF',
+  },
+  // Balance chip — shows currency + available amount
+  balanceChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    marginRight: 8,
+    borderWidth: 1.5,
+    borderColor: 'rgba(21,101,192,0.18)',
+    alignItems: 'center',
+    minWidth: 70,
+  },
+  balanceChipActive: {
+    backgroundColor: '#1565C0',
+    borderColor: '#1565C0',
+  },
+  balanceChipCurrency: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0D1B2E',
+  },
+  balanceChipCurrencyActive: {
+    color: '#FFFFFF',
+  },
+  balanceChipAmount: {
+    fontSize: 11,
+    color: '#657786',
+    marginTop: 2,
+  },
+  balanceChipAmountActive: {
+    color: 'rgba(255,255,255,0.8)',
+  },
+  // Live FX conversion preview card
+  fxPreviewCard: {
+    backgroundColor: '#F5F0FF',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#DDD0FA',
+  },
+  fxPreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  fxPreviewItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  fxPreviewLabel: {
+    fontSize: 10,
+    color: '#7C3AED',
+    fontWeight: '700',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  fxPreviewAmountText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0D1B2E',
+  },
+  fxPreviewCurr: {
+    fontSize: 11,
+    color: '#9575CD',
+    marginTop: 2,
+  },
+  fxPreviewNote: {
+    fontSize: 11,
+    color: '#7C3AED',
+    textAlign: 'center',
   },
   infoBox: {
     backgroundColor: '#EFF6FF',

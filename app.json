@@ -2,6 +2,7 @@
   "expo": {
     "name": "EGWallet",
     "slug": "EGWalletSimple",
+    "scheme": "egwallet",
     "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -23,7 +24,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.francisco1953.egwalletmobile",
-      "versionCode": 13
+      "versionCode": 42
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -38,7 +39,20 @@
     },
     "owner": "francisco1953",
     "plugins": [
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow EGWallet to use your camera to scan QR codes for payments."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow EGWallet to access your photos to upload KYC identity documents.",
+          "cameraPermission": "Allow EGWallet to use your camera to photograph your identity documents for verification."
+        }
+      ]
     ]
   }
 }

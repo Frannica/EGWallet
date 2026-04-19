@@ -59,6 +59,22 @@ const REGION_CONFIGS: Record<Region, RegionalConfig> = {
 };
 
 /**
+ * Returns the raw ISO 3166-1 alpha-2 country code from the device locale.
+ * e.g. 'CM' for Cameroon, 'MA' for Morocco, 'BR' for Brazil, 'JP' for Japan.
+ * Returns null if the locale has no region info.
+ */
+export function detectCountryCode(): string | null {
+  try {
+    const locales = Localization.getLocales();
+    if (!locales || locales.length === 0) return null;
+    const code = locales[0].regionCode?.toUpperCase() ?? null;
+    return code || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Auto-detect user's region based on device locale
  */
 export function autoDetectRegion(): Region {

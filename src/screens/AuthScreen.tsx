@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, Alert, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
+import { detectCountryCode } from '../config/regional';
 
 export default function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
+  const [secureText, setSecureText] = useState(true);
   const [loading, setLoading] = useState(false);
   const auth = useAuth();
 
@@ -17,7 +19,8 @@ export default function AuthScreen() {
     setLoading(true);
     try {
       if (isSignUp) {
-        await auth.signUp(email.trim(), password);
+        const countryCode = detectCountryCode();
+        await auth.signUp(email.trim(), password, countryCode ?? undefined);
         Alert.alert('Success', 'Account created successfully!');
       } else {
         await auth.signIn(email.trim(), password);
@@ -66,16 +69,21 @@ export default function AuthScreen() {
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Password</Text>
-            <TextInput 
-              value={password} 
-              onChangeText={setPassword} 
-              placeholder="Enter your password" 
-              placeholderTextColor="#AAB8C2"
-              secureTextEntry
-              autoCapitalize="none"
-              editable={!loading}
-              style={styles.input} 
-            />
+            <View style={styles.passwordContainer}>
+              <TextInput 
+                value={password} 
+                onChangeText={setPassword} 
+                placeholder="Enter your password" 
+                placeholderTextColor="#AAB8C2"
+                secureTextEntry={secureText}
+                autoCapitalize="none"
+                editable={!loading}
+                style={[styles.input, styles.passwordInput]} 
+              />
+              <TouchableOpacity style={styles.eyeButton} onPress={() => setSecureText(v => !v)}>
+                <Text style={styles.eyeIcon}>{secureText ? '👁️' : '🙈'}</Text>
+              </TouchableOpacity>
+            </View>
             {isSignUp && (
               <Text style={styles.hint}>Must be at least 8 characters</Text>
             )}
@@ -178,6 +186,27 @@ const styles = StyleSheet.create({
     borderColor: '#E1E8ED',
     fontSize: 16,
     color: '#14171A',
+  },
+  passwordContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E1E8ED',
+  },
+  passwordInput: {
+    flex: 1,
+    borderWidth: 0,
+    borderRadius: 12,
+  },
+  eyeButton: {
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  eyeIcon: {
+    fontSize: 20,
   },
   hint: {
     fontSize: 12,

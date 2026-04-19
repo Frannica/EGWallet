@@ -27,7 +27,19 @@ import EmployerDashboardScreen from '../screens/EmployerDashboardScreen';
 import DepositScreen from '../screens/DepositScreen';
 import ReceiptScreen from '../screens/ReceiptScreen';
 import NotificationsScreen from '../screens/NotificationsScreen';
+import PayRequestScreen from '../screens/PayRequestScreen';
+import QRScannerScreen from '../screens/QRScannerScreen';
 import { ToastProvider } from '../utils/toast';
+import { LinkingOptions } from '@react-navigation/native';
+
+const linking: LinkingOptions<any> = {
+  prefixes: ['egwallet://'],
+  config: {
+    screens: {
+      PayRequest: 'pay/:requestId',
+    },
+  },
+};
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -113,6 +125,7 @@ export default function AppNavigator() {
     return (
       <ToastProvider>
       <NavigationContainer
+        linking={linking}
         fallback={
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
             <Text>Loading...</Text>
@@ -142,6 +155,8 @@ export default function AppNavigator() {
               <Stack.Screen name="Deposit" component={DepositScreen} options={{ title: 'Add Money' }} />
               <Stack.Screen name="Receipt" component={ReceiptScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifications' }} />
+              <Stack.Screen name="PayRequest" component={PayRequestScreen} options={{ title: 'Pay Request' }} />
+              <Stack.Screen name="QRScanner" component={QRScannerScreen} options={{ headerShown: false }} />
             </>
           )}
         </Stack.Navigator>

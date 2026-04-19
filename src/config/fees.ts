@@ -8,7 +8,7 @@
 // ── Rate constants (mirrors backend FEES object) ────────────────────────────
 export const TOPUP_FREE_LIMIT    = 6;       // first N top-ups are free
 export const TOPUP_FEE_RATE      = 0.005;   // 0.5% after free limit
-export const WITHDRAW_LOCAL_RATE = 0.008;   // 0.8% local withdrawal
+export const WITHDRAW_LOCAL_RATE = 0.0128;  // 1.28% local withdrawal
 export const WITHDRAW_INTL_RATE  = 0.0175;  // 1.75% international withdrawal
 export const FX_CONVERSION_RATE  = 0.0115;  // 1.15% on every FX conversion
 export const SEND_FEE_RATE       = 0;       // peer-to-peer sends are FREE
@@ -44,7 +44,7 @@ export const FEE_SCHEDULE = [
   },
   {
     type: 'Local Withdrawal',
-    fee: '0.8%',
+    fee: '1.28%',
     note: 'Withdraw to local bank or mobile money',
   },
   {

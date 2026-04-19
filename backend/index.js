@@ -164,12 +164,15 @@ const auditLogger = winston.createLogger({
 // Clean up keys older than 24 hours
 const idempotencyStore = new Map();
 const IDEMPOTENCY_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
+// In-flight guard: prevents two concurrent withdrawal requests for the same
+// user+currency from both passing the balance check before either commits.
+const withdrawalInFlight = new Set();
 
 // ==================== FEE SCHEDULE (single source of truth) ====================
 const FEES = {
   TOPUP_FREE_LIMIT:    6,      // first N deposits are free per user
   TOPUP_FEE_RATE:      0.005,  // 0.5% after the free limit
-  WITHDRAW_LOCAL_RATE: 0.0125, // 1.25% local withdrawal (bank / mobile money)
+  WITHDRAW_LOCAL_RATE: 0.0128, // 1.28% local withdrawal (bank / mobile money)
   WITHDRAW_INTL_RATE:  0.0175, // 1.75% international withdrawal
   FX_RATE:             0.0115, // 1.15% FX conversion markup
   SEND_RATE:           0,      // peer-to-peer sends are free
@@ -654,7 +657,7 @@ const translations = {
     refund_s1: "Create ticket", refund_s2: "File dispute", refund_s3: "Contact support",
     help_response: "I'm here to help! You can:\n\n• Ask about features\n• Get transaction info\n• Report issues\n• Create support tickets\n\nOur Help Center has detailed guides, or I can connect you with our support team.",
     help_s1: "Browse FAQs", help_s2: "Create ticket", help_s3: "Feature guides",
-    fees_response: "EGWallet fee structure:\n\n✓ Add Money — first 3 top-ups: FREE, then 0.5%\n✓ Send / Receive: FREE\n• FX Conversion: 1.15% (cross-currency sends)\n• Local Withdrawal: 0.8%\n• International Withdrawal: 1.75%\n✓ Virtual Card: FREE\n✓ Monthly subscription: FREE\n\nAll fees are shown before you confirm. No hidden charges.",
+    fees_response: "EGWallet fee structure:\n\n✓ Add Money — first 6 top-ups: FREE, then 0.5%\n✓ Send / Receive: FREE\n• FX Conversion: 1.15% (cross-currency sends)\n• Local Withdrawal: 1.28%\n• International Withdrawal: 1.75%\n✓ Virtual Card: FREE\n✓ Monthly subscription: FREE\n\nAll fees are shown before you confirm. No hidden charges.",
     fees_s1: "How is the fee calculated?", fees_s2: "International transfers", fees_s3: "Save on fees",
     dispute_response: "I can help you file a formal dispute or create a support ticket. Our team will:\n\n1. Review your case within 2-3 business days\n2. Contact relevant parties\n3. Investigate thoroughly\n4. Provide regular updates\n\nNote: Investigation timelines vary by case complexity.",
     dispute_s1: "File dispute", dispute_s2: "Create ticket", dispute_s3: "View dispute process",
@@ -735,7 +738,7 @@ const translations = {
     refund_s1: "Crear ticket", refund_s2: "Presentar disputa", refund_s3: "Contactar soporte",
     help_response: "¡Estoy aquí para ayudarte! Puedes:\n\n• Preguntar sobre funciones\n• Obtener información de transacciones\n• Reportar problemas\n• Crear tickets de soporte\n\nNuestro Centro de Ayuda tiene guías detalladas, o puedo conectarte con nuestro equipo de soporte.",
     help_s1: "Ver preguntas frecuentes", help_s2: "Crear ticket", help_s3: "Guías de funciones",
-    fees_response: "Estructura de tarifas de EGWallet:\n\n✓ Agregar dinero — primeras 3 recargas: GRATIS, luego 0.5%\n✓ Enviar / Recibir: GRATIS\n• Conversión de divisas: 1.15% (envíos entre monedas)\n• Retiro local: 0.8%\n• Retiro internacional: 1.75%\n✓ Tarjeta virtual: GRATIS\n✓ Suscripción mensual: GRATIS\n\nTodas las tarifas se muestran antes de confirmar. Sin cargos ocultos.",
+    fees_response: "Estructura de tarifas de EGWallet:\n\n✓ Agregar dinero — primeras 6 recargas: GRATIS, luego 0.5%\n✓ Enviar / Recibir: GRATIS\n• Conversión de divisas: 1.15% (envíos entre monedas)\n• Retiro local: 1.28%\n• Retiro internacional: 1.75%\n✓ Tarjeta virtual: GRATIS\n✓ Suscripción mensual: GRATIS\n\nTodas las tarifas se muestran antes de confirmar. Sin cargos ocultos.",
     fees_s1: "¿Cómo se calcula la tarifa?", fees_s2: "Transferencias internacionales", fees_s3: "Ahorrar en tarifas",
     dispute_response: "Puedo ayudarte a presentar una disputa formal o crear un ticket de soporte. Nuestro equipo:\n\n1. Revisará tu caso en 2-3 días hábiles\n2. Contactará a las partes relevantes\n3. Investigará a fondo\n4. Proporcionará actualizaciones regulares\n\nNota: Los plazos de investigación varían según la complejidad del caso.",
     dispute_s1: "Presentar disputa", dispute_s2: "Crear ticket", dispute_s3: "Ver proceso de disputa",
@@ -816,7 +819,7 @@ const translations = {
     refund_s1: "Créer un ticket", refund_s2: "Déposer une contestation", refund_s3: "Contacter le support",
     help_response: "Je suis là pour vous aider ! Vous pouvez :\n\n• Poser des questions sur les fonctionnalités\n• Obtenir des informations sur les transactions\n• Signaler des problèmes\n• Créer des tickets de support\n\nNotre Centre d'aide dispose de guides détaillés, ou je peux vous connecter avec notre équipe.",
     help_s1: "Parcourir les FAQs", help_s2: "Créer un ticket", help_s3: "Guides des fonctionnalités",
-    fees_response: "Structure des frais EGWallet :\n\n✓ Ajouter de l'argent — 3 premiers rechargements : GRATUITS, puis 0,5%\n✓ Envoyer / Recevoir : GRATUIT\n• Conversion de devises : 1,15% (envois entre devises)\n• Retrait local : 0,8%\n• Retrait international : 1,75%\n✓ Carte virtuelle : GRATUITE\n✓ Abonnement mensuel : GRATUIT\n\nTous les frais sont affichés avant confirmation. Aucun frais caché.",
+    fees_response: "Structure des frais EGWallet :\n\n✓ Ajouter de l'argent — 6 premiers rechargements : GRATUITS, puis 0,5%\n✓ Envoyer / Recevoir : GRATUIT\n• Conversion de devises : 1,15% (envois entre devises)\n• Retrait local : 1,28%\n• Retrait international : 1,75%\n✓ Carte virtuelle : GRATUITE\n✓ Abonnement mensuel : GRATUIT\n\nTous les frais sont affichés avant confirmation. Aucun frais caché.",
     fees_s1: "Comment les frais sont-ils calculés ?", fees_s2: "Transferts internationaux", fees_s3: "Économiser sur les frais",
     dispute_response: "Je peux vous aider à déposer une contestation formelle ou créer un ticket de support. Notre équipe va :\n\n1. Examiner votre dossier dans 2-3 jours ouvrables\n2. Contacter les parties concernées\n3. Enquêter en profondeur\n4. Fournir des mises à jour régulières\n\nRemarque : Les délais d'investigation varient selon la complexité du dossier.",
     dispute_s1: "Déposer une contestation", dispute_s2: "Créer un ticket", dispute_s3: "Voir le processus de contestation",
@@ -897,7 +900,7 @@ const translations = {
     refund_s1: "Criar ticket", refund_s2: "Registrar contestação", refund_s3: "Contatar suporte",
     help_response: "Estou aqui para ajudar! Você pode:\n\n• Perguntar sobre funcionalidades\n• Obter informações sobre transações\n• Reportar problemas\n• Criar tickets de suporte\n\nNosso Centro de Ajuda tem guias detalhados, ou posso te conectar com nossa equipe de suporte.",
     help_s1: "Ver FAQs", help_s2: "Criar ticket", help_s3: "Guias de funcionalidades",
-    fees_response: "Estrutura de taxas da EGWallet:\n\n✓ Adicionar dinheiro — primeiras 3 recargas: GRÁTIS, depois 0,5%\n✓ Enviar / Receber: GRÁTIS\n• Conversão de moeda: 1,15% (envios entre moedas)\n• Saque local: 0,8%\n• Saque internacional: 1,75%\n✓ Cartão virtual: GRÁTIS\n✓ Assinatura mensal: GRÁTIS\n\nTodas as taxas são exibidas antes de confirmar. Sem cobranças ocultas.",
+    fees_response: "Estrutura de taxas da EGWallet:\n\n✓ Adicionar dinheiro — primeiras 6 recargas: GRÁTIS, depois 0,5%\n✓ Enviar / Receber: GRÁTIS\n• Conversão de moeda: 1,15% (envios entre moedas)\n• Saque local: 1,28%\n• Saque internacional: 1,75%\n✓ Cartão virtual: GRÁTIS\n✓ Assinatura mensal: GRÁTIS\n\nTodas as taxas são exibidas antes de confirmar. Sem cobranças ocultas.",
     fees_s1: "Como a taxa é calculada?", fees_s2: "Transferências internacionais", fees_s3: "Economizar em taxas",
     dispute_response: "Posso te ajudar a registrar uma contestação formal ou criar um ticket de suporte. Nossa equipe vai:\n\n1. Analisar seu caso em 2-3 dias úteis\n2. Contatar as partes relevantes\n3. Investigar minuciosamente\n4. Fornecer atualizações regulares\n\nNota: Os prazos de investigação variam de acordo com a complexidade do caso.",
     dispute_s1: "Registrar contestação", dispute_s2: "Criar ticket", dispute_s3: "Ver processo de contestação",
@@ -978,7 +981,7 @@ const translations = {
     refund_s1: "创建工单", refund_s2: "提交争议", refund_s3: "联系客服",
     help_response: "我在这里为您提供帮助！您可以：\n\n• 询问功能相关问题\n• 获取交易信息\n• 报告问题\n• 创建支持工单\n\n我们的帮助中心有详细指南，或我可以为您联系支持团队。",
     help_s1: "浏览常见问题", help_s2: "创建工单", help_s3: "功能指南",
-    fees_response: "EGWallet费率结构：\n\n✓ 充值 — 前3次：免费，之后0.5%\n✓ 发送/接收：免费\n• 外汇转换：1.15%（跨货币发送）\n• 本地提款：0.8%\n• 国际提款：1.75%\n✓ 虚拟卡：免费\n✓ 月度订阅：免费\n\n所有费用在确认前均会显示，没有隐藏收费。",
+    fees_response: "EGWallet费率结构：\n\n✓ 充值 — 前6次：免费，之后0.5%\n✓ 发送/接收：免费\n• 外汇转换：1.15%（跨货币发送）\n• 本地提款：1.28%\n• 国际提款：1.75%\n✓ 虚拟卡：免费\n✓ 月度订阅：免费\n\n所有费用在确认前均会显示，没有隐藏收费。",
     fees_s1: "费用如何计算？", fees_s2: "国际转账", fees_s3: "节省费用",
     dispute_response: "我可以帮您提交正式争议或创建支持工单。我们的团队将：\n\n1. 在2-3个工作日内审查您的案例\n2. 联系相关方\n3. 进行彻底调查\n4. 定期提供更新\n\n注意：调查时间因案例复杂性而异。",
     dispute_s1: "提交争议", dispute_s2: "创建工单", dispute_s3: "查看争议流程",
@@ -1059,7 +1062,7 @@ const translations = {
     refund_s1: "チケットを作成", refund_s2: "異議を申し立てる", refund_s3: "サポートに連絡",
     help_response: "お手伝いするためにここにいます！以下のことができます：\n\n• 機能についての質問\n• 取引情報の取得\n• 問題の報告\n• サポートチケットの作成\n\nヘルプセンターには詳細なガイドがあります。サポートチームに繋ぐこともできます。",
     help_s1: "よくある質問を見る", help_s2: "チケットを作成", help_s3: "機能ガイド",
-    fees_response: "EGWallet手数料体系：\n\n✓ 入金 — 最初の3回：無料、以降0.5%\n✓ 送金/受け取り：無料\n• 外貨両替：1.15%（通貨をまたいだ送金）\n• 国内出金：0.8%\n• 国際出金：1.75%\n✓ 仮想カード：無料\n✓ 月額登録料：無料\n\nすべての手数料は確認前に表示されます。隠れた手数料はありません。",
+    fees_response: "EGWallet手数料体系：\n\n✓ 入金 — 最初の6回：無料、以降0.5%\n✓ 送金/受け取り：無料\n• 外貨両替：1.15%（通貨をまたいだ送金）\n• 国内出金：1.28%\n• 国際出金：1.75%\n✓ 仮想カード：無料\n✓ 月額登録料：無料\n\nすべての手数料は確認前に表示されます。隠れた手数料はありません。",
     fees_s1: "手数料はどのように計算されますか？", fees_s2: "国際送金", fees_s3: "手数料を節約",
     dispute_response: "正式な異議申し立てやサポートチケットの作成をお手伝いできます。チームは以下を行います：\n\n1. 2〜3営業日以内にケースを審査\n2. 関係者に連絡\n3. 徹底的に調査\n4. 定期的に更新情報を提供\n\n注意：調査期間はケースの複雑さによって異なります。",
     dispute_s1: "異議を申し立てる", dispute_s2: "チケットを作成", dispute_s3: "異議申し立てプロセスを見る",
@@ -1356,6 +1359,7 @@ function loadDB() {
     if (!db.employerEmployees) db.employerEmployees = [];
     if (!db.payrollBatches) db.payrollBatches = [];
     if (!db.demoIntents) db.demoIntents = [];
+    if (!db.notifications) db.notifications = [];
     return db;
   } catch (e) {
     const initial = {
@@ -1837,7 +1841,33 @@ app.get('/auth/me', authMiddleware, (req, res) => {
   const db = loadDB();
   const user = db.users.find(u => u.id === req.user.userId);
   if (!user) return res.status(404).json({ error: 'User not found' });
-  res.json({ id: user.id, email: user.email, preferredCurrency: user.preferredCurrency || 'USD', autoConvertIncoming: user.autoConvertIncoming !== false, kycTier: user.kycTier || 0, kycStatus: user.kycStatus || 'pending', tierLimits: KYC_TIERS[user.kycTier || 0] });
+  res.json({ id: user.id, email: user.email, username: user.username || null, preferredCurrency: user.preferredCurrency || 'USD', autoConvertIncoming: user.autoConvertIncoming !== false, kycTier: user.kycTier || 0, kycStatus: user.kycStatus || 'pending', tierLimits: KYC_TIERS[user.kycTier || 0] });
+});
+
+// Set or update @username — persists to database, enforces uniqueness
+app.put('/auth/username', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const user = db.users.find(u => u.id === req.user.userId);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const raw = req.body.username;
+  if (!raw || typeof raw !== 'string') return res.status(400).json({ error: 'username required' });
+
+  const normalized = raw.replace(/^@/, '').toLowerCase().trim();
+  if (!/^[a-z0-9_]{3,20}$/.test(normalized)) {
+    return res.status(400).json({ error: 'Username must be 3-20 characters (letters, numbers, underscores only)' });
+  }
+
+  // Uniqueness check — skip if user already owns this name
+  const existing = db.users.find(u => u.username === normalized);
+  if (existing && existing.id !== user.id) {
+    return res.status(409).json({ error: 'Username already taken' });
+  }
+
+  user.username = normalized;
+  saveDB(db);
+  logger.info('Username updated', { userId: user.id, username: normalized });
+  res.json({ username: normalized });
 });
 
 // Refresh token endpoint
@@ -1944,13 +1974,31 @@ app.get('/wallets/:id/transactions', authMiddleware, (req, res) => {
     .sort((a, b) => b.timestamp - a.timestamp)
     .map(t => ({
       ...t,
-      // direction: 'out' = money left this wallet, 'in' = money arrived
       direction: t.fromWalletId === wallet.id ? 'out' : 'in',
-      // type: keep existing explicit types (payroll, qr_payment, withdrawal…),
-      // derive 'sent'/'received' for plain transfers that have no type set
       type: t.type || (t.fromWalletId === wallet.id ? 'sent' : 'received')
     }));
-  res.json({ transactions: txs });
+  // Include withdrawals (stored separately in db.withdrawals, not db.transactions)
+  const withdrawalTxs = (db.withdrawals || [])
+    .filter(w => w.walletId === wallet.id)
+    .map(w => ({
+      id: w.id,
+      type: 'withdrawal',
+      direction: 'out',
+      fromWalletId: w.walletId,
+      amount: w.amount,
+      currency: w.currency,
+      feeAmount: w.feeAmount,
+      netPayout: w.netPayout,
+      method: w.method,
+      bankName: w.bankName,
+      accountNumber: w.accountNumber,
+      accountHolderName: w.accountHolderName,
+      status: w.status,
+      timestamp: w.createdAt,
+      memo: `Withdrawal to ${w.bankName || w.method || 'account'}`,
+    }));
+  const combined = [...txs, ...withdrawalTxs].sort((a, b) => b.timestamp - a.timestamp);
+  res.json({ transactions: combined });
 });
 
 // Get all transactions for authenticated user (across all their wallets)
@@ -1960,13 +2008,33 @@ app.get('/transactions', authMiddleware, (req, res) => {
   const walletIds = new Set(userWallets.map(w => w.id));
   const txs = db.transactions
     .filter(t => walletIds.has(t.fromWalletId) || walletIds.has(t.toWalletId))
-    .sort((a, b) => b.timestamp - a.timestamp)
     .map(t => ({
       ...t,
       direction: walletIds.has(t.fromWalletId) ? 'out' : 'in',
       type: t.type || (walletIds.has(t.fromWalletId) ? 'sent' : 'received')
     }));
-  res.json(txs);
+  // Include withdrawals (stored separately in db.withdrawals, not db.transactions)
+  const withdrawalTxs = (db.withdrawals || [])
+    .filter(w => walletIds.has(w.walletId))
+    .map(w => ({
+      id: w.id,
+      type: 'withdrawal',
+      direction: 'out',
+      fromWalletId: w.walletId,
+      amount: w.amount,
+      currency: w.currency,
+      feeAmount: w.feeAmount,
+      netPayout: w.netPayout,
+      method: w.method,
+      bankName: w.bankName,
+      accountNumber: w.accountNumber,
+      accountHolderName: w.accountHolderName,
+      status: w.status,
+      timestamp: w.createdAt,
+      memo: `Withdrawal to ${w.bankName || w.method || 'account'}`,
+    }));
+  const combined = [...txs, ...withdrawalTxs].sort((a, b) => b.timestamp - a.timestamp);
+  res.json(combined);
 });
 
 // Resolve @username OR email to { userId, walletId }
@@ -2011,8 +2079,17 @@ function resolveRecipient(db, input) {
 // Send money (simple internal transfer between wallets by walletId or @username)
 app.post('/transactions', authMiddleware, (req, res) => {
   const db = loadDB();
-  const { fromWalletId, toWalletId: rawToId, amount, currency, memo } = req.body; // amount is expected in minor units (integer)
+  const { fromWalletId, toWalletId: rawToId, amount, currency, memo, idempotencyKey } = req.body; // amount is expected in minor units (integer)
   if (!fromWalletId || !rawToId || typeof amount === 'undefined' || !currency) return res.status(400).json({ error: 'missing fields' });
+
+  // ── Idempotency check ──────────────────────────────────────────────────────
+  const clientKey = idempotencyKey || req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
+  if (clientKey) {
+    const cached = idempotencyStore.get(clientKey);
+    if (cached && Date.now() - cached.timestamp < IDEMPOTENCY_EXPIRY) {
+      return res.status(200).json(cached.response);
+    }
+  }
 
   // @username / email resolution — resolve to walletId before all other logic
   let toWalletId = rawToId;
@@ -2087,6 +2164,11 @@ app.post('/transactions', authMiddleware, (req, res) => {
     : currency;
   
   // Deduct from sender in original currency (send is FREE — only FX fee on conversion)
+  // Save original amounts for rollback if saveDB fails
+  const originalFromAmount = fromBalance.amount;
+  const destBalance = toWallet.balances.find(b=>b.currency===receiverCurrency);
+  const originalDestAmount = destBalance ? destBalance.amount : null;
+
   fromBalance.amount -= amount;
   
   // Convert to receiver's preferred currency if different AND auto-convert is enabled
@@ -2110,7 +2192,6 @@ app.post('/transactions', authMiddleware, (req, res) => {
   }
   
   // Add to receiver in their preferred currency
-  const destBalance = toWallet.balances.find(b=>b.currency===receivedCurrency);
   if (destBalance) destBalance.amount += receivedAmount; 
   else toWallet.balances.push({ currency: receivedCurrency, amount: receivedAmount });
   
@@ -2135,7 +2216,17 @@ app.post('/transactions', authMiddleware, (req, res) => {
   updateLimitTracking(senderUser, toAmountInUSD);
   // senderUser is a reference to the object already in db.users — saveDB below persists it
 
-  saveDB(db);
+  try {
+    saveDB(db);
+  } catch (saveErr) {
+    // Rollback in-memory changes so state stays consistent before rethrowing
+    fromBalance.amount = originalFromAmount;
+    if (destBalance) destBalance.amount = originalDestAmount;
+    else toWallet.balances = toWallet.balances.filter(b => b.currency !== receivedCurrency);
+    db.transactions.pop();
+    console.error('[/transactions] saveDB failed — rolled back in-memory state:', saveErr);
+    return res.status(500).json({ error: 'Transaction could not be persisted. Please try again.' });
+  }
 
   // Notify sender
   createNotification(db, req.user.userId, 'money_sent',
@@ -2150,7 +2241,7 @@ app.post('/transactions', authMiddleware, (req, res) => {
     { transactionId: tx.id, amount: receivedAmount, currency: receivedCurrency });
   saveDB(db);
 
-  res.json({
+  const responseBody = {
     transaction: tx,
     feeBreakdown: {
       youSend: amount,
@@ -2167,7 +2258,14 @@ app.post('/transactions', authMiddleware, (req, res) => {
       remainingMonthlyUSD: limitCheck.remainingMonthlyUSD,
       tierLevel:           limitCheck.tierLevel,
     },
-  });
+  };
+
+  // Store in idempotency cache so retries return the same response
+  if (clientKey) {
+    idempotencyStore.set(clientKey, { response: responseBody, timestamp: Date.now() });
+  }
+
+  res.json(responseBody);
 });
 
 // ==================== ADMIN ROUTES ====================
@@ -2193,6 +2291,12 @@ app.post('/withdrawals', authMiddleware, (req, res) => {
       return res.status(200).json(cached.response);
   }
 
+  // ── Per-user/currency mutex — blocks concurrent in-flight withdrawals ───────
+  const inflightKey = `${req.user.userId}:${currency}`;
+  if (withdrawalInFlight.has(inflightKey))
+    return res.status(409).json({ error: 'A withdrawal for this currency is already being processed. Please wait.' });
+  withdrawalInFlight.add(inflightKey);
+
   const db = loadDB();
   const feeCalc = calcWithdrawFee(amount, !!isInternational);
 
@@ -2217,6 +2321,7 @@ app.post('/withdrawals', authMiddleware, (req, res) => {
       netPayout:  feeCalc.netPayout,
     });
   } catch (err) {
+    withdrawalInFlight.delete(inflightKey);
     return res.status(err.status || 500).json({ error: err.message });
   }
 
@@ -2261,6 +2366,9 @@ app.post('/withdrawals', authMiddleware, (req, res) => {
   });
 
   res.json(responseBody);
+
+  // Release the in-flight lock now that the DB has been saved and response sent.
+  withdrawalInFlight.delete(inflightKey);
 
   // Fire the real payout asynchronously — AFTER the HTTP response is sent.
   // executePayout loads a fresh DB, calls Stripe or Kora, then marks paid or failed.
@@ -2615,7 +2723,7 @@ app.get('/me', authMiddleware, (req, res) => {
   const db = loadDB();
   const u = db.users.find(x=>x.id===req.user.userId);
   if (!u) return res.status(404).json({ error: 'Not found' });
-  res.json({ id: u.id, email: u.email, region: u.region, kycTier: u.kycTier || 0, kycStatus: u.kycStatus || 'pending', tierLimits: KYC_TIERS[u.kycTier || 0] });
+  res.json({ id: u.id, email: u.email, username: u.username || null, region: u.region, kycTier: u.kycTier || 0, kycStatus: u.kycStatus || 'pending', tierLimits: KYC_TIERS[u.kycTier || 0] });
 });
 
 // ==================== PAYMENT REQUESTS ====================
@@ -2937,6 +3045,23 @@ app.post('/payment-requests/:id/pay', authMiddleware, (req, res) => {
   request.transactionId = tx.id;
   
   saveDB(db);
+
+  // Notify payer
+  const payerUser = db.users.find(u => u.id === req.user.userId);
+  createNotification(db, req.user.userId, 'money_sent',
+    'Payment Sent',
+    `You paid ${(request.amount / 100).toFixed(2)} ${request.currency}${request.memo ? ` for "${request.memo}"` : ''}`,
+    { transactionId: tx.id, requestId: request.id, amount: request.amount, currency: request.currency });
+
+  // Notify requester (wallet owner)
+  const requesterUser = db.users.find(u => u.id === toWallet.userId);
+  createNotification(db, toWallet.userId, 'money_received',
+    'Payment Received',
+    `You received ${(request.amount / 100).toFixed(2)} ${request.currency} from ${payerUser?.fullName || payerUser?.username || payerUser?.email || 'someone'}${request.memo ? ` for "${request.memo}"` : ''}`,
+    { transactionId: tx.id, requestId: request.id, amount: request.amount, currency: request.currency });
+
+  saveDB(db);
+
   res.json({ request, transaction: tx });
 });
 

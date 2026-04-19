@@ -1,12 +1,19 @@
 import { API_BASE } from './client';
-import { v4 as uuidv4 } from 'uuid';
+
+/** RFC-4122 v4 UUID using Math.random — no crypto.getRandomValues() needed. */
+function generateId(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
 
 /** Fetch the primary currency of any wallet (used to preview FX before sending). */
 export async function getWalletCurrency(
   token: string,
   walletId: string
 ): Promise<string> {
-  const res = await fetch(`${API_BASE}/wallets/${walletId}/currency`, {
+  const res = await fetch(`${API_BASE}/wallets/${encodeURIComponent(walletId)}/currency`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) return 'XAF'; // graceful fallback
@@ -56,24 +63,36 @@ export async function sendTransaction(
   memo?: string
 ) {
   // Generate idempotency key to prevent double-sends
-  const idempotencyKey = uuidv4();
+  const idempotencyKey = generateId();
 
-  const res = await fetch(`${API_BASE}/transactions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      'Idempotency-Key': idempotencyKey,
-    },
-    body: JSON.stringify({
-      fromWalletId,
-      toWalletId,
-      amount,
-      currency,
-      memo,
-      idempotencyKey,
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/transactions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        'Idempotency-Key': idempotencyKey,
+      },
+      body: JSON.stringify({
+        fromWalletId,
+        toWalletId,
+        amount,
+        currency,
+        memo,
+        idempotencyKey,
+      }),
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') throw new Error('Request timed out. Please try again.');
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -107,7 +126,7 @@ export async function createPaymentRequest(
   currency: string,
   memo?: string
 ) {
-  const idempotencyKey = uuidv4();
+  const idempotencyKey = generateId();
   
   const res = await fetch(`${API_BASE}/payment-requests`, {
     method: 'POST',
@@ -165,7 +184,7 @@ export async function createVirtualCard(
   currency: string,
   label?: string
 ) {
-  const idempotencyKey = uuidv4();
+  const idempotencyKey = generateId();
   
   const res = await fetch(`${API_BASE}/virtual-cards`, {
     method: 'POST',
@@ -199,7 +218,7 @@ export async function getVirtualCards(token: string) {
 }
 
 export async function toggleCardFreeze(token: string, cardId: string) {
-  const idempotencyKey = uuidv4();
+  const idempotencyKey = generateId();
   
   const res = await fetch(`${API_BASE}/virtual-cards/${cardId}/toggle-freeze`, {
     method: 'POST',
@@ -243,7 +262,7 @@ export async function createBudget(
   currency: string,
   monthlyLimit: number
 ) {
-  const idempotencyKey = uuidv4();
+  const idempotencyKey = generateId();
   
   const res = await fetch(`${API_BASE}/budgets`, {
     method: 'POST',

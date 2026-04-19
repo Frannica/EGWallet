@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
+import { majorToMinor } from '../utils/currency';
 
 interface Balance {
   currency: string;
@@ -76,7 +77,14 @@ export default function EmployerDashboardScreen() {
   const [employeePosition, setEmployeePosition] = useState('Software Engineer');
 
   // Payroll form — pre-filled with test values
-  const [payrollAmount, setPayrollAmount] = useState('1000');
+  const [payrollAmount, setPayrollAmount] = useState('1,000');
+
+  function formatAmountInput(text: string): string {
+    const cleaned = text.replace(/[^0-9.]/g, '');
+    const parts = cleaned.split('.');
+    const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return parts.length > 1 ? intPart + '.' + parts[1] : intPart;
+  }
   const [payrollCurrency, setPayrollCurrency] = useState('XAF');
   const [payrollMemo, setPayrollMemo] = useState('Monthly Salary - March 2026');
 
@@ -288,23 +296,27 @@ export default function EmployerDashboardScreen() {
       return;
     }
 
-    const amount = parseFloat(payrollAmount);
+    const amount = parseFloat(payrollAmount.replace(/,/g, ''));
     if (isNaN(amount) || amount <= 0) {
       Alert.alert('Invalid Amount', 'Enter a positive payroll amount');
       return;
     }
 
-    const total = amount * readyEmployees.length;
-    const fundingBalance = getFundingBalance();
+    // Convert to minor units (e.g. 1000 XAF → 100000 minor units) to be
+    // consistent with every other backend endpoint.
+    const amountMinor = majorToMinor(amount, payrollCurrency);
+    const totalMinor = amountMinor * readyEmployees.length;
+    const fundingBalance = getFundingBalance(); // stored in minor units
 
-    if (fundingBalance < total) {
+    if (fundingBalance < totalMinor) {
       Alert.alert(
         'Insufficient Funds',
-        `Funding wallet has ${fundingBalance.toLocaleString()} ${payrollCurrency}, but need ${total.toLocaleString()} ${payrollCurrency}.\n\nTap "Fund Wallet (Demo)" to add test funds.`
+        `Funding wallet has ${fundingBalance.toLocaleString()} ${payrollCurrency} (minor units), but need ${totalMinor.toLocaleString()}.\n\nTap "Fund Wallet (Demo)" to add test funds.`
       );
       return;
     }
 
+    const total = amount * readyEmployees.length; // major units, for display only
     Alert.alert(
       'Confirm Payroll',
       `Pay ${readyEmployees.length} employee(s)?\n\nAmount: ${amount.toLocaleString()} ${payrollCurrency} each\nTotal: ${total.toLocaleString()} ${payrollCurrency}`,
@@ -319,7 +331,7 @@ export default function EmployerDashboardScreen() {
                 workerId: e.workerId,
                 walletId: e.walletId!,
                 workerEmail: e.workerEmail,
-                amount,
+                amount: amountMinor, // minor units — consistent with /transactions
                 currency: payrollCurrency,
                 memo: payrollMemo,
               }));
@@ -358,7 +370,7 @@ export default function EmployerDashboardScreen() {
                   workerId: e.workerId,
                   workerEmail: e.workerEmail,
                   status: 'success' as const,
-                  amount: parseFloat(payrollAmount),
+                  amount: amountMinor,
                   currency: payrollCurrency,
                 })),
               });
@@ -650,7 +662,7 @@ export default function EmployerDashboardScreen() {
                       <TextInput
                         style={styles.input}
                         value={payrollAmount}
-                        onChangeText={setPayrollAmount}
+                        onChangeText={v => setPayrollAmount(formatAmountInput(v))}
                         placeholder="1000"
                         keyboardType="numeric"
                         placeholderTextColor="#aaa"
@@ -703,7 +715,7 @@ export default function EmployerDashboardScreen() {
                           TOTAL ({employees.filter(e => e.status === 'active').length})
                         </Text>
                         <Text style={[styles.tableCell, styles.tableTotalText]}>
-                          {((parseFloat(payrollAmount) || 0) * employees.filter(e => e.status === 'active').length).toLocaleString()}
+                          {((parseFloat(payrollAmount.replace(/,/g, '')) || 0) * employees.filter(e => e.status === 'active').length).toLocaleString()}
                         </Text>
                         <Text style={[styles.tableCell, styles.tableTotalText]}>{payrollCurrency}</Text>
                       </View>

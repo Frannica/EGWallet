@@ -47,10 +47,12 @@ export default function NotificationsScreen() {
   const [notifs, setNotifs] = useState<Notif[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   async function load() {
     if (!auth.token) return;
     setLoading(true);
+    setFetchError(null);
     try {
       const res = await fetch(`${API_BASE}/notifications`, {
         headers: { Authorization: `Bearer ${auth.token}` },
@@ -58,9 +60,12 @@ export default function NotificationsScreen() {
       if (res.ok) {
         const data = await res.json();
         setNotifs(data.notifications || []);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setFetchError(err.error || `Server error (${res.status})`);
       }
     } catch {
-      // Offline — show whatever we have
+      setFetchError('Unable to load notifications. Check your connection.');
     } finally {
       setLoading(false);
     }
@@ -125,9 +130,19 @@ export default function NotificationsScreen() {
         contentContainerStyle={styles.list}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Ionicons name="notifications-off-outline" size={52} color="#AAB8C2" />
-            <Text style={styles.emptyTitle}>No notifications yet</Text>
-            <Text style={styles.emptySubtitle}>Activity like deposits, sends, and withdrawals will appear here.</Text>
+            {fetchError ? (
+              <>
+                <Ionicons name="cloud-offline-outline" size={52} color="#AAB8C2" />
+                <Text style={styles.emptyTitle}>Couldn't load notifications</Text>
+                <Text style={styles.emptySubtitle}>{fetchError}</Text>
+              </>
+            ) : (
+              <>
+                <Ionicons name="notifications-off-outline" size={52} color="#AAB8C2" />
+                <Text style={styles.emptyTitle}>No notifications yet</Text>
+                <Text style={styles.emptySubtitle}>Activity like deposits, sends, and withdrawals will appear here.</Text>
+              </>
+            )}
           </View>
         }
         renderItem={({ item }) => {
