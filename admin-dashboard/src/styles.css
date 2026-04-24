@@ -77,6 +77,26 @@ body {
   width: 100%;
 }
 
+/* ── Footer ──────────────────────────────────── */
+
+.site-footer {
+  text-align: center;
+  padding: 16px 24px;
+  border-top: 1px solid #e4e7ec;
+  font-size: 12px;
+  color: #999;
+  margin-top: auto;
+}
+
+.site-footer a {
+  color: #4361ee;
+  text-decoration: none;
+}
+
+.site-footer a:hover {
+  text-decoration: underline;
+}
+
 /* ── Forms ───────────────────────────────────── */
 
 .form-label {

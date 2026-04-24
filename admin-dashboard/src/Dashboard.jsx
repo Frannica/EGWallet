@@ -27,6 +27,9 @@ export default function Dashboard({ onLogout }) {
           <WithdrawalTable onSelect={setSelectedId} />
         )}
       </main>
+      <footer className="site-footer">
+        <a href="/privacy-policy">Privacy Policy</a>
+      </footer>
     </div>
   );
 }
