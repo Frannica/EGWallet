@@ -168,6 +168,24 @@ const IDEMPOTENCY_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
 // user+currency from both passing the balance check before either commits.
 const withdrawalInFlight = new Set();
 
+// ==================== DEVICE BINDING ABUSE PROTECTION ====================
+// Persistent tracker: stored in db.device_signup_tracker (array of records)
+// Enforces max 3 signups per unique device ID per 24 hours.
+// Schema: { deviceId: string, timestamps: number[], updatedAt: number }
+const DEVICE_SIGNUP_LIMIT = 3;
+const DEVICE_SIGNUP_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// Prune stale device_signup_tracker records from the DB every 6 hours
+setInterval(() => {
+  const db = loadDB();
+  if (!db.device_signup_tracker) return;
+  const cutoff = Date.now() - DEVICE_SIGNUP_WINDOW_MS;
+  db.device_signup_tracker = db.device_signup_tracker
+    .map(rec => ({ ...rec, timestamps: rec.timestamps.filter(ts => ts > cutoff) }))
+    .filter(rec => rec.timestamps.length > 0);
+  saveDB(db);
+}, 6 * 60 * 60 * 1000);
+
 // ==================== FEE SCHEDULE (single source of truth) ====================
 const FEES = {
   TOPUP_FREE_LIMIT:    6,      // first N deposits are free per user
@@ -538,7 +556,14 @@ function getUserContext(userId, db) {
   const kyc = (db.kyc || []).find(k => k.userId === userId);
   const userCards = (db.virtualCards || []).filter(c => c.userId === userId && c.status === 'active');
   const userTransactions = (db.transactions || []).filter(t => t.userId === userId).slice(-10);
-  
+
+  // Wallet & balance context
+  const wallet = (db.wallets || []).find(w => w.userId === userId);
+  const walletBalances = wallet?.balances || [];
+  const primaryBal = walletBalances[0];
+  const failedTxs = userTransactions.filter(t => t.status === 'failed');
+  const pendingTxs = userTransactions.filter(t => t.status === 'pending');
+
   const kycTier = kyc?.status === 'approved' ? 'verified' : (kyc?.status === 'under_review' ? 'pending' : 'unverified');
   const dailyLimit = kycTier === 'verified' ? 50000 : (kycTier === 'pending' ? 5000 : 2000);
   
@@ -550,12 +575,19 @@ function getUserContext(userId, db) {
   
   return {
     email: maskEmail(user?.email),
+    username: user?.username || (user?.email ? user.email.split('@')[0] : 'User'),
+    walletId: wallet?.id ? wallet.id.slice(-8).toUpperCase() : 'N/A',
+    balance: primaryBal ? (primaryBal.amount / 100).toFixed(2) : '0.00',
+    currency: primaryBal?.currency || 'USD',
     kycTier,
     dailyLimit,
     dailySpent: todaySpent,
     dailyRemaining: dailyLimit - todaySpent,
     cardCount: userCards.length,
     recentTxCount: userTransactions.length,
+    failedTxCount: failedTxs.length,
+    lastFailedReason: failedTxs[0]?.failureReason || null,
+    pendingTxCount: pendingTxs.length,
     accountStatus: user?.status || 'active',
     language: user?.language || 'en' // Default to English
   };
@@ -668,7 +700,14 @@ const translations = {
     qa_track: "Track Transaction", qa_track_q: "Check my latest transaction status",
     qa_issue: "Report Issue", qa_issue_q: "I want to report a problem",
     qa_card: "Virtual Cards", qa_card_q: "How do I create a virtual card?",
-    qa_verify: "Verify Identity", qa_verify_q: "Help me verify my identity"
+    qa_verify: "Verify Identity", qa_verify_q: "Help me verify my identity",
+    limit_daily_exceeded: "This transaction exceeds your remaining daily limit. You can send up to {remaining} more today.",
+    limit_daily_reached: "You have reached your daily limit of {limit}.",
+    limit_weekly_exceeded: "This transaction exceeds your remaining weekly limit. You can send up to {remaining} more this week.",
+    limit_weekly_reached: "You have reached your weekly limit of {limit}.",
+    limit_monthly_exceeded: "This transaction exceeds your remaining monthly limit. You can send up to {remaining} more this month.",
+    limit_monthly_reached: "You have reached your monthly limit of {limit}.",
+    limit_upgrade: "Upgrade to {tierName} to unlock higher limits."
   },
   es: {
     greeting: "¡Hola! 👋 Me llamo Felisa, tu asistente de EGWallet. Puedo ayudarte con:\n\n• Preguntas sobre transacciones\n• Información de cuenta\n• Guías de funciones\n• Tickets de soporte\n\n¿En qué puedo ayudarte hoy?",
@@ -749,7 +788,14 @@ const translations = {
     qa_track: "Rastrear Transacción", qa_track_q: "Verificar el estado de mi última transacción",
     qa_issue: "Reportar Problema", qa_issue_q: "Quiero reportar un problema",
     qa_card: "Tarjetas Virtuales", qa_card_q: "¿Cómo creo una tarjeta virtual?",
-    qa_verify: "Verificar Identidad", qa_verify_q: "Ayúdame a verificar mi identidad"
+    qa_verify: "Verificar Identidad", qa_verify_q: "Ayúdame a verificar mi identidad",
+    limit_daily_exceeded: "Esta transacción supera tu límite diario restante. Puedes enviar hasta {remaining} más hoy.",
+    limit_daily_reached: "Has alcanzado tu límite diario de {limit}.",
+    limit_weekly_exceeded: "Esta transacción supera tu límite semanal restante. Puedes enviar hasta {remaining} más esta semana.",
+    limit_weekly_reached: "Has alcanzado tu límite semanal de {limit}.",
+    limit_monthly_exceeded: "Esta transacción supera tu límite mensual restante. Puedes enviar hasta {remaining} más este mes.",
+    limit_monthly_reached: "Has alcanzado tu límite mensual de {limit}.",
+    limit_upgrade: "Actualiza a {tierName} para desbloquear límites más altos."
   },
   fr: {
     greeting: "Bonjour ! 👋 Je m'appelle Felisa, votre assistante EGWallet. Je peux vous aider avec :\n\n• Questions sur les transactions\n• Informations sur le compte\n• Guides des fonctionnalités\n• Tickets de support\n\nComment puis-je vous aider aujourd'hui ?",
@@ -830,7 +876,14 @@ const translations = {
     qa_track: "Suivre Transaction", qa_track_q: "Vérifier le statut de ma dernière transaction",
     qa_issue: "Signaler Problème", qa_issue_q: "Je veux signaler un problème",
     qa_card: "Cartes Virtuelles", qa_card_q: "Comment créer une carte virtuelle ?",
-    qa_verify: "Vérifier Identité", qa_verify_q: "Aidez-moi à vérifier mon identité"
+    qa_verify: "Vérifier Identité", qa_verify_q: "Aidez-moi à vérifier mon identité",
+    limit_daily_exceeded: "Cette transaction dépasse votre limite journalière restante. Vous pouvez envoyer jusqu'à {remaining} de plus aujourd'hui.",
+    limit_daily_reached: "Vous avez atteint votre limite journalière de {limit}.",
+    limit_weekly_exceeded: "Cette transaction dépasse votre limite hebdomadaire restante. Vous pouvez envoyer jusqu'à {remaining} de plus cette semaine.",
+    limit_weekly_reached: "Vous avez atteint votre limite hebdomadaire de {limit}.",
+    limit_monthly_exceeded: "Cette transaction dépasse votre limite mensuelle restante. Vous pouvez envoyer jusqu'à {remaining} de plus ce mois-ci.",
+    limit_monthly_reached: "Vous avez atteint votre limite mensuelle de {limit}.",
+    limit_upgrade: "Passez à {tierName} pour débloquer des limites plus élevées."
   },
   pt: {
     greeting: "Olá! 👋 Meu nome é Felisa, sua assistente da EGWallet. Posso ajudá-lo com:\n\n• Perguntas sobre transações\n• Informações da conta\n• Guias de recursos\n• Tickets de suporte\n\nComo posso ajudá-lo hoje?",
@@ -911,7 +964,14 @@ const translations = {
     qa_track: "Rastrear Transação", qa_track_q: "Verificar o status da minha última transação",
     qa_issue: "Reportar Problema", qa_issue_q: "Quero reportar um problema",
     qa_card: "Cartões Virtuais", qa_card_q: "Como crio um cartão virtual?",
-    qa_verify: "Verificar Identidade", qa_verify_q: "Me ajude a verificar minha identidade"
+    qa_verify: "Verificar Identidade", qa_verify_q: "Me ajude a verificar minha identidade",
+    limit_daily_exceeded: "Esta transação excede seu limite diário restante. Você pode enviar até {remaining} mais hoje.",
+    limit_daily_reached: "Você atingiu seu limite diário de {limit}.",
+    limit_weekly_exceeded: "Esta transação excede seu limite semanal restante. Você pode enviar até {remaining} mais esta semana.",
+    limit_weekly_reached: "Você atingiu seu limite semanal de {limit}.",
+    limit_monthly_exceeded: "Esta transação excede seu limite mensal restante. Você pode enviar até {remaining} mais este mês.",
+    limit_monthly_reached: "Você atingiu seu limite mensal de {limit}.",
+    limit_upgrade: "Atualize para {tierName} para desbloquear limites mais altos."
   },
   zh: {
     greeting: "您好！👋 我叫 Felisa，是您的 EGWallet 助手。我可以帮助您：\n\n• 交易问题\n• 账户信息\n• 功能指南\n• 支持工单\n\n今天我能帮您什么？",
@@ -992,7 +1052,14 @@ const translations = {
     qa_track: "追踪交易", qa_track_q: "查看我最近的交易状态",
     qa_issue: "报告问题", qa_issue_q: "我想报告一个问题",
     qa_card: "虚拟卡", qa_card_q: "如何创建虚拟卡？",
-    qa_verify: "验证身份", qa_verify_q: "帮我验证我的身份"
+    qa_verify: "验证身份", qa_verify_q: "帮我验证我的身份",
+    limit_daily_exceeded: "此交易超过您的每日剩余限额。今天您最多还可发送 {remaining}。",
+    limit_daily_reached: "您已达到每日限额 {limit}。",
+    limit_weekly_exceeded: "此交易超过您的每周剩余限额。本周您最多还可发送 {remaining}。",
+    limit_weekly_reached: "您已达到每周限额 {limit}。",
+    limit_monthly_exceeded: "此交易超过您的每月剩余限额。本月您最多还可发送 {remaining}。",
+    limit_monthly_reached: "您已达到每月限额 {limit}。",
+    limit_upgrade: "升级至 {tierName} 以解锁更高限额。"
   },
   ja: {
     greeting: "こんにちは！👋 私はFelisaです、EGWalletのアシスタントです。以下についてサポートできます：\n\n• 取引に関する質問\n• アカウント情報\n• 機能ガイド\n• サポートチケット\n\n本日はどのようにお手伝いできますか？",
@@ -1073,7 +1140,14 @@ const translations = {
     qa_track: "取引を追跡", qa_track_q: "最新の取引状況を確認する",
     qa_issue: "問題を報告", qa_issue_q: "問題を報告したい",
     qa_card: "仮想カード", qa_card_q: "仮想カードを作成するにはどうすればいいですか？",
-    qa_verify: "身元確認", qa_verify_q: "身元確認を手伝ってください"
+    qa_verify: "身元確認", qa_verify_q: "身元確認を手伝ってください",
+    limit_daily_exceeded: "この取引は残りの1日の上限を超えています。本日はあと最大 {remaining} 送金できます。",
+    limit_daily_reached: "1日の上限 {limit} に達しました。",
+    limit_weekly_exceeded: "この取引は残りの週間の上限を超えています。今週はあと最大 {remaining} 送金できます。",
+    limit_weekly_reached: "週間の上限 {limit} に達しました。",
+    limit_monthly_exceeded: "この取引は残りの月間の上限を超えています。今月はあと最大 {remaining} 送金できます。",
+    limit_monthly_reached: "月間の上限 {limit} に達しました。",
+    limit_upgrade: "{tierName} にアップグレードして上限を引き上げましょう。"
   },
   ru: {
     greeting: "Здравствуйте! 👋 Меня зовут Фелиса, ваш помощник EGWallet. Я могу помочь вам с:\n\n• Вопросами о транзакциях\n• Информацией об учетной записи\n• Руководствами по функциям\n• Заявками в поддержку\n\nКак я могу помочь вам сегодня?",
@@ -1154,7 +1228,14 @@ const translations = {
     qa_track: "Отследить транзакцию", qa_track_q: "Проверить статус последней транзакции",
     qa_issue: "Сообщить о проблеме", qa_issue_q: "Я хочу сообщить о проблеме",
     qa_card: "Виртуальные карты", qa_card_q: "Как создать виртуальную карту?",
-    qa_verify: "Подтвердить личность", qa_verify_q: "Помогите мне подтвердить личность"
+    qa_verify: "Подтвердить личность", qa_verify_q: "Помогите мне подтвердить личность",
+    limit_daily_exceeded: "Эта транзакция превышает остаток дневного лимита. Сегодня можно отправить ещё до {remaining}.",
+    limit_daily_reached: "Вы достигли дневного лимита {limit}.",
+    limit_weekly_exceeded: "Эта транзакция превышает остаток недельного лимита. На этой неделе можно отправить ещё до {remaining}.",
+    limit_weekly_reached: "Вы достигли недельного лимита {limit}.",
+    limit_monthly_exceeded: "Эта транзакция превышает остаток месячного лимита. В этом месяце можно отправить ещё до {remaining}.",
+    limit_monthly_reached: "Вы достигли месячного лимита {limit}.",
+    limit_upgrade: "Перейдите на {tierName}, чтобы разблокировать более высокие лимиты."
   },
   de: {
     greeting: "Hallo! 👋 Mein Name ist Felisa, Ihre EGWallet-Assistentin. Ich kann Ihnen helfen mit:\n\n• Transaktionsfragen\n• Kontoinformationen\n• Funktionsanleitungen\n• Support-Tickets\n\nWie kann ich Ihnen heute helfen?",
@@ -1235,7 +1316,14 @@ const translations = {
     qa_track: "Transaktion verfolgen", qa_track_q: "Status meiner letzten Transaktion prüfen",
     qa_issue: "Problem melden", qa_issue_q: "Ich möchte ein Problem melden",
     qa_card: "Virtuelle Karten", qa_card_q: "Wie erstelle ich eine virtuelle Karte?",
-    qa_verify: "Identität verifizieren", qa_verify_q: "Helfen Sie mir, meine Identität zu verifizieren"
+    qa_verify: "Identität verifizieren", qa_verify_q: "Helfen Sie mir, meine Identität zu verifizieren",
+    limit_daily_exceeded: "Diese Transaktion übersteigt Ihr verbleibendes Tageslimit. Sie können heute noch bis zu {remaining} senden.",
+    limit_daily_reached: "Sie haben Ihr Tageslimit von {limit} erreicht.",
+    limit_weekly_exceeded: "Diese Transaktion übersteigt Ihr verbleibendes Wochenlimit. Sie können diese Woche noch bis zu {remaining} senden.",
+    limit_weekly_reached: "Sie haben Ihr Wochenlimit von {limit} erreicht.",
+    limit_monthly_exceeded: "Diese Transaktion übersteigt Ihr verbleibendes Monatslimit. Sie können diesen Monat noch bis zu {remaining} senden.",
+    limit_monthly_reached: "Sie haben Ihr Monatslimit von {limit} erreicht.",
+    limit_upgrade: "Upgraden Sie auf {tierName}, um höhere Limits freizuschalten."
   }
 };
 
@@ -1701,12 +1789,68 @@ app.post('/auth/register',
     }
   }
 
+  // ==================== DEVICE BINDING CHECKS ====================
+  // Read canonical device ID from header (preferred) or fall back to body fingerprint
+  const deviceId = (req.headers['x-device-id'] && typeof req.headers['x-device-id'] === 'string')
+    ? req.headers['x-device-id'].trim()
+    : (deviceInfo?.fingerprint || null);
+
+  const riskFlags = [];
+  let forceUnverifiedDevice = false;
+
+  if (deviceId) {
+    const now = Date.now();
+
+    // --- Rate limit: max 3 signups per device per 24h (persistent) ---
+    if (!db.device_signup_tracker) db.device_signup_tracker = [];
+    let trackerRec = db.device_signup_tracker.find(r => r.deviceId === deviceId);
+    const recentSignups = trackerRec
+      ? trackerRec.timestamps.filter(ts => now - ts < DEVICE_SIGNUP_WINDOW_MS)
+      : [];
+    if (recentSignups.length >= DEVICE_SIGNUP_LIMIT) {
+      logger.warn('Device signup rate limit exceeded', { deviceId, ip: req.clientIP });
+      return res.status(429).json({
+        error: 'Too many accounts created from this device. Please try again in 24 hours.',
+      });
+    }
+    recentSignups.push(now);
+    if (trackerRec) {
+      trackerRec.timestamps = recentSignups;
+      trackerRec.updatedAt  = now;
+    } else {
+      db.device_signup_tracker.push({ deviceId, timestamps: recentSignups, updatedAt: now });
+    }
+    // Note: saveDB is called later after the user record is fully built — no extra write needed here.
+
+    // --- Multiple accounts on same device ---
+    const existingOnDevice = (db.users || []).filter(u => u.deviceId === deviceId);
+    if (existingOnDevice.length > 0) {
+      riskFlags.push('multiple_accounts_same_device');
+      // If any existing account is KYC-verified, keep the new one unverified
+      const hasVerified = existingOnDevice.some(u => (u.kycTier || 0) >= 1 || u.kycStatus === 'approved');
+      if (hasVerified) {
+        riskFlags.push('device_has_verified_account');
+        forceUnverifiedDevice = true;
+      }
+    }
+
+    // Log for audit trail
+    logger.info('Signup device binding', {
+      deviceId,
+      ip: req.clientIP,
+      timestamp: new Date().toISOString(),
+      riskFlags,
+      forceUnverifiedDevice,
+    });
+  }
+  // ============================================================
+
   const id = uuidv4();
-  const passwordHash = bcrypt.hashSync(password, 8);
-  
+  const passwordHash = bcrypt.hashSync(password, 12);
+
   // Auto-detect preferred currency using the global country→currency map
   const preferredCurrency = COUNTRY_TO_CURRENCY[region] || 'USD';
-  
+
   const user = { 
     id, 
     email, 
@@ -1719,6 +1863,9 @@ app.post('/auth/register',
     kycTier: 0,
     kycStatus: 'pending',
     kycDocuments: {},
+    deviceId: deviceId || null,
+    riskFlags: riskFlags.length > 0 ? riskFlags : undefined,
+    kycDeviceBlocked: forceUnverifiedDevice || undefined,
     dailySpent: 0,
     lastResetDate: new Date().toISOString().split('T')[0],
     limitTracking: {
@@ -2119,8 +2266,9 @@ app.post('/transactions', authMiddleware, (req, res) => {
 
   const limitCheck = checkKYCLimits(senderUser, toAmountInUSD, db);
   if (!limitCheck.allowed) {
+    const lang = senderUser.language || 'en';
     const upgradeMsg = limitCheck.nextTier
-      ? ` Upgrade to ${limitCheck.nextTier.name} to unlock higher limits.`
+      ? ' ' + t('limit_upgrade', lang, { tierName: limitCheck.nextTier.name })
       : '';
     return res.status(403).json({
       code:                'LIMIT_EXCEEDED',
@@ -2969,9 +3117,10 @@ app.get('/payment-requests/:id', (req, res) => {
   if (!request) return res.status(404).json({ error: 'Request not found' });
   
   const requester = db.users.find(u => u.id === request.requesterId);
+  // Mask email on this public endpoint — only expose enough to identify the requester
   res.json({ 
-    request,
-    requesterEmail: requester?.email || 'Unknown'
+    request: { id: request.id, amount: request.amount, currency: request.currency, note: request.note, status: request.status, expiresAt: request.expiresAt, requesterId: request.requesterId },
+    requesterEmail: maskEmail(requester?.email || 'unknown')
   });
 });
 
@@ -3753,6 +3902,164 @@ app.post('/kyc/upload', authMiddleware, (req, res) => {
   res.json({ success: true, document: newDoc });
 });
 
+// ==================== SMILE IDENTITY KYC VERIFICATION ====================
+// POST /kyc/verify
+// Body: { idType, idNumber, country, firstName?, lastName?, selfieBase64? }
+// Calls Smile Identity Basic KYC (job_type 5 — ID verification, no selfie required).
+// Falls back to manual review queue when SMILE_PARTNER_ID / SMILE_API_KEY not set.
+//
+// Required env vars:
+//   SMILE_PARTNER_ID  — your Smile Identity partner ID
+//   SMILE_API_KEY     — your Smile Identity API key
+//   SMILE_API_BASE    — (optional) override base URL; default = sandbox
+
+const SMILE_PARTNER_ID = process.env.SMILE_PARTNER_ID || null;
+const SMILE_API_KEY    = process.env.SMILE_API_KEY    || null;
+const SMILE_API_BASE   = process.env.SMILE_API_BASE   || 'https://testapi.smileidentity.com/v1';
+
+// HMAC-SHA256 signature as required by Smile Identity REST API
+function computeSmileSignature(timestamp, partnerId, apiKey) {
+  return crypto.createHmac('sha256', apiKey)
+    .update(`${timestamp}${partnerId}`)
+    .digest('base64');
+}
+
+// Normalise Smile Identity result codes to our internal status
+function smileResultToStatus(resultCode) {
+  if (resultCode === '0810') return 'approved';
+  if (['0811', '0812', '0813', '0814'].includes(resultCode)) return 'rejected';
+  return 'under_review';
+}
+
+const kycVerifyLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  keyGenerator: req => req.user?.userId || req.clientIP,
+  handler: (_req, res) => res.status(429).json({ error: 'Too many KYC attempts. Please try again in 1 hour.' }),
+});
+
+app.post('/kyc/verify',
+  authMiddleware,
+  kycVerifyLimiter,
+  validateInput([
+    body('idType').trim().notEmpty(),
+    body('idNumber').trim().notEmpty(),
+    body('country').trim().isLength({ min: 2, max: 3 }),
+  ]),
+  async (req, res) => {
+    const db = loadDB();
+    const user = db.users.find(u => u.id === req.user.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const { idType, idNumber, country, firstName, lastName } = req.body;
+    const jobId = uuidv4();
+
+    // ---- Graceful fallback when credentials not configured ----
+    if (!SMILE_PARTNER_ID || !SMILE_API_KEY) {
+      user.kycStatus = 'under_review';
+      user.kycUpdatedAt = Date.now();
+      if (!user.kycDocuments) user.kycDocuments = {};
+      user.kycDocuments.pendingVerification = { idType, country, submittedAt: Date.now(), jobId };
+      saveDB(db);
+      logger.warn('Smile Identity not configured — KYC queued for manual review', {
+        userId: user.id, jobId, idType, country,
+      });
+      return res.json({
+        status: 'under_review',
+        message: 'Your verification has been submitted and is under manual review.',
+        provider: 'manual',
+        jobId,
+      });
+    }
+
+    // ---- Call Smile Identity API ----
+    const timestamp = new Date().toISOString();
+    const signature = computeSmileSignature(timestamp, SMILE_PARTNER_ID, SMILE_API_KEY);
+
+    const smilePayload = {
+      source_sdk: 'rest_api',
+      source_sdk_version: '1.0.0',
+      smile_client_id: user.id,
+      partner_params: {
+        job_id: jobId,
+        user_id: user.id,
+        job_type: 5, // Basic KYC — ID number verification without selfie
+      },
+      id_info: {
+        first_name:  (firstName  || '').toUpperCase(),
+        last_name:   (lastName   || '').toUpperCase(),
+        country:     country.toUpperCase(),
+        id_type:     idType.toUpperCase(),
+        id_number:   idNumber,
+        entered:     true,
+      },
+      partner_id: SMILE_PARTNER_ID,
+      timestamp,
+      signature,
+    };
+
+    try {
+      const smileRes = await axios.post(
+        `${SMILE_API_BASE}/id_verification`,
+        smilePayload,
+        { timeout: 30000, headers: { 'Content-Type': 'application/json' } }
+      );
+
+      const result    = smileRes.data?.result || {};
+      const resultCode = result.ResultCode || '';
+      const actions   = result.Actions || {};
+      const kycStatus = smileResultToStatus(resultCode);
+      const newTier   = kycStatus === 'approved' ? Math.max(user.kycTier || 0, 1) : (user.kycTier || 0);
+
+      // Persist result
+      user.kycStatus    = kycStatus;
+      user.kycTier      = newTier;
+      user.kycSmileJobId = jobId;
+      user.kycUpdatedAt  = Date.now();
+      if (!user.kycDocuments) user.kycDocuments = {};
+      user.kycDocuments.smileResult = {
+        resultCode, actions, country, idType, verifiedAt: Date.now(), jobId,
+      };
+      saveDB(db);
+
+      logger.info('Smile Identity KYC completed', {
+        userId: user.id, kycStatus, resultCode, kycTier: newTier, jobId,
+      });
+
+      return res.json({
+        status:     kycStatus,
+        resultCode,
+        kycTier:    newTier,
+        jobId,
+        message: kycStatus === 'approved'
+          ? 'Identity verified successfully.'
+          : kycStatus === 'rejected'
+            ? 'We could not verify your identity. Please check your details and try again.'
+            : 'Verification submitted and under review.',
+      });
+
+    } catch (err) {
+      logger.error('Smile Identity API error', {
+        userId: user.id, error: err.message, jobId,
+        responseData: err.response?.data,
+      });
+
+      // Non-fatal fallback — queue for manual review
+      user.kycStatus    = 'under_review';
+      user.kycSmileJobId = jobId;
+      user.kycUpdatedAt  = Date.now();
+      saveDB(db);
+
+      return res.json({
+        status:   'under_review',
+        jobId,
+        message:  'Verification submitted. Our team will review it shortly.',
+        provider: 'manual_fallback',
+      });
+    }
+  }
+);
+
 // AI Chat endpoint (Rule-based with safety guardrails)
 app.post('/ai/chat', 
   authMiddleware, 
@@ -3767,6 +4074,7 @@ app.post('/ai/chat',
   const lowerMessage = message.toLowerCase();
   let response = '';
   let suggestions = [];
+  let actions = [];
   let ticketCreated = null;
   let needsMoreInfo = null;
   
@@ -4032,6 +4340,11 @@ app.post('/ai/chat',
     } else if (lowerMessage.includes('failed') || lowerMessage.includes('problem') || lowerMessage.includes('issue')) {
       response = t('tx_issue', lang) + t('tx_issue_note', lang, { sla: escalation.sla || '24-48h' });
       suggestions = [t('tx_issue_s1', lang), t('tx_issue_s2', lang), t('tx_issue_s3', lang)];
+      actions = [
+        { label: lang === 'fr' ? 'Réessayer' : lang === 'es' ? 'Reintentar' : 'Retry transaction', type: 'retry', icon: 'refresh' },
+        { label: lang === 'fr' ? 'Voir transactions' : lang === 'es' ? 'Ver transacciones' : 'View transactions', type: 'view_transaction', icon: 'list-outline' },
+        { label: lang === 'fr' ? 'Contacter support' : lang === 'es' ? 'Contactar soporte' : 'Contact support', type: 'contact_support', icon: 'headset' },
+      ];
     } else {
       response = t('tx_general', lang);
       suggestions = [t('tx_general_s1', lang), t('tx_general_s2', lang), t('tx_general_s3', lang)];
@@ -4060,7 +4373,25 @@ app.post('/ai/chat',
         suggestions = [t('balance_limit_s2', lang), t('tx_latest_s1', lang)];
       }
     } else {
-      response += t('balance_incorrect', lang);
+      // Show real balance from client context if available
+      const clientCtx = req.body.userCtx || {};
+      const clientBals = clientCtx.balances || {};
+      const balEntries = Object.entries(clientBals).filter(([, v]) => Number(v) > 0);
+      if (balEntries.length > 0) {
+        const [topCur, topAmt] = balEntries[0];
+        const readableAmt = (Number(topAmt) / 100).toFixed(2);
+        response = lang === 'fr'
+          ? `Votre solde disponible est de ${topCur} ${readableAmt}.\n\n`
+          : lang === 'es'
+          ? `Su saldo disponible es ${topCur} ${readableAmt}.\n\n`
+          : `Your available balance is ${topCur} ${readableAmt}.\n\n`;
+        response += t('balance_incorrect', lang);
+      } else {
+        response += t('balance_incorrect', lang);
+      }
+      actions = [
+        { label: lang === 'fr' ? 'Contacter support' : lang === 'es' ? 'Contactar soporte' : 'Contact support', type: 'contact_support', icon: 'headset' },
+      ];
       suggestions = [t('balance_s1', lang), t('balance_s2', lang), t('balance_s3', lang)];
     }
   }
@@ -4136,7 +4467,7 @@ app.post('/ai/chat',
     suggestions = [t('default_s1', lang), t('default_s2', lang), t('default_s3', lang)];
   }
   
-  res.json({ response, suggestions, ticketCreated });
+  res.json({ response, suggestions, ticketCreated, actions });
 });
 
 // Update user language preference
@@ -4161,6 +4492,203 @@ app.post('/user/language', authMiddleware, (req, res) => {
   
   res.json({ success: true, language });
 });
+
+// ==================== POST /ai-assistant (Smart Financial Assistant) ====================
+const AI_SUPPORTED_EVENTS = ['transaction_failed', 'withdrawal_pending', 'suspicious_activity', 'new_recipient'];
+const AI_SUPPORTED_LANGS  = ['en', 'es', 'fr', 'pt', 'zh', 'ja', 'ru', 'de'];
+const AI_KNOWN_CURRENCIES = new Set([
+  'USD','EUR','GBP','XAF','XOF','NGN','GHS','ZAR','KES','EGP','MAD','TZS','UGX',
+  'INR','CNY','JPY','KRW','HKD','SGD','THB','IDR','MYR','PHP','VND','PKR',
+  'BRL','ARS','COP','MXN','CLP','PEN','AUD','CAD','NZD','CHF','SEK','NOK',
+  'DKK','PLN','CZK','HUF','RON','BGN','RUB','UAH','TRY','AED','SAR','QAR',
+]);
+
+/** Sanitise a currency code: uppercase, alphanumeric only, 2-5 chars, known list. */
+function sanitiseCurrency(raw) {
+  if (!raw) return null;
+  const s = String(raw).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
+  return AI_KNOWN_CURRENCIES.has(s) ? s : null;
+}
+
+/** Sanitise an amount: must be a finite positive number <= 1e9 minor units. */
+function sanitiseAmount(raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n > 1e9) return null;
+  return n;
+}
+
+/** Sanitise a pending-withdrawals object from the client: only known currencies, positive numbers. */
+function sanitisePendingWithdrawals(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const safe = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const cur = sanitiseCurrency(k);
+    const amt = sanitiseAmount(v);
+    if (cur && amt !== null && amt > 0) safe[cur] = amt;
+    if (Object.keys(safe).length >= 10) break; // never more than 10 entries
+  }
+  return safe;
+}
+
+app.post('/ai-assistant',
+  authMiddleware,
+  aiChatLimiter,
+  validateInput([
+    body('language').optional().isString().isIn(AI_SUPPORTED_LANGS),
+    body('event').optional().isString().isIn(AI_SUPPORTED_EVENTS),
+    body('message').optional().trim().isLength({ max: 2000 }),
+  ]),
+  async (req, res) => {
+    const { message, language, event, eventContext = {}, userContext: clientCtx = {} } = req.body;
+    const db = loadDB();
+    const userId = req.user.userId;
+
+    const detectedLang = message ? detectLanguageFromMessage(message) : null;
+    // Whitelist the language — fall back to 'en' for unknown values
+    const requestedLang = AI_SUPPORTED_LANGS.includes(language) ? language : 'en';
+    const lang = (detectedLang && AI_SUPPORTED_LANGS.includes(detectedLang)) ? detectedLang : requestedLang;
+
+    const serverCtx = getUserContext(userId, db);
+    logAIInteraction(userId, 'AI_ASSISTANT', ['event', 'context'], null, req);
+
+    let response = '';
+    let actions = [];
+    let suggestions = [];
+
+    // ─── EVENT: Transaction Failed ──────────────────────────────────────────────
+    if (event === 'transaction_failed') {
+      // Only use failureReason if it matches a known whitelist key; never embed raw client input
+      const KNOWN_REASONS = ['insufficient_funds', 'limit_exceeded', 'invalid_recipient', 'network_error', 'blocked_account'];
+      const rawReason = eventContext.failureReason || serverCtx.lastFailedReason || '';
+      const failReason = KNOWN_REASONS.includes(String(rawReason)) ? String(rawReason) : 'unknown';
+
+      // Sanitise amount and currency from client
+      const txAmount   = sanitiseAmount(eventContext.amount);
+      const txCurrency = sanitiseCurrency(eventContext.currency) || serverCtx.currency;
+      const amtStr = (txAmount !== null && txAmount > 0)
+        ? `${txCurrency} ${(txAmount / 100).toFixed(2)}` : '';
+
+      const reasonMap = {
+        insufficient_funds: lang === 'fr' ? `fonds insuffisants — solde disponible\u00a0: ${serverCtx.currency}\u00a0${serverCtx.balance}`
+          : lang === 'es' ? `fondos insuficientes — saldo disponible: ${serverCtx.currency} ${serverCtx.balance}`
+          : `insufficient funds — your available balance is ${serverCtx.currency} ${serverCtx.balance}`,
+        limit_exceeded: lang === 'fr' ? 'limite journali\u00e8re d\u00e9pass\u00e9e' : lang === 'es' ? 'l\u00edmite diario excedido' : 'daily limit exceeded',
+        invalid_recipient: lang === 'fr' ? 'destinataire introuvable' : lang === 'es' ? 'destinatario no encontrado' : 'recipient not found',
+        network_error: lang === 'fr' ? 'erreur r\u00e9seau temporaire' : lang === 'es' ? 'error de red temporal' : 'temporary network error',
+        blocked_account: lang === 'fr' ? 'restriction temporaire du compte' : lang === 'es' ? 'restricci\u00f3n temporal de la cuenta' : 'temporary account restriction',
+        unknown: lang === 'fr' ? 'une erreur inattendue' : lang === 'es' ? 'un error inesperado' : 'an unexpected error',
+      };
+      // readableReason is ALWAYS from the whitelist map — raw client input is never interpolated
+      const readableReason = reasonMap[failReason];
+      if (lang === 'fr') {
+        response = `Votre transaction${amtStr ? ` de ${amtStr}` : ''} a \u00e9chou\u00e9 en raison de ${readableReason}.\n\nSolde disponible\u00a0: ${serverCtx.currency}\u00a0${serverCtx.balance}.\n\nVous pouvez r\u00e9essayer ou contacter notre support pour obtenir de l\u2019aide.`;
+      } else if (lang === 'es') {
+        response = `Su transacci\u00f3n${amtStr ? ` de ${amtStr}` : ''} fall\u00f3 por ${readableReason}.\n\nSaldo disponible: ${serverCtx.currency} ${serverCtx.balance}.\n\nPuede reintentar o contactar soporte para obtener ayuda.`;
+      } else {
+        response = `Your transaction${amtStr ? ` of ${amtStr}` : ''} failed because of ${readableReason}.\n\nYour available balance: ${serverCtx.currency} ${serverCtx.balance}.\n\nYou can retry or contact support for assistance.`;
+      }
+      actions = [
+        { label: lang === 'fr' ? 'R\u00e9essayer' : lang === 'es' ? 'Reintentar' : 'Retry transaction', type: 'retry', icon: 'refresh' },
+        { label: lang === 'fr' ? 'Voir transactions' : lang === 'es' ? 'Ver transacciones' : 'View transactions', type: 'view_transaction', icon: 'list-outline' },
+        { label: lang === 'fr' ? 'Contacter support' : lang === 'es' ? 'Contactar soporte' : 'Contact support', type: 'contact_support', icon: 'headset' },
+      ];
+
+    // ─── EVENT: Withdrawal Pending ─────────────────────────────────────────────
+    } else if (event === 'withdrawal_pending') {
+      // Sanitise client-supplied pending amounts before embedding in response
+      const pending = sanitisePendingWithdrawals(clientCtx.pendingWithdrawals);
+      const pendingLines = Object.entries(pending)
+        .filter(([, amt]) => Number(amt) > 0)
+        .map(([cur, amt]) => `${cur} ${(Number(amt) / 100).toFixed(2)}`)
+        .join(', ');
+      if (lang === 'fr') {
+        response = `Votre retrait${pendingLines ? ` de ${pendingLines}` : ''} est en cours de traitement.\n\nLes retraits prennent g\u00e9n\u00e9ralement 3 \u00e0 5 jours ouvr\u00e9s selon votre banque. Vous recevrez une notification par e-mail d\u00e8s que le virement sera effectu\u00e9.\n\nID de portefeuille\u00a0: ${serverCtx.walletId}`;
+      } else if (lang === 'es') {
+        response = `Su retiro${pendingLines ? ` de ${pendingLines}` : ''} est\u00e1 siendo procesado.\n\nLos retiros generalmente tardan 3 a 5 d\u00edas h\u00e1biles seg\u00fan su banco. Recibir\u00e1 una notificaci\u00f3n por correo cuando se complete la transferencia.\n\nID de billetera: ${serverCtx.walletId}`;
+      } else {
+        response = `Your withdrawal${pendingLines ? ` of ${pendingLines}` : ''} is being processed.\n\nWithdrawals typically take 3\u20135 business days depending on your bank. You\u2019ll receive an email notification once the transfer is complete.\n\nWallet ID: ${serverCtx.walletId}`;
+      }
+      actions = [
+        { label: lang === 'fr' ? 'Voir transactions' : lang === 'es' ? 'Ver transacciones' : 'View transactions', type: 'view_transaction', icon: 'list-outline' },
+        { label: lang === 'fr' ? 'Contacter support' : lang === 'es' ? 'Contactar soporte' : 'Contact support', type: 'contact_support', icon: 'headset' },
+      ];
+
+    // ─── EVENT: Suspicious Activity ────────────────────────────────────────────
+    } else if (event === 'suspicious_activity') {
+      if (lang === 'fr') {
+        response = `\u26a0\ufe0f Activit\u00e9 suspecte d\u00e9tect\u00e9e sur votre compte (${serverCtx.walletId}).\n\nVeuillez\u00a0:\n1. V\u00e9rifier vos transactions r\u00e9centes\n2. Changer votre mot de passe imm\u00e9diatement\n3. Activer la double authentification\n\nSi vous ne reconnaissez pas cette activit\u00e9, contactez notre support imm\u00e9diatement.`;
+      } else if (lang === 'es') {
+        response = `\u26a0\ufe0f Actividad sospechosa detectada en su cuenta (${serverCtx.walletId}).\n\nPor favor:\n1. Revise sus transacciones recientes\n2. Cambie su contrase\u00f1a inmediatamente\n3. Active la autenticaci\u00f3n de dos factores\n\nSi no reconoce esta actividad, contacte soporte inmediatamente.`;
+      } else {
+        response = `\u26a0\ufe0f Suspicious activity detected on your account (${serverCtx.walletId}).\n\nPlease:\n1. Review your recent transactions\n2. Change your password immediately\n3. Enable two-factor authentication\n\nIf you don\u2019t recognize this activity, contact our support immediately.`;
+      }
+      actions = [
+        { label: lang === 'fr' ? 'Voir transactions' : lang === 'es' ? 'Ver transacciones' : 'View transactions', type: 'view_transaction', icon: 'list-outline' },
+        { label: lang === 'fr' ? 'Contacter support' : lang === 'es' ? 'Contactar soporte' : 'Contact support', type: 'contact_support', icon: 'headset' },
+      ];
+
+    // ─── EVENT: New Recipient Security Warning ─────────────────────────────────
+    } else if (event === 'new_recipient') {
+      // Strip to alphanumeric + limited punctuation to prevent injection; cap at 30 chars
+      const recipientId = String(eventContext.recipientId || '')
+        .replace(/[^a-zA-Z0-9@._\-]/g, '')
+        .substring(0, 30);
+      if (lang === 'fr') {
+        response = `\u26a0\ufe0f Avertissement de s\u00e9curit\u00e9\n\nVous envoyez de l\u2019argent \u00e0 un nouveau destinataire${recipientId ? ` (${recipientId})` : ''}.\n\nV\u00e9rifiez soigneusement l\u2019identit\u00e9 du destinataire avant de confirmer. EGWallet ne peut pas r\u00e9cup\u00e9rer les fonds envoy\u00e9s \u00e0 la mauvaise personne.\n\nSolde disponible\u00a0: ${serverCtx.currency}\u00a0${serverCtx.balance}`;
+      } else if (lang === 'es') {
+        response = `\u26a0\ufe0f Advertencia de seguridad\n\nEst\u00e1 enviando dinero a un nuevo destinatario${recipientId ? ` (${recipientId})` : ''}.\n\nVerifique cuidadosamente la identidad del destinatario antes de confirmar. EGWallet no puede recuperar fondos enviados a la persona equivocada.\n\nSaldo disponible: ${serverCtx.currency} ${serverCtx.balance}`;
+      } else {
+        response = `\u26a0\ufe0f Security Warning\n\nYou are sending money to a new recipient${recipientId ? ` (${recipientId})` : ''}.\n\nPlease carefully verify the recipient\u2019s identity before confirming. EGWallet cannot recover funds sent to the wrong person.\n\nAvailable balance: ${serverCtx.currency} ${serverCtx.balance}`;
+      }
+      actions = [
+        { label: lang === 'fr' ? 'Contacter support' : lang === 'es' ? 'Contactar soporte' : 'Contact support', type: 'contact_support', icon: 'headset' },
+      ];
+
+    // ─── FREE-FORM MESSAGE with real context ──────────────────────────────────
+    } else if (message) {
+      const lower = message.toLowerCase();
+      // Sanitise client-supplied pending amounts before embedding in response
+      const pending = sanitisePendingWithdrawals(clientCtx.pendingWithdrawals);
+      const hasPending = Object.values(pending).some(v => Number(v) > 0);
+      const pendingStr = Object.entries(pending).filter(([, v]) => Number(v) > 0)
+        .map(([c, v]) => `${c} ${(Number(v) / 100).toFixed(2)}`).join(', ');
+
+      if (lower.includes('insufficient') || lower.includes('fonds insuffisant') || lower.includes('fondos insuficiente') ||
+          (lower.includes('failed') && (lower.includes('balance') || lower.includes('fund')))) {
+        if (lang === 'fr') {
+          response = `Votre solde disponible est de ${serverCtx.currency}\u00a0${serverCtx.balance}.\n\nSi votre transaction a \u00e9chou\u00e9 pour fonds insuffisants, veuillez ajouter des fonds avant de r\u00e9essayer.`;
+        } else if (lang === 'es') {
+          response = `Su saldo disponible es ${serverCtx.currency} ${serverCtx.balance}.\n\nSi su transacci\u00f3n fall\u00f3 por fondos insuficientes, a\u00f1ada fondos antes de reintentar.`;
+        } else {
+          response = `Your available balance is ${serverCtx.currency} ${serverCtx.balance}.\n\nIf your transaction failed due to insufficient funds, please add funds before retrying.`;
+        }
+        actions = [
+          { label: lang === 'fr' ? 'R\u00e9essayer' : lang === 'es' ? 'Reintentar' : 'Retry transaction', type: 'retry', icon: 'refresh' },
+          { label: lang === 'fr' ? 'Contacter support' : lang === 'es' ? 'Contactar soporte' : 'Contact support', type: 'contact_support', icon: 'headset' },
+        ];
+      } else if (hasPending && (lower.includes('pending') || lower.includes('withdrawal') || lower.includes('retrait') || lower.includes('retiro'))) {
+        if (lang === 'fr') {
+          response = `Vous avez un retrait en cours${pendingStr ? ` de ${pendingStr}` : ''}. Les retraits prennent 3 \u00e0 5 jours ouvr\u00e9s.`;
+        } else if (lang === 'es') {
+          response = `Tiene un retiro pendiente${pendingStr ? ` de ${pendingStr}` : ''}. Los retiros tardan 3 a 5 d\u00edas h\u00e1biles.`;
+        } else {
+          response = `You have a pending withdrawal${pendingStr ? ` of ${pendingStr}` : ''}. Withdrawals take 3\u20135 business days.`;
+        }
+        actions = [
+          { label: lang === 'fr' ? 'Voir transactions' : lang === 'es' ? 'Ver transacciones' : 'View transactions', type: 'view_transaction', icon: 'list-outline' },
+          { label: lang === 'fr' ? 'Contacter support' : lang === 'es' ? 'Contactar soporte' : 'Contact support', type: 'contact_support', icon: 'headset' },
+        ];
+      } else {
+        // Not a context-specific query — let frontend fall back to /ai/chat
+        return res.json({ response: null, actions: [], suggestions: [], forwardToChat: true });
+      }
+    } else {
+      return res.status(400).json({ error: 'event or message required' });
+    }
+
+    return res.json({ response, actions, suggestions, language: lang });
+  }
+);
 
 // Get supported languages
 app.get('/user/languages', (req, res) => {
@@ -4485,34 +5013,48 @@ console.log('[FOLLOW-UP SYSTEM] Automated follow-up checker started (runs every 
 app.post('/disputes', authMiddleware, (req, res) => {
   const db = loadDB();
   const { transactionId, reason, description } = req.body;
-  
+
+  // ── Input validation ──────────────────────────────────────────────────────
   if (!transactionId || !reason || !description) {
     return res.status(400).json({ error: 'transactionId, reason, and description required' });
   }
-  
-  // Verify transaction belongs to user
-  const transaction = (db.transactions || []).find(t => t.id === transactionId);
-  if (!transaction) {
-    return res.status(404).json({ error: 'Transaction not found' });
+
+  const VALID_REASONS = ['unauthorized', 'wrong_amount', 'not_received', 'duplicate', 'other'];
+  if (!VALID_REASONS.includes(reason)) {
+    return res.status(400).json({ error: `reason must be one of: ${VALID_REASONS.join(', ')}` });
   }
-  
+
+  if (typeof description !== 'string' || description.trim().length < 10 || description.trim().length > 2000) {
+    return res.status(400).json({ error: 'description must be between 10 and 2000 characters' });
+  }
+
+  // ── Resolve authenticated user's email from DB (never trust client) ───────
+  const dbUser = (db.users || []).find(u => u.id === req.user.userId);
+  const resolvedEmail = dbUser?.email || null;
+
   if (!db.disputes) db.disputes = [];
-  
+
+  // Generate ticket number server-side (never from client)
+  const ticketNumber = `EGW-${Math.floor(10000 + Math.random() * 90000)}`;
+
   const dispute = {
     id: uuidv4(),
+    ticketNumber,
     userId: req.user.userId,
-    transactionId,
+    userEmail: resolvedEmail,
+    notifyEmail: 'support@egwalletfinance.com',
+    transactionId: String(transactionId).slice(0, 100), // cap length
     reason,
-    description,
+    description: description.trim(),
     status: 'open',
     createdAt: Date.now(),
     updatedAt: Date.now()
   };
-  
+
   db.disputes.push(dispute);
   saveDB(db);
-  
-  res.json({ success: true, dispute });
+
+  res.json({ success: true, dispute: { id: dispute.id, ticketNumber: dispute.ticketNumber, status: dispute.status } });
 });
 
 // Report payroll fraud/dispute (auto-creates Freshdesk ticket)
@@ -5126,6 +5668,7 @@ function checkKYCLimits(user, amountUSD, _db) {
   const tierLevel = user.kycTier || 0;
   const tier      = KYC_TIERS[tierLevel] || KYC_TIERS[0];
   const lt        = user.limitTracking;
+  const lang      = user.language || 'en';
 
   const dailyUsed   = lt.dailyUsedUSD   || 0;
   const weeklyUsed  = lt.weeklyUsedUSD  || 0;
@@ -5142,7 +5685,9 @@ function checkKYCLimits(user, amountUSD, _db) {
       allowed: false,
       code: 'LIMIT_EXCEEDED',
       limitType: 'daily',
-      message: `You have reached your daily limit of $${tier.dailyLimit.toLocaleString()}. You can send $${remDay.toFixed(2)} more today.`,
+      message: remDay > 0
+        ? t('limit_daily_exceeded', lang, { remaining: '$' + remDay.toFixed(2) })
+        : t('limit_daily_reached',  lang, { limit:     '$' + tier.dailyLimit.toLocaleString() }),
       remainingDailyUSD:   remDay,
       remainingWeeklyUSD:  remWeek,
       remainingMonthlyUSD: remMonth,
@@ -5156,7 +5701,9 @@ function checkKYCLimits(user, amountUSD, _db) {
       allowed: false,
       code: 'LIMIT_EXCEEDED',
       limitType: 'weekly',
-      message: `You have reached your weekly limit of $${tier.weeklyLimit.toLocaleString()}. You can send $${remWeek.toFixed(2)} more this week.`,
+      message: remWeek > 0
+        ? t('limit_weekly_exceeded', lang, { remaining: '$' + remWeek.toFixed(2) })
+        : t('limit_weekly_reached',  lang, { limit:     '$' + tier.weeklyLimit.toLocaleString() }),
       remainingDailyUSD:   remDay,
       remainingWeeklyUSD:  remWeek,
       remainingMonthlyUSD: remMonth,
@@ -5170,7 +5717,9 @@ function checkKYCLimits(user, amountUSD, _db) {
       allowed: false,
       code: 'LIMIT_EXCEEDED',
       limitType: 'monthly',
-      message: `You have reached your monthly limit of $${tier.monthlyLimit.toLocaleString()}. You can send $${remMonth.toFixed(2)} more this month.`,
+      message: remMonth > 0
+        ? t('limit_monthly_exceeded', lang, { remaining: '$' + remMonth.toFixed(2) })
+        : t('limit_monthly_reached',  lang, { limit:     '$' + tier.monthlyLimit.toLocaleString() }),
       remainingDailyUSD:   remDay,
       remainingWeeklyUSD:  remWeek,
       remainingMonthlyUSD: remMonth,
