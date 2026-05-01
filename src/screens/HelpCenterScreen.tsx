@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface FAQ {
   question: string;
@@ -74,6 +75,7 @@ const FAQS: FAQ[] = [
 const CATEGORIES = Array.from(new Set(FAQS.map(f => f.category)));
 
 export default function HelpCenterScreen() {
+  const { t } = useLanguage();
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
@@ -89,9 +91,9 @@ export default function HelpCenterScreen() {
     <ScrollView style={styles.container}>
       <View style={styles.header}>
         <Ionicons name="help-circle" size={48} color="#007AFF" />
-        <Text style={styles.title}>Help Center</Text>
+        <Text style={styles.title}>{t('help.title')}</Text>
         <Text style={styles.subtitle}>
-          Find answers to common questions or contact our support team
+          {t('help.subtitle')}
         </Text>
       </View>
 
@@ -99,20 +101,20 @@ export default function HelpCenterScreen() {
       <View style={styles.section}>
         <TouchableOpacity style={styles.supportButton} onPress={handleContactSupport}>
           <Ionicons name="mail" size={24} color="#FFFFFF" />
-          <Text style={styles.supportButtonText}>Contact Support</Text>
+          <Text style={styles.supportButtonText}>{t('help.contactSupport')}</Text>
         </TouchableOpacity>
       </View>
 
       {/* Category Filter */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Browse by Category</Text>
+        <Text style={styles.sectionTitle}>{t('help.browseByCategory')}</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
           <TouchableOpacity
             style={[styles.categoryChip, !selectedCategory && styles.categoryChipActive]}
             onPress={() => setSelectedCategory(null)}
           >
             <Text style={[styles.categoryChipText, !selectedCategory && styles.categoryChipTextActive]}>
-              All
+              {t('common.all')}
             </Text>
           </TouchableOpacity>
           {CATEGORIES.map((category) => (
@@ -131,7 +133,7 @@ export default function HelpCenterScreen() {
 
       {/* FAQs */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Frequently Asked Questions</Text>
+        <Text style={styles.sectionTitle}>{t('help.faqs')}</Text>
         {filteredFAQs.map((faq, index) => (
           <View key={index} style={styles.faqCard}>
             <TouchableOpacity
@@ -159,9 +161,9 @@ export default function HelpCenterScreen() {
 
       {/* Bottom CTA */}
       <View style={styles.bottomSection}>
-        <Text style={styles.bottomText}>Still need help?</Text>
+        <Text style={styles.bottomText}>{t('help.stillNeedHelp')}</Text>
         <TouchableOpacity style={styles.bottomButton} onPress={handleContactSupport}>
-          <Text style={styles.bottomButtonText}>Email Our Support Team</Text>
+          <Text style={styles.bottomButtonText}>{t('help.emailSupport')}</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>

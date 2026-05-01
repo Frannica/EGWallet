@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, ActivityIndi
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
+import { useLanguage } from '../i18n/LanguageContext';
 
 type Device = {
   id: string;
@@ -34,6 +35,7 @@ const DEMO_DEVICES: Device[] = [
 
 export default function TrustedDevicesScreen() {
   const auth = useAuth();
+  const { t } = useLanguage();
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -76,7 +78,7 @@ export default function TrustedDevicesScreen() {
 
   async function handleRemoveDevice(device: Device) {
     Alert.alert(
-      'Remove Device',
+      t('trusted.removeTitle'),
       `Are you sure you want to remove "${device.name}"? You will need to verify this device again next time you sign in from it.`,
       [
         { text: 'Cancel', style: 'cancel' },
@@ -94,14 +96,14 @@ export default function TrustedDevicesScreen() {
 
               if (res.ok) {
                 setDevices(prev => prev.filter(d => d.id !== device.id));
-                Alert.alert('Removed', 'Device removed ✅');
+                Alert.alert(t('trusted.removedTitle'), t('trusted.removedMsg'));
               } else {
                 throw new Error('api_error');
               }
             } catch (error) {
               // Demo mode: succeed locally
               setDevices(prev => prev.filter(d => d.id !== device.id));
-              Alert.alert('Removed', 'Device removed ✅');
+              Alert.alert(t('trusted.removedTitle'), t('trusted.removedMsg'));
             }
           },
         },
@@ -122,7 +124,7 @@ export default function TrustedDevicesScreen() {
         setDevices(prev => prev.map(d =>
           d.id === device.id ? { ...d, trusted: true } : d
         ));
-        Alert.alert('Trusted', 'Device marked as trusted ✅');
+        Alert.alert(t('trusted.trustedTitle'), t('trusted.trustedMsg'));
       } else {
         throw new Error('api_error');
       }
@@ -131,11 +133,11 @@ export default function TrustedDevicesScreen() {
       setDevices(prev => prev.map(d =>
         d.id === device.id ? { ...d, trusted: true } : d
       ));
-      Alert.alert('Trusted', 'Device marked as trusted ✅');
+      Alert.alert(t('trusted.trustedTitle'), t('trusted.trustedMsg'));
     }
   }
 
-  function formatDate(timestamp: number): string {
+  function formatDate(timestamp: number, tFn: (key: string) => string): string {
     const date = new Date(timestamp);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
@@ -143,10 +145,10 @@ export default function TrustedDevicesScreen() {
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
 
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
+    if (diffMins < 1) return tFn('common.justNow');
+    if (diffMins < 60) return `${diffMins} ${tFn('common.minsAgo')}`;
+    if (diffHours < 24) return `${diffHours} ${tFn('common.hoursAgo')}`;
+    if (diffDays < 7) return `${diffDays} ${tFn('common.daysAgo')}`;
     
     return date.toLocaleDateString();
   }
@@ -177,10 +179,10 @@ export default function TrustedDevicesScreen() {
           <Text style={styles.deviceType}>{item.type}</Text>
           <View style={styles.deviceMeta}>
             <Text style={styles.metaText}>
-              Last seen: {formatDate(item.lastSeen)}
+              {t('trusted.lastSeen')}{formatDate(item.lastSeen, t)}
             </Text>
             <Text style={styles.metaText}>
-              Added: {formatDate(item.firstSeen)}
+              {t('trusted.added')}{formatDate(item.firstSeen, t)}
             </Text>
           </View>
         </View>
@@ -217,19 +219,15 @@ export default function TrustedDevicesScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Ionicons name="shield" size={40} color="#007AFF" />
-        <Text style={styles.title}>Trusted Devices</Text>
-        <Text style={styles.subtitle}>
-          Manage devices that have access to your account
-        </Text>
+        <Text style={styles.title}>{t('trusted.title')}</Text>
+        <Text style={styles.subtitle}>{t('trusted.subtitle')}</Text>
       </View>
 
       {devices.length === 0 ? (
         <View style={styles.emptyState}>
           <Ionicons name="phone-portrait-outline" size={64} color="#AAB8C2" />
-          <Text style={styles.emptyText}>No devices found</Text>
-          <Text style={styles.emptySubtext}>
-            Devices will appear here when you sign in
-          </Text>
+          <Text style={styles.emptyText}>{t('trusted.noDevices')}</Text>
+          <Text style={styles.emptySubtext}>{t('trusted.noDevicesSubtitle')}</Text>
         </View>
       ) : (
         <FlatList
@@ -250,7 +248,7 @@ export default function TrustedDevicesScreen() {
       <View style={styles.infoBox}>
         <Ionicons name="information-circle" size={20} color="#007AFF" />
         <Text style={styles.infoText}>
-          You'll receive an alert when signing in from a new device. Remove devices you don't recognize immediately.
+          {t('trusted.securityNote')}
         </Text>
       </View>
     </View>

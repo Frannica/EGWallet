@@ -8,6 +8,7 @@ import { debitLocalBalance, logLocalTransaction } from '../utils/localBalance';
 import QRCode from 'react-native-qrcode-svg';
 import { protectedApiCall, generateIdempotencyKey, showErrorAlert } from '../api/protectedClient';
 import { API_BASE } from '../api/client';
+import { useLanguage } from '../i18n/LanguageContext';
 
 type PaymentState = 'idle' | 'processing' | 'success' | 'error';
 
@@ -26,6 +27,7 @@ export default function QRPaymentScreen() {
   const auth = useAuth();
   const route = useRoute();
   const navigation = useNavigation();
+  const { t } = useLanguage();
   
   const [paymentState, setPaymentState] = useState<PaymentState>('idle');
   const [transactionId, setTransactionId] = useState<string | null>(null);
@@ -50,7 +52,7 @@ export default function QRPaymentScreen() {
 
   async function handleConfirmPayment() {
     if (!auth.token) {
-      Alert.alert('Error', 'Not authenticated');
+      Alert.alert(t('common.error'), t('common.notAuthenticated'));
       return;
     }
     
@@ -60,12 +62,12 @@ export default function QRPaymentScreen() {
     }
     
     Alert.alert(
-      'Confirm Payment',
-      `Pay ${formatCurrency(amount, currency)} to ${employerName}?`,
+      t('qr.confirmPayTitle'),
+      t('qr.confirmPayMsg').replace('{amount}', formatCurrency(amount, currency)).replace('{name}', employerName),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Confirm',
+          text: t('common.confirm'),
           onPress: () => executePayment(),
         }
       ]
@@ -101,13 +103,13 @@ export default function QRPaymentScreen() {
       );
 
       if (error) {
-        setErrorMessage(typeof error === 'string' ? error : 'Payment service unavailable. Please try again later.');
+        setErrorMessage(typeof error === 'string' ? error : t('qr.paymentUnavailable'));
         setPaymentState('error');
         return;
       }
 
       if (!data || !data.success) {
-        setErrorMessage('Payment could not be processed. Please contact support.');
+        setErrorMessage(t('qr.paymentCouldNotProcess'));
         setPaymentState('error');
         return;
       }
@@ -137,20 +139,20 @@ export default function QRPaymentScreen() {
       <View style={styles.container}>
         <View style={styles.header}>
           <Ionicons name="checkmark-circle" size={80} color="#FFFFFF" />
-          <Text style={styles.successTitle}>Payment Confirmed!</Text>
+          <Text style={styles.successTitle}>{t('qr.paymentConfirmed')}</Text>
         </View>
 
         <View style={styles.content}>
           <View style={styles.receiptCard}>
             <View style={styles.receiptRow}>
-              <Text style={styles.receiptLabel}>Amount Paid</Text>
+              <Text style={styles.receiptLabel}>{t('qr.amountPaid')}</Text>
               <Text style={styles.receiptValue}>{formatCurrency(amount, currency)}</Text>
             </View>
 
             <View style={styles.divider} />
 
             <View style={styles.receiptRow}>
-              <Text style={styles.receiptLabel}>To</Text>
+              <Text style={styles.receiptLabel}>{t('qr.to')}</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Text style={styles.receiptValue}>{employerName}</Text>
                 {verified && (
@@ -162,14 +164,14 @@ export default function QRPaymentScreen() {
             <View style={styles.divider} />
 
             <View style={styles.receiptRow}>
-              <Text style={styles.receiptLabel}>Batch ID</Text>
+              <Text style={styles.receiptLabel}>{t('qr.batchId')}</Text>
               <Text style={styles.receiptValue}>{batchId}</Text>
             </View>
 
             <View style={styles.divider} />
 
             <View style={styles.receiptRow}>
-              <Text style={styles.receiptLabel}>Transaction ID</Text>
+              <Text style={styles.receiptLabel}>{t('qr.transactionId')}</Text>
               <Text style={[styles.receiptValue, { fontSize: 12, color: '#657786' }]}>
                 {transactionId}
               </Text>
@@ -178,7 +180,7 @@ export default function QRPaymentScreen() {
             <View style={styles.divider} />
 
             <View style={styles.receiptRow}>
-              <Text style={styles.receiptLabel}>Date</Text>
+              <Text style={styles.receiptLabel}>{t('qr.date')}</Text>
               <Text style={styles.receiptValue}>
                 {new Date().toLocaleDateString()}
               </Text>
@@ -189,7 +191,7 @@ export default function QRPaymentScreen() {
             style={styles.doneButton}
             onPress={() => navigation.goBack()}
           >
-            <Text style={styles.doneButtonText}>Done</Text>
+            <Text style={styles.doneButtonText}>{t('qr.done')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -202,7 +204,7 @@ export default function QRPaymentScreen() {
       <View style={styles.container}>
         <View style={[styles.header, { backgroundColor: '#d32f2f' }]}>
           <Ionicons name="alert-circle" size={80} color="#FFFFFF" />
-          <Text style={styles.successTitle}>Payment Pending</Text>
+          <Text style={styles.successTitle}>{t('qr.paymentPending')}</Text>
         </View>
 
         <View style={styles.content}>
@@ -213,8 +215,8 @@ export default function QRPaymentScreen() {
               {errorMessage.includes('connection') || errorMessage.includes('network')
                 ? 'Check your internet connection and try again.'
                 : errorMessage.includes('timeout')
-                ? 'The request took too long. Please check your connection and try again.'
-                : 'If the problem persists, please contact support.'}
+                ? t('qr.requestTimeout')
+                : t('qr.contactSupportError')}
             </Text>
           </View>
 
@@ -226,14 +228,14 @@ export default function QRPaymentScreen() {
             }}
           >
             <Ionicons name="reload" size={20} color="#FFFFFF" />
-            <Text style={styles.retryButtonText}>Try Again</Text>
+            <Text style={styles.retryButtonText}>{t('qr.tryAgain')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.cancelButton}
             onPress={() => navigation.goBack()}
           >
-            <Text style={styles.cancelButtonText}>Cancel</Text>
+            <Text style={styles.cancelButtonText}>{t('qr.cancel')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -245,11 +247,11 @@ export default function QRPaymentScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Pay {employerName}</Text>
+        <Text style={styles.headerTitle}>{t('qr.pay')} {employerName}</Text>
       </View>
 
       <View style={styles.content}>
-        <Text style={styles.amountLabel}>Amount to Pay</Text>
+        <Text style={styles.amountLabel}>{t('qr.amountToPay')}</Text>
         <Text style={styles.amountValue}>{formatCurrency(amount, currency)}</Text>
 
         <View style={styles.qrContainer}>
@@ -258,7 +260,7 @@ export default function QRPaymentScreen() {
             size={220}
             backgroundColor="white"
           />
-          <Text style={styles.qrLabel}>Scan to Pay</Text>
+          <Text style={styles.qrLabel}>{t('qr.scanToPay')}</Text>
         </View>
 
         <View style={styles.detailsCard}>
@@ -274,17 +276,17 @@ export default function QRPaymentScreen() {
 
           <View style={styles.detailRow}>
             <Ionicons name="document-text" size={20} color="#1976D2" />
-            <Text style={styles.detailText}>Batch {batchId}</Text>
+            <Text style={styles.detailText}>{t('qr.batch')} {batchId}</Text>
           </View>
 
           <View style={styles.detailRow}>
             <Ionicons name="calendar" size={20} color="#1976D2" />
-            <Text style={styles.detailText}>January 2026 Salary</Text>
+            <Text style={styles.detailText}>{t('qr.paymentPeriod')}</Text>
           </View>
 
           <View style={styles.detailRow}>
             <Ionicons name="shield-checkmark" size={20} color="#2E7D32" />
-            <Text style={styles.secureText}>Secure & Verified</Text>
+            <Text style={styles.secureText}>{t('qr.secureVerified')}</Text>
           </View>
         </View>
 
@@ -299,7 +301,7 @@ export default function QRPaymentScreen() {
           {paymentState === 'processing' ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
-            <Text style={styles.confirmButtonText}>Confirm Payment</Text>
+            <Text style={styles.confirmButtonText}>{t('qr.confirmPayment')}</Text>
           )}
         </TouchableOpacity>
       </View>

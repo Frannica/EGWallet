@@ -9,6 +9,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { Ionicons } from '@expo/vector-icons';
 import { getLocalBalances, mergeWithLocalBalances, syncLocalBalancesFromBackend } from '../utils/localBalance';
+import { useLanguage } from '../i18n/LanguageContext';
 
 type Balance = { currency: string; amount: number };
 
@@ -20,6 +21,7 @@ const DEMO_WALLET = {
 
 export default function WalletScreen() {
   const auth = useAuth();
+  const { t } = useLanguage();
   const { isOnline } = useNetworkStatus();
   const [wallets, setWallets] = useState<Array<any>>([]);
   const [loading, setLoading] = useState(false);
@@ -62,7 +64,7 @@ export default function WalletScreen() {
       setApiError(null);
     } catch (e: any) {
       if (__DEV__) console.warn('Load wallets failed:', e?.message);
-      setApiError(e?.message || 'Unable to reach the server.');
+      setApiError(e?.message || t('common.serverUnreachable'));
       // Show demo wallet with local balances so the UI stays functional
       const localBalancesOnError = await getLocalBalances();
       const localCurrencies = Object.entries(localBalancesOnError).filter(([, amt]) => amt > 0);
@@ -153,7 +155,7 @@ export default function WalletScreen() {
         {/* Floating Header */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.greetingText}>Welcome back</Text>
+            <Text style={styles.greetingText}>{t('wallet.welcomeBack')}</Text>
             <Text style={styles.appTitle}>EGWallet</Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -190,7 +192,7 @@ export default function WalletScreen() {
         >
           <View style={styles.decorBlob1} />
           <View style={styles.decorBlob2} />
-          <Text style={styles.balanceLabel}>TOTAL BALANCE</Text>
+          <Text style={styles.balanceLabel}>{t('wallet.totalBalance')}</Text>
           {loading && wallets.length === 0 ? (
             <ActivityIndicator size="large" color="#FFFFFF" style={{ marginVertical: 16 }} />
           ) : (
@@ -216,13 +218,13 @@ export default function WalletScreen() {
 
         {/* Test Mode Label */}
         <Text style={{ textAlign: 'center', fontSize: 11, color: '#94a3b8', marginTop: 6, marginBottom: 2, letterSpacing: 0.5 }}>
-          TEST MODE — No real money is used
+          {t('wallet.testMode')}
         </Text>
 
         {/* Currency Picker */}
         {showCurrencyPicker && (
           <View style={styles.currencySelector}>
-            <Text style={styles.currencyLabel}>Display Currency</Text>
+            <Text style={styles.currencyLabel}>{t('wallet.displayCurrency')}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {POPULAR_CURRENCIES.map(c => (
                 <TouchableOpacity
@@ -252,11 +254,11 @@ export default function WalletScreen() {
           contentContainerStyle={styles.quickActions}
         >
           {([
-            { icon: 'send' as const, label: 'Send', bg: '#DBEAFE', color: '#1565C0', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Send'); (navigation as any).navigate('Send'); } },
-            { icon: 'download' as const, label: 'Request', bg: '#DCFCE7', color: '#15803D', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Request'); (navigation as any).navigate('Request'); } },
-            { icon: 'add-circle' as const, label: 'Add Money', bg: '#FEF9C3', color: '#A16207', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Add Money'); (navigation as any).navigate('Deposit', { walletId: wallets[0]?.id }); } },
-            { icon: 'card' as const, label: 'Card', bg: '#F3E8FF', color: '#7E22CE', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Card'); (navigation as any).navigate('Card'); } },
-            { icon: 'sparkles' as const, label: 'AI Support', bg: '#EDE9FE', color: '#7C3AED', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: AI Support'); (navigation as any).navigate('AIChat'); } },
+            { icon: 'send' as const, label: t('common.send'), bg: '#DBEAFE', color: '#1565C0', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Send'); (navigation as any).navigate('Send'); } },
+            { icon: 'download' as const, label: t('common.request'), bg: '#DCFCE7', color: '#15803D', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Request'); (navigation as any).navigate('Request'); } },
+            { icon: 'add-circle' as const, label: t('wallet.addMoney'), bg: '#FEF9C3', color: '#A16207', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Add Money'); (navigation as any).navigate('Deposit', { walletId: wallets[0]?.id }); } },
+            { icon: 'card' as const, label: t('nav.card'), bg: '#F3E8FF', color: '#7E22CE', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Card'); (navigation as any).navigate('Card'); } },
+            { icon: 'sparkles' as const, label: t('wallet.aiSupport'), bg: '#EDE9FE', color: '#7C3AED', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: AI Support'); (navigation as any).navigate('AIChat'); } },
           ]).map(({ icon, label, bg, color, onPress }) => (
             <TouchableOpacity key={label} style={styles.quickActionBtn} onPress={onPress} activeOpacity={0.75}>
               <View style={[styles.quickActionIcon, { backgroundColor: bg }]}>
@@ -269,9 +271,9 @@ export default function WalletScreen() {
 
         {/* Wallet Overview */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Wallet Overview</Text>
+          <Text style={styles.sectionTitle}>{t('wallet.overview')}</Text>
           <TouchableOpacity onPress={() => (navigation as any).navigate('Transactions', { walletId: wallets[0]?.id })}>
-            <Text style={styles.sectionLink}>View All</Text>
+            <Text style={styles.sectionLink}>{t('wallet.viewAll')}</Text>
           </TouchableOpacity>
         </View>
 
@@ -297,7 +299,7 @@ export default function WalletScreen() {
         )}
         {(wallets.length === 0 || wallets.every(w => (w.balances || []).every((b: Balance) => b.amount === 0))) && (
           <View style={[styles.currencyCard, { justifyContent: 'center' }]}>
-            <Text style={{ color: '#5C6E8A', fontSize: 14 }}>No balance yet. Add money to get started.</Text>
+            <Text style={{ color: '#5C6E8A', fontSize: 14 }}>{t('wallet.noBalance')}</Text>
           </View>
         )}
 

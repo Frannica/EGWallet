@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
+import { useLanguage } from '../i18n/LanguageContext';
 
 type Notif = {
   id: string;
@@ -30,20 +31,21 @@ function getIconMeta(type: string) {
   return TYPE_ICON[type] ?? { icon: 'notifications', color: '#1565C0', bg: '#DBEAFE' };
 }
 
-function formatRelTime(ts: number) {
+function formatRelTime(ts: number, t: (key: string) => string) {
   const diff = Date.now() - ts;
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 1) return t('common.justNow');
+  if (mins < 60) return `${mins} ${t('common.minsAgo')}`;
   const hrs = Math.floor(diff / 3600000);
-  if (hrs < 24) return `${hrs}h ago`;
+  if (hrs < 24) return `${hrs} ${t('common.hoursAgo')}`;
   const days = Math.floor(diff / 86400000);
-  return `${days}d ago`;
+  return `${days} ${t('common.daysAgo')}`;
 }
 
 export default function NotificationsScreen() {
   const auth = useAuth();
   const navigation = useNavigation();
+  const { t } = useLanguage();
   const [notifs, setNotifs] = useState<Notif[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -119,7 +121,7 @@ export default function NotificationsScreen() {
       {unread > 0 && (
         <TouchableOpacity style={styles.markAllBtn} onPress={markAllRead} activeOpacity={0.8}>
           <Ionicons name="checkmark-done" size={16} color="#1565C0" />
-          <Text style={styles.markAllText}>Mark all as read</Text>
+          <Text style={styles.markAllText}>{t('notif.markAllRead')}</Text>
         </TouchableOpacity>
       )}
 
@@ -133,14 +135,14 @@ export default function NotificationsScreen() {
             {fetchError ? (
               <>
                 <Ionicons name="cloud-offline-outline" size={52} color="#AAB8C2" />
-                <Text style={styles.emptyTitle}>Couldn't load notifications</Text>
+                <Text style={styles.emptyTitle}>{t('notif.loadError')}</Text>
                 <Text style={styles.emptySubtitle}>{fetchError}</Text>
               </>
             ) : (
               <>
                 <Ionicons name="notifications-off-outline" size={52} color="#AAB8C2" />
-                <Text style={styles.emptyTitle}>No notifications yet</Text>
-                <Text style={styles.emptySubtitle}>Activity like deposits, sends, and withdrawals will appear here.</Text>
+                <Text style={styles.emptyTitle}>{t('notif.empty')}</Text>
+                <Text style={styles.emptySubtitle}>{t('notif.emptySubtitle')}</Text>
               </>
             )}
           </View>
@@ -162,7 +164,7 @@ export default function NotificationsScreen() {
                   {!item.read && <View style={styles.unreadDot} />}
                 </View>
                 <Text style={styles.body} numberOfLines={2}>{item.body}</Text>
-                <Text style={styles.time}>{formatRelTime(item.createdAt)}</Text>
+                <Text style={styles.time}>{formatRelTime(item.createdAt, t)}</Text>
               </View>
             </TouchableOpacity>
           );

@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
+import { useLanguage } from '../i18n/LanguageContext';
 
 type KYCStatus = 'not_started' | 'pending' | 'under_review' | 'approved' | 'rejected';
 
@@ -18,6 +19,7 @@ type KYCDocument = {
 
 export default function KYCVerificationScreen() {
   const auth = useAuth();
+  const { t } = useLanguage();
   const [kycStatus, setKycStatus] = useState<KYCStatus>('not_started');
   const [documents, setDocuments] = useState<KYCDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,12 +49,12 @@ export default function KYCVerificationScreen() {
     }
   }
 
-  function getDocumentInstructions(type: KYCDocument['type']): string {
+  function getDocumentInstructions(type: KYCDocument['type'], tFn: (key: string) => string): string {
     switch (type) {
-      case 'id_card':         return 'Take a clear photo of the front of your National ID card. Make sure all text is readable and the card fills the frame.';
-      case 'passport':        return 'Open your passport to the photo page and take a clear photo. All text must be visible.';
-      case 'drivers_license': return 'Take a clear photo of the front of your driver\'s license.';
-      case 'proof_of_address': return 'Take a photo of a recent utility bill, bank statement, or official letter showing your name and address. Must be dated within the last 3 months.';
+      case 'id_card':         return tFn('kyc.idCardInstructions');
+      case 'passport':        return tFn('kyc.passportInstructions');
+      case 'drivers_license': return tFn('kyc.driversLicenseInstructions');
+      case 'proof_of_address': return tFn('kyc.proofOfAddressInstructions');
     }
   }
 
@@ -61,13 +63,13 @@ export default function KYCVerificationScreen() {
     if (source === 'camera') {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Camera Permission', 'Please allow camera access in your device settings to take document photos.');
+        Alert.alert(t('kyc.cameraPermission'), t('kyc.cameraPermissionMsg'));
         return;
       }
     } else {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Gallery Permission', 'Please allow photo library access in your device settings to select document photos.');
+        Alert.alert(t('kyc.galleryPermission'), t('kyc.galleryPermissionMsg'));
         return;
       }
     }
@@ -94,7 +96,7 @@ export default function KYCVerificationScreen() {
     // ── Security: allowlist document types ───────────────────────────────────
     const ALLOWED_DOC_TYPES: KYCDocument['type'][] = ['id_card', 'passport', 'drivers_license', 'proof_of_address'];
     if (!ALLOWED_DOC_TYPES.includes(type)) {
-      Alert.alert('Invalid Document Type', 'This document type is not accepted.');
+      Alert.alert(t('kyc.invalidDocType'), t('kyc.invalidDocTypeMsg'));
       return;
     }
 
@@ -102,19 +104,19 @@ export default function KYCVerificationScreen() {
     const ALLOWED_MIME = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
     const mimeType = asset.mimeType?.toLowerCase() ?? 'image/jpeg';
     if (!ALLOWED_MIME.includes(mimeType)) {
-      Alert.alert('Invalid File Type', 'Only JPEG, PNG, WEBP, and HEIC images are accepted.');
+      Alert.alert(t('kyc.invalidFileType'), t('kyc.invalidFileTypeMsg'));
       return;
     }
 
     // ── Security: validate URI is a local file (not a remote URL) ────────────
     if (!asset.uri || (!asset.uri.startsWith('file://') && !asset.uri.startsWith('content://'))) {
-      Alert.alert('Invalid Image', 'Could not read the selected image. Please try again.');
+      Alert.alert(t('kyc.invalidImage'), t('kyc.invalidImageMsg'));
       return;
     }
 
     // ── Security: file size (max 10 MB) ──────────────────────────────────────
     if (asset.fileSize && asset.fileSize > 10 * 1024 * 1024) {
-      Alert.alert('File Too Large', 'Please choose an image smaller than 10 MB.');
+      Alert.alert(t('kyc.fileTooLarge'), t('kyc.fileTooLargeMsg'));
       return;
     }
 
@@ -151,7 +153,7 @@ export default function KYCVerificationScreen() {
         return [...filtered, newDoc];
       });
       setKycStatus('under_review');
-      Alert.alert('✅ Document Submitted', 'Our team will review your document within 1–2 business days. You\'ll be notified when it\'s approved.');
+      Alert.alert(t('kyc.documentSubmittedTitle'), t('kyc.documentSubmittedMsg'));
     } catch (error: any) {
       // If backend KYC endpoint not yet live, store locally as pending
       if (error?.message?.includes('fetch') || error?.message?.includes('network') || error?.message?.includes('404')) {
@@ -166,9 +168,9 @@ export default function KYCVerificationScreen() {
           return [...filtered, newDoc];
         });
         setKycStatus('under_review');
-        Alert.alert('✅ Document Captured', 'Your document photo has been saved and will be submitted for review.');
+        Alert.alert(t('kyc.documentCaptured'), t('kyc.documentCapturedMsg'));
       } else {
-        Alert.alert('Upload Failed', error.message ?? 'Please try again.');
+        Alert.alert(t('kyc.uploadFailed'), error.message ?? t('common.networkError'));
       }
     } finally {
       setUploading(false);
@@ -178,11 +180,11 @@ export default function KYCVerificationScreen() {
   async function handleUploadDocument(type: KYCDocument['type']) {
     Alert.alert(
       getDocumentTypeLabel(type),
-      getDocumentInstructions(type),
+      getDocumentInstructions(type, t),
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: '📷 Take Photo', onPress: () => pickAndUpload(type, 'camera') },
-        { text: '🖼️ Choose from Gallery', onPress: () => pickAndUpload(type, 'gallery') },
+        { text: t('kyc.takePhoto'), onPress: () => pickAndUpload(type, 'camera') },
+        { text: t('kyc.chooseFromGallery'), onPress: () => pickAndUpload(type, 'gallery') },
       ]
     );
   }
@@ -209,11 +211,11 @@ export default function KYCVerificationScreen() {
 
   function getStatusText(status: KYCStatus): string {
     switch (status) {
-      case 'approved': return 'Verified';
-      case 'rejected': return 'Rejected';
-      case 'under_review': return 'Under Review';
-      case 'pending': return 'Pending';
-      case 'not_started': return 'Not Started';
+      case 'approved': return t('kyc.approved');
+      case 'rejected': return t('kyc.rejected');
+      case 'under_review': return t('kyc.underReview');
+      case 'pending': return t('kyc.pending');
+      case 'not_started': return t('kyc.notStarted');
     }
   }
 
@@ -249,7 +251,7 @@ export default function KYCVerificationScreen() {
     <ScrollView style={styles.container}>
       <View style={styles.header}>
         <Ionicons name="shield-checkmark" size={48} color={getStatusColor(kycStatus)} />
-        <Text style={styles.title}>Identity Verification</Text>
+        <Text style={styles.title}>{t('kyc.title')}</Text>
         <View style={[styles.statusBadge, { backgroundColor: getStatusColor(kycStatus) + '20' }]}>
           <Ionicons name={getStatusIcon(kycStatus)} size={20} color={getStatusColor(kycStatus)} />
           <Text style={[styles.statusText, { color: getStatusColor(kycStatus) }]}>
@@ -262,10 +264,8 @@ export default function KYCVerificationScreen() {
         <View style={styles.successCard}>
           <Ionicons name="checkmark-circle" size={32} color="#34C759" />
           <View style={styles.successContent}>
-            <Text style={styles.successTitle}>Verification Complete</Text>
-            <Text style={styles.successText}>
-              Your identity has been verified. You now have full access to all features.
-            </Text>
+            <Text style={styles.successTitle}>{t('kyc.verificationComplete')}</Text>
+            <Text style={styles.successText}>{t('kyc.verificationCompleteText')}</Text>
           </View>
         </View>
       )}
@@ -274,12 +274,10 @@ export default function KYCVerificationScreen() {
         <View style={styles.errorCard}>
           <Ionicons name="close-circle" size={32} color="#FF3B30" />
           <View style={styles.errorContent}>
-            <Text style={styles.errorTitle}>Verification Declined</Text>
-            <Text style={styles.errorText}>
-              We couldn't verify your documents. Please upload clearer photos and ensure all information is visible.
-            </Text>
+            <Text style={styles.errorTitle}>{t('kyc.verificationDeclined')}</Text>
+            <Text style={styles.errorText}>{t('kyc.verificationDeclinedText')}</Text>
             <TouchableOpacity style={styles.retryButton} onPress={loadKYCStatus}>
-              <Text style={styles.retryButtonText}>Try Again</Text>
+              <Text style={styles.retryButtonText}>{t('kyc.tryAgain')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -289,19 +287,15 @@ export default function KYCVerificationScreen() {
         <View style={styles.infoCard}>
           <Ionicons name="time" size={32} color="#FF9500" />
           <View style={styles.infoContent}>
-            <Text style={styles.infoTitle}>Review in Progress</Text>
-            <Text style={styles.infoText}>
-              Our team is reviewing your documents. You'll receive a notification within 1-2 business days.
-            </Text>
+            <Text style={styles.infoTitle}>{t('kyc.inReview')}</Text>
+            <Text style={styles.infoText}>{t('kyc.inReviewText')}</Text>
           </View>
         </View>
       )}
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Required Documents</Text>
-        <Text style={styles.sectionSubtitle}>
-          National ID Card is the preferred document. Also upload a Proof of Address. Passport or Driver’s License are accepted as alternatives.
-        </Text>
+        <Text style={styles.sectionTitle}>{t('kyc.requiredDocuments')}</Text>
+        <Text style={styles.sectionSubtitle}>{t('kyc.requiredDocsNote')}</Text>
 
         {documentTypes.map((type) => {
           const doc = documents.find(d => d.type === type);
@@ -318,12 +312,12 @@ export default function KYCVerificationScreen() {
                   <Text style={styles.documentName}>{getDocumentTypeLabel(type)}</Text>
                   {type === 'id_card' && (
                     <View style={{ backgroundColor: '#007AFF', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
-                      <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>PREFERRED</Text>
+                      <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>{t('kyc.preferred')}</Text>
                     </View>
                   )}
                   {type === 'proof_of_address' && (
                     <View style={{ backgroundColor: '#34C759', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
-                      <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>REQUIRED</Text>
+                      <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>{t('kyc.required')}</Text>
                     </View>
                   )}
                 </View>
@@ -339,7 +333,7 @@ export default function KYCVerificationScreen() {
                     </Text>
                   </View>
                 ) : (
-                  <Text style={styles.notUploadedText}>Not uploaded</Text>
+                  <Text style={styles.notUploadedText}>{t('kyc.notUploaded')}</Text>
                 )}
               </View>
 
@@ -369,29 +363,29 @@ export default function KYCVerificationScreen() {
       </View>
 
       <View style={styles.benefitsCard}>
-        <Text style={styles.benefitsTitle}>Benefits of Verification</Text>
+        <Text style={styles.benefitsTitle}>{t('kyc.benefitsTitle')}</Text>
         <View style={styles.benefit}>
           <Ionicons name="arrow-up-circle" size={20} color="#34C759" />
-          <Text style={styles.benefitText}>Higher transaction limits ($50,000+)</Text>
+          <Text style={styles.benefitText}>{t('kyc.higherLimits')}</Text>
         </View>
         <View style={styles.benefit}>
           <Ionicons name="flash" size={20} color="#34C759" />
-          <Text style={styles.benefitText}>Instant withdrawals</Text>
+          <Text style={styles.benefitText}>{t('kyc.instantWithdrawals')}</Text>
         </View>
         <View style={styles.benefit}>
           <Ionicons name="shield-checkmark" size={20} color="#34C759" />
-          <Text style={styles.benefitText}>Enhanced security features</Text>
+          <Text style={styles.benefitText}>{t('kyc.enhancedSecurity')}</Text>
         </View>
         <View style={styles.benefit}>
           <Ionicons name="globe" size={20} color="#34C759" />
-          <Text style={styles.benefitText}>International transfers</Text>
+          <Text style={styles.benefitText}>{t('kyc.internationalTransfers')}</Text>
         </View>
       </View>
 
       <View style={styles.privacyNote}>
         <Ionicons name="lock-closed" size={16} color="#657786" />
         <Text style={styles.privacyText}>
-          Your documents are encrypted and stored securely. We never share your personal information without your consent.
+          {t('kyc.privacyNote')}
         </Text>
       </View>
     </ScrollView>

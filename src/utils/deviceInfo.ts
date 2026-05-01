@@ -43,6 +43,36 @@ export async function getDeviceFingerprint(): Promise<string> {
   return fingerprint;
 }
 
+const PERSISTENT_DEVICE_ID_KEY = 'device_id';
+
+/**
+ * Get (or create) a stable UUID for this device installation.
+ * Generated ONCE via UUID v4, stored in SecureStore under 'device_id'.
+ * This is the canonical identifier used for abuse-protection headers.
+ */
+export async function getDeviceId(): Promise<string> {
+  try {
+    const stored = await SecureStore.getItemAsync(PERSISTENT_DEVICE_ID_KEY);
+    if (stored) return stored;
+  } catch (e) {
+    if (__DEV__) console.warn('SecureStore read failed for device_id', e);
+  }
+
+  // UUID v4 generation without external dependency
+  const id = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+
+  try {
+    await SecureStore.setItemAsync(PERSISTENT_DEVICE_ID_KEY, id);
+  } catch (e) {
+    if (__DEV__) console.warn('SecureStore write failed for device_id', e);
+  }
+
+  return id;
+}
+
 /**
  * Get human-readable device information
  */

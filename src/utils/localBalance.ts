@@ -12,6 +12,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const BALANCE_KEY = '@egwallet_local_balances_v1';
 const TX_KEY = '@egwallet_local_transactions_v1';
 const LAST_DEBIT_KEY = '@egwallet_last_debit_v1';
+const PENDING_WITHDRAWAL_KEY = '@egwallet_pending_withdrawal_v1';
 
 /** Map of ISO currency code → amount in **minor units** (e.g. cents). */
 export type LocalBalances = Record<string, number>;
@@ -66,6 +67,48 @@ export async function debitLocalBalance(
   return balances;
 }
 
+/** Get the locally tracked pending withdrawal amounts (in minor units, per currency). */
+export async function getPendingWithdrawals(): Promise<Record<string, number>> {
+  try {
+    const raw = await AsyncStorage.getItem(PENDING_WITHDRAWAL_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Mark an amount as "pending withdrawal" for the given currency.
+ * Called BEFORE the POST /withdrawals request is sent, so the UI
+ * can immediately show the reduced available balance.
+ */
+export async function addPendingWithdrawal(
+  currency: string,
+  minorAmount: number
+): Promise<void> {
+  try {
+    const pending = await getPendingWithdrawals();
+    pending[currency] = (pending[currency] || 0) + Math.abs(minorAmount);
+    await AsyncStorage.setItem(PENDING_WITHDRAWAL_KEY, JSON.stringify(pending));
+  } catch { /* non-critical */ }
+}
+
+/**
+ * Clear (or reduce) a pending withdrawal once the backend has confirmed
+ * or rejected the request.
+ */
+export async function clearPendingWithdrawal(
+  currency: string,
+  minorAmount: number
+): Promise<void> {
+  try {
+    const pending = await getPendingWithdrawals();
+    pending[currency] = Math.max(0, (pending[currency] || 0) - Math.abs(minorAmount));
+    if (pending[currency] === 0) delete pending[currency];
+    await AsyncStorage.setItem(PENDING_WITHDRAWAL_KEY, JSON.stringify(pending));
+  } catch { /* non-critical */ }
+}
+
 /** Log a transaction to the local history (max 100 entries). */
 export async function logLocalTransaction(
   tx: Omit<LocalTransaction, 'id' | 'status' | 'timestamp'>
@@ -93,6 +136,7 @@ export async function clearLocalUserData(): Promise<void> {
       TX_KEY,
       '@egwallet_budgets_v1',
       LAST_DEBIT_KEY,
+      PENDING_WITHDRAWAL_KEY,
     ]);
   } catch {
     // ignore
@@ -133,6 +177,14 @@ export async function syncLocalBalancesFromBackend(
     for (const b of primary.balances || []) {
       const hasDebitRecord = !!debitTimes[b.currency];
       const localAmt = localBals[b.currency];
+
+      // Ephemeral-backend reset guard (e.g. Railway db.json wiped on restart):
+      // If the backend returns 0 but we have local funds, the server likely lost
+      // its state. Keep local balance in all cases — debitTimes irrelevant here.
+      if (b.amount === 0 && localAmt !== undefined && localAmt > 0) {
+        synced[b.currency] = localAmt;
+        continue;
+      }
 
       if (hasDebitRecord && localAmt !== undefined) {
         if (b.amount <= localAmt) {

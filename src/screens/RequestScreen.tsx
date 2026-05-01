@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
+import { useLanguage } from '../i18n/LanguageContext';
 import { listWallets } from '../api/auth';
 import { API_BASE } from '../api/client';
 import { getCurrencySymbol, majorToMinor } from '../utils/currency';
@@ -57,6 +58,7 @@ const DEMO_WALLET_ID = 'egwallet-demo-001'; // fallback only
 
 export default function RequestScreen() {
   const auth = useAuth();
+  const { t } = useLanguage();
   const { isOnline } = useNetworkStatus();
   const toast = useToast();
 
@@ -146,17 +148,17 @@ export default function RequestScreen() {
   const handleContactSubmit = async () => {
     if (__DEV__) console.log('[Request] Contact submit pressed');
     if (!contactFirstName.trim()) {
-      return Alert.alert('Missing Info', 'Please enter a first name.');
+      return Alert.alert(t('send.missingInfo'), t('request.missingFirstName'));
     }
     if (!contactLastName.trim()) {
-      return Alert.alert('Missing Info', 'Please enter a last name.');
+      return Alert.alert(t('send.missingInfo'), t('request.missingLastName'));
     }
     if (!contactInfo.trim()) {
-      return Alert.alert('Missing Info', 'Please enter an email or phone number.');
+      return Alert.alert(t('send.missingInfo'), t('request.missingContactMsg'));
     }
     const amountNum = parseFloat(contactAmount.replace(/,/g, ''));
     if (!contactAmount || isNaN(amountNum) || amountNum <= 0) {
-      return Alert.alert('Invalid Amount', 'Please enter a valid amount greater than 0.');
+      return Alert.alert(t('common.invalidAmount'), t('request.invalidAmount'));
     }
     if (isSendingContact) return;
 
@@ -215,9 +217,9 @@ export default function RequestScreen() {
     setContactNote('');
     setIsSendingContact(false);
     if (__DEV__) console.log('[Request] Contact request created:', req.id);
-    toast.show('Request sent ✅');
+    toast.show(t('request.requestSentToast'));
     Alert.alert(
-      '✅ Request Sent',
+      t('request.sentTitle'),
       `Your request to ${req.firstName} ${req.lastName} for ${getCurrencySymbol(req.currency)}${amountNum.toFixed(2)} ${req.currency} has been sent successfully.`
     );
   };
@@ -225,10 +227,10 @@ export default function RequestScreen() {
   // ── Add Employee ──────────────────────────────────────────────────────────
 
   const handleAddEmployee = () => {
-    if (!empFirstName.trim()) return Alert.alert('Missing Info', 'Please enter a first name.');
-    if (!empLastName.trim()) return Alert.alert('Missing Info', 'Please enter a last name.');
+    if (!empFirstName.trim()) return Alert.alert(t('send.missingInfo'), t('request.missingFirstName'));
+    if (!empLastName.trim()) return Alert.alert(t('send.missingInfo'), t('request.missingLastName'));
     if (!empEmail.trim() || !empEmail.includes('@')) {
-      return Alert.alert('Invalid Email', 'Please enter a valid email address.');
+      return Alert.alert(t('common.error'), t('request.invalidEmail'));
     }
     const emp: Employee = {
       id: uid(),
@@ -241,7 +243,7 @@ export default function RequestScreen() {
     setEmpLastName('');
     setEmpEmail('');
     setShowAddEmployee(false);
-    Alert.alert('✅ Employee Added', `${emp.firstName} ${emp.lastName} has been added to your team.`);
+    Alert.alert(t('request.employeeAddedTitle'), `${emp.firstName} ${emp.lastName} ${t('request.employeeAddedMsg')}`);
   };
 
   // ── Payroll request ───────────────────────────────────────────────────────
@@ -249,21 +251,21 @@ export default function RequestScreen() {
   const handlePayrollSubmit = () => {
     if (__DEV__) console.log('[Request] Payroll submit pressed');
     if (!selectedEmployee) {
-      return Alert.alert('Select Employee', 'Please select an employee first.');
+      return Alert.alert(t('common.error'), t('request.selectEmployee'));
     }
     const amountNum = parseFloat(payrollAmount.replace(/,/g, ''));
     if (!payrollAmount || isNaN(amountNum) || amountNum <= 0) {
-      return Alert.alert('Invalid Amount', 'Please enter a valid amount.');
+      return Alert.alert(t('common.invalidAmount'), t('request.invalidAmount'));
     }
     if (isSendingPayroll) return;
 
     Alert.alert(
-      'Confirm Payroll Request',
+      t('request.confirmPayrollTitle'),
       `Request ${getCurrencySymbol(payrollCurrency)}${amountNum.toFixed(2)} ${payrollCurrency} from ${selectedEmployee.firstName} ${selectedEmployee.lastName}?`,
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Send Request',
+          text: t('request.sendRequestBtn'),
           onPress: () => {
             setIsSendingPayroll(true);
             setTimeout(() => {
@@ -292,8 +294,8 @@ export default function RequestScreen() {
               setSelectedEmployee(null);
               setIsSendingPayroll(false);
               if (__DEV__) console.log('[Request] Employer request created:', req.id);
-              toast.show('Request sent ✅');
-              Alert.alert('✅ Request Sent', `Payment request sent to ${req.firstName} ${req.lastName}.`);
+              toast.show(t('request.requestSentToast'));
+              Alert.alert(t('request.sentTitle'), `${t('request.payrollSentMsg')} ${req.firstName} ${req.lastName}.`);
             }, 600);
           },
         },
@@ -304,10 +306,10 @@ export default function RequestScreen() {
   // ── Cancel / Share ────────────────────────────────────────────────────────
 
   const handleCancelRequest = (id: string) => {
-    Alert.alert('Cancel Request', 'Are you sure?', [
-      { text: 'No', style: 'cancel' },
+    Alert.alert(t('request.cancelRequestTitle'), t('common.areYouSure'), [
+      { text: t('common.no'), style: 'cancel' },
       {
-        text: 'Yes, Cancel',
+        text: t('request.yesCancel'),
         style: 'destructive',
         onPress: () => setRequests(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled' } : r)),
       },
@@ -327,13 +329,13 @@ export default function RequestScreen() {
     if (__DEV__) console.log('[Request] Generate QR pressed');
     const amountNum = parseFloat(qrAmount.replace(/,/g, ''));
     if (!qrAmount || isNaN(amountNum) || amountNum <= 0) {
-      return Alert.alert('Invalid Amount', 'Please enter a valid amount.');
+      return Alert.alert(t('common.invalidAmount'), t('request.invalidAmount'));
     }
     setDynamicQR({
       value: JSON.stringify({
         type: 'payment_request',
         walletId: realWalletId,
-        amount: amountNum,
+        amount: majorToMinor(amountNum, qrCurrency),
         currency: qrCurrency,
         memo: qrMemo || qrPurpose || 'Payment',
         requestId: `req-${Date.now()}`,
@@ -355,7 +357,7 @@ export default function RequestScreen() {
       <OfflineErrorBanner visible={!isOnline} onRetry={() => {}} />
 
       <View style={styles.header}>
-        <Text style={styles.title}>Request</Text>
+        <Text style={styles.title}>{t('request.title')}</Text>
       </View>
 
       {/* Tabs */}
@@ -373,7 +375,7 @@ export default function RequestScreen() {
               color={activeTab === tab ? '#fff' : '#657786'}
             />
             <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-              {tab === 'contact' ? 'Contact' : tab === 'employer' ? 'Employer' : 'QR Code'}
+              {tab === 'contact' ? t('request.contactTab') : tab === 'employer' ? t('request.employerTab') : t('request.qrTab')}
             </Text>
           </TouchableOpacity>
         ))}
@@ -383,11 +385,11 @@ export default function RequestScreen() {
       {activeTab === 'contact' && (
         <>
           <View style={styles.form}>
-            <Text style={styles.formSectionTitle}>Request Money From</Text>
+            <Text style={styles.formSectionTitle}>{t('request.from')}</Text>
 
             <View style={styles.nameRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.label}>First Name</Text>
+                <Text style={styles.label}>{t('request.firstName')}</Text>
                 <TextInput
                   style={styles.input}
                   value={contactFirstName}
@@ -398,7 +400,7 @@ export default function RequestScreen() {
                 />
               </View>
               <View style={{ flex: 1, marginLeft: 10 }}>
-                <Text style={styles.label}>Last Name</Text>
+                <Text style={styles.label}>{t('request.lastName')}</Text>
                 <TextInput
                   style={styles.input}
                   value={contactLastName}
@@ -410,7 +412,7 @@ export default function RequestScreen() {
               </View>
             </View>
 
-            <Text style={styles.label}>Email or Phone</Text>
+            <Text style={styles.label}>{t('request.emailOrPhone')}</Text>
             <TextInput
               style={styles.input}
               value={contactInfo}
@@ -423,7 +425,7 @@ export default function RequestScreen() {
 
             <View style={styles.amountRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.label}>Amount</Text>
+                <Text style={styles.label}>{t('request.amount')}</Text>
                 <TextInput
                   style={styles.input}
                   value={contactAmount}
@@ -434,7 +436,7 @@ export default function RequestScreen() {
                 />
               </View>
               <View style={{ marginLeft: 12, minWidth: 90 }}>
-                <Text style={styles.label}>Currency</Text>
+                <Text style={styles.label}>{t('request.currency')}</Text>
                 <TouchableOpacity
                   style={styles.currencyPicker}
                   onPress={() => setCurrencyModalFor('contact')}
@@ -446,12 +448,12 @@ export default function RequestScreen() {
               </View>
             </View>
 
-            <Text style={styles.label}>Note (Optional)</Text>
+            <Text style={styles.label}>{t('request.noteOptionalLabel')}</Text>
             <TextInput
               style={[styles.input, styles.memoInput]}
               value={contactNote}
               onChangeText={setContactNote}
-              placeholder="What's this for?"
+              placeholder={t('request.notePlaceholder')}
               placeholderTextColor="#999"
               multiline
             />
@@ -467,7 +469,7 @@ export default function RequestScreen() {
                 : (
                   <>
                     <Ionicons name="send" size={20} color="#FFFFFF" />
-                    <Text style={styles.createButtonText}>Send Request</Text>
+                    <Text style={styles.createButtonText}>{t('request.sendRequest')}</Text>
                   </>
                 )
               }
@@ -477,7 +479,7 @@ export default function RequestScreen() {
           {/* Contact History */}
           {contactRequests.length > 0 && (
             <>
-              <Text style={styles.historyTitle}>Request History</Text>
+              <Text style={styles.historyTitle}>{t('request.history')}</Text>
               {contactRequests.map(req => (
                 <View key={req.id} style={styles.requestCard}>
                   <View style={styles.requestHeader}>
@@ -506,11 +508,11 @@ export default function RequestScreen() {
                     <View style={styles.actions}>
                       <TouchableOpacity style={styles.shareButton} onPress={() => handleShare(req)}>
                         <Ionicons name="share-social" size={18} color="#007AFF" />
-                        <Text style={styles.shareButtonText}>Share</Text>
+                        <Text style={styles.shareButtonText}>{t('common.share')}</Text>
                       </TouchableOpacity>
                       <TouchableOpacity style={styles.cancelButton} onPress={() => handleCancelRequest(req.id)}>
                         <Ionicons name="close-circle" size={18} color="#d32f2f" />
-                        <Text style={styles.cancelButtonText}>Cancel</Text>
+                        <Text style={styles.cancelButtonText}>{t('request.cancelRequest')}</Text>
                       </TouchableOpacity>
                     </View>
                   )}
@@ -525,23 +527,23 @@ export default function RequestScreen() {
       {activeTab === 'employer' && (
         <>
           <View style={styles.employerSectionHeader}>
-            <Text style={styles.formSectionTitle}>Team Members</Text>
+            <Text style={styles.formSectionTitle}>{t('request.teamMembers')}</Text>
             <TouchableOpacity
               style={styles.addEmployeeBtn}
               onPress={() => setShowAddEmployee(v => !v)}
               activeOpacity={0.8}
             >
               <Ionicons name={showAddEmployee ? 'close' : 'person-add'} size={16} color="#007AFF" />
-              <Text style={styles.addEmployeeBtnText}>{showAddEmployee ? 'Cancel' : 'Add Employee'}</Text>
+              <Text style={styles.addEmployeeBtnText}>{showAddEmployee ? t('common.cancel') : t('request.addEmployeeBtn')}</Text>
             </TouchableOpacity>
           </View>
 
           {/* Add Employee Form */}
           {showAddEmployee && (
             <View style={[styles.form, { marginBottom: 12 }]}>
-              <Text style={styles.formSectionTitle}>New Employee</Text>
+              <Text style={styles.formSectionTitle}>{t('request.newEmployee')}</Text>
 
-              <Text style={styles.label}>First Name</Text>
+              <Text style={styles.label}>{t('request.firstName')}</Text>
               <TextInput
                 style={styles.input}
                 value={empFirstName}
@@ -550,7 +552,7 @@ export default function RequestScreen() {
                 placeholderTextColor="#999"
                 autoCapitalize="words"
               />
-              <Text style={styles.label}>Last Name</Text>
+              <Text style={styles.label}>{t('request.lastName')}</Text>
               <TextInput
                 style={styles.input}
                 value={empLastName}
@@ -559,7 +561,7 @@ export default function RequestScreen() {
                 placeholderTextColor="#999"
                 autoCapitalize="words"
               />
-              <Text style={styles.label}>Email</Text>
+              <Text style={styles.label}>{t('request.email')}</Text>
               <TextInput
                 style={styles.input}
                 value={empEmail}
@@ -572,7 +574,7 @@ export default function RequestScreen() {
 
               <TouchableOpacity style={styles.createButton} onPress={handleAddEmployee} activeOpacity={0.8}>
                 <Ionicons name="person-add" size={18} color="#FFFFFF" />
-                <Text style={styles.createButtonText}>Save Employee</Text>
+                <Text style={styles.createButtonText}>{t('request.saveEmployee')}</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -581,14 +583,14 @@ export default function RequestScreen() {
           {employees.length === 0 && !showAddEmployee && (
             <View style={styles.emptyContainer}>
               <Ionicons name="people-outline" size={56} color="#CCCCCC" />
-              <Text style={styles.emptyTitle}>No Employees Yet</Text>
-              <Text style={styles.emptyText}>Add employees to request payments from them</Text>
+              <Text style={styles.emptyTitle}>{t('request.noEmployees')}</Text>
+              <Text style={styles.emptyText}>{t('request.addEmployee')}</Text>
               <TouchableOpacity
                 style={[styles.createButton, { marginTop: 20, paddingHorizontal: 24 }]}
                 onPress={() => setShowAddEmployee(true)}
               >
                 <Ionicons name="person-add" size={18} color="#FFFFFF" />
-                <Text style={styles.createButtonText}>Add First Employee</Text>
+                <Text style={styles.createButtonText}>{t('request.addFirstEmployee')}</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -618,11 +620,11 @@ export default function RequestScreen() {
           {/* Payroll Request Form */}
           {selectedEmployee && (
             <View style={[styles.form, { marginTop: 8 }]}>
-              <Text style={styles.formSectionTitle}>Request from {selectedEmployee.firstName}</Text>
+              <Text style={styles.formSectionTitle}>{t('request.requestFrom')} {selectedEmployee.firstName}</Text>
 
               <View style={styles.amountRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Amount</Text>
+                  <Text style={styles.label}>{t('request.amount')}</Text>
                   <TextInput
                     style={styles.input}
                     value={payrollAmount}
@@ -633,7 +635,7 @@ export default function RequestScreen() {
                   />
                 </View>
                 <View style={{ marginLeft: 12, minWidth: 90 }}>
-                  <Text style={styles.label}>Currency</Text>
+                  <Text style={styles.label}>{t('request.currency')}</Text>
                   <TouchableOpacity
                     style={styles.currencyPicker}
                     onPress={() => setCurrencyModalFor('employer')}
@@ -645,12 +647,12 @@ export default function RequestScreen() {
                 </View>
               </View>
 
-              <Text style={styles.label}>Note (Optional)</Text>
+              <Text style={styles.label}>{t('request.noteOptionalLabel')}</Text>
               <TextInput
                 style={[styles.input, styles.memoInput]}
                 value={payrollNote}
                 onChangeText={setPayrollNote}
-                placeholder="January salary, bonus..."
+                placeholder={t('request.memoPlaceholder')}
                 placeholderTextColor="#999"
                 multiline
               />
@@ -666,7 +668,7 @@ export default function RequestScreen() {
                   : (
                     <>
                       <Ionicons name="send" size={18} color="#FFFFFF" />
-                      <Text style={styles.createButtonText}>Send Request</Text>
+                      <Text style={styles.createButtonText}>{t('request.sendRequest')}</Text>
                     </>
                   )
                 }
@@ -677,7 +679,7 @@ export default function RequestScreen() {
           {/* Payroll History */}
           {employerRequests.length > 0 && (
             <>
-              <Text style={styles.historyTitle}>Payroll Requests</Text>
+              <Text style={styles.historyTitle}>{t('request.payrollRequests')}</Text>
               {employerRequests.map(req => (
                 <View key={req.id} style={styles.requestCard}>
                   <View style={styles.requestHeader}>
@@ -706,7 +708,7 @@ export default function RequestScreen() {
                     <View style={styles.actions}>
                       <TouchableOpacity style={styles.cancelButton} onPress={() => handleCancelRequest(req.id)}>
                         <Ionicons name="close-circle" size={18} color="#d32f2f" />
-                        <Text style={styles.cancelButtonText}>Cancel</Text>
+                        <Text style={styles.cancelButtonText}>{t('request.cancelRequest')}</Text>
                       </TouchableOpacity>
                     </View>
                   )}
@@ -724,15 +726,15 @@ export default function RequestScreen() {
           <View style={styles.qrCard}>
             <View style={styles.qrCardHeader}>
               <Ionicons name="qr-code" size={22} color="#007AFF" />
-              <Text style={styles.qrCardTitle}>Your Wallet QR Code</Text>
+              <Text style={styles.qrCardTitle}>{t('request.staticQr')}</Text>
             </View>
             <Text style={styles.qrCardSub}>
-              Show this to anyone with EGWallet — they scan and pay you instantly. Perfect for grocery stores, bars, and open markets.
+              {t('request.qrDesc')}
             </Text>
             <View style={[styles.qrCenter, { marginTop: 4 }]}>
               <View style={styles.egwalletOnlyBadge}>
                 <Ionicons name="phone-portrait-outline" size={13} color="#1565C0" />
-                <Text style={styles.egwalletOnlyText}> Requires EGWallet app to scan</Text>
+                <Text style={styles.egwalletOnlyText}> {t('request.requiresApp')}</Text>
               </View>
               {staticQRValue ? (
                 <QRCode value={staticQRValue} size={200} backgroundColor="white" />
@@ -741,19 +743,19 @@ export default function RequestScreen() {
                   <Ionicons name="qr-code" size={80} color="#E1E8ED" />
                 </View>
               )}
-              <Text style={styles.qrPermanentLabel}>Permanent · No expiry</Text>
+              <Text style={styles.qrPermanentLabel}>{t('request.permanentNoExpiry')}</Text>
             </View>
           </View>
 
           {/* Divider */}
           <View style={styles.orDivider}>
             <View style={styles.orLine} />
-            <Text style={styles.orText}>OR REQUEST SPECIFIC AMOUNT</Text>
+            <Text style={styles.orText}>{t('request.orRequestAmount')}</Text>
             <View style={styles.orLine} />
           </View>
 
           {/* Purpose presets */}
-          <Text style={styles.label}>Select Purpose</Text>
+          <Text style={styles.label}>{t('request.purpose')}</Text>
           <View style={styles.purposeRow}>
             {QR_PURPOSES.map(p => (
               <TouchableOpacity
@@ -771,7 +773,7 @@ export default function RequestScreen() {
 
           <View style={styles.amountRow}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.label}>Amount</Text>
+              <Text style={styles.label}>{t('request.amount')}</Text>
               <TextInput
                 style={styles.input}
                 value={qrAmount}
@@ -782,7 +784,7 @@ export default function RequestScreen() {
               />
             </View>
             <View style={{ marginLeft: 12, minWidth: 90 }}>
-              <Text style={styles.label}>Currency</Text>
+              <Text style={styles.label}>{t('request.currency')}</Text>
               <TouchableOpacity
                 style={styles.currencyPicker}
                 onPress={() => setCurrencyModalFor('qr')}
@@ -809,14 +811,14 @@ export default function RequestScreen() {
             activeOpacity={0.8}
           >
             <Ionicons name="qr-code" size={20} color="#FFFFFF" />
-            <Text style={styles.createButtonText}>Generate QR Code</Text>
+            <Text style={styles.createButtonText}>{t('request.generateDynamic')}</Text>
           </TouchableOpacity>
 
           {dynamicQR && (
             <View style={styles.generatedQRCard}>
               <View style={styles.qrCardHeader}>
                 <Ionicons name="checkmark-circle" size={22} color="#2E7D32" />
-                <Text style={[styles.qrCardTitle, { color: '#2E7D32' }]}>QR Code Ready</Text>
+                <Text style={[styles.qrCardTitle, { color: '#2E7D32' }]}>{t('request.qrReady')}</Text>
               </View>
               <View style={styles.qrCenter}>
                 <QRCode value={dynamicQR.value} size={200} backgroundColor="white" />
@@ -828,7 +830,7 @@ export default function RequestScreen() {
                 style={styles.clearQRButton}
                 onPress={() => { setDynamicQR(null); setQrAmount(''); setQrMemo(''); setQrPurpose(''); }}
               >
-                <Text style={styles.clearQRText}>Generate New QR</Text>
+                <Text style={styles.clearQRText}>{t('request.generateNew')}</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -841,7 +843,7 @@ export default function RequestScreen() {
       <Modal visible={currencyModalFor !== null} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
-            <Text style={styles.modalTitle}>Select Currency</Text>
+            <Text style={styles.modalTitle}>{t('common.selectCurrency')}</Text>
             <FlatList
               data={ALL_CURRENCIES}
               keyExtractor={c => c}
@@ -864,7 +866,7 @@ export default function RequestScreen() {
               }}
             />
             <TouchableOpacity style={styles.modalClose} onPress={() => setCurrencyModalFor(null)}>
-              <Text style={styles.modalCloseText}>Cancel</Text>
+              <Text style={styles.modalCloseText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
           </View>
         </View>

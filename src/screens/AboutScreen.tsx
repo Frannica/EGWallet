@@ -3,30 +3,32 @@ import { View, Text, ScrollView, Linking, Alert, TouchableOpacity, StyleSheet } 
 import { Ionicons } from '@expo/vector-icons';
 import config from '../config/env';
 import { FEE_SCHEDULE } from '../config/fees';
+import { useLanguage } from '../i18n/LanguageContext';
 
 export default function AboutScreen() {
+  const { t } = useLanguage();
   const appVersion = '1.0.0';
   const buildNumber = '2';
-  const environment = __DEV__ ? 'Development' : 'Production';
+  const environment = __DEV__ ? t('about.development') : t('about.production');
   const apiUrl = config.API_BASE_URL;
 
   const handlePrivacyPolicy = async () => {
-    const url = 'https://egwallet.com/privacy';
+    const url = 'https://www.egwalletfinance.com/privacy';
     const supported = await Linking.canOpenURL(url);
     if (supported) {
       await Linking.openURL(url);
     } else {
-      Alert.alert('Cannot open link', `Please visit ${url}`);
+      Alert.alert(t('about.cannotOpenLink'), `${t('about.visitUrl')} ${url}`);
     }
   };
 
   const handleTerms = async () => {
-    const url = 'https://egwallet.com/terms';
+    const url = 'https://www.egwalletfinance.com/terms';
     const supported = await Linking.canOpenURL(url);
     if (supported) {
       await Linking.openURL(url);
     } else {
-      Alert.alert('Cannot open link', `Please visit ${url}`);
+      Alert.alert(t('about.cannotOpenLink'), `${t('about.visitUrl')} ${url}`);
     }
   };
 
@@ -44,33 +46,33 @@ export default function AboutScreen() {
             <Ionicons name="wallet" size={48} color="#007AFF" />
           </View>
           <Text style={styles.appName}>EGWallet</Text>
-          <Text style={styles.tagline}>Multi-currency wallet for Africa</Text>
+          <Text style={styles.tagline}>{t('about.tagline')}</Text>
         </View>
 
         {/* Version Info */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Ionicons name="information-circle" size={24} color="#007AFF" />
-            <Text style={styles.cardTitle}>Release Information</Text>
+            <Text style={styles.cardTitle}>{t('about.releaseInfo')}</Text>
           </View>
           <View style={styles.infoItem}>
             <Ionicons name="code" size={20} color="#657786" />
-            <Text style={styles.infoLabel}>Version:</Text>
+            <Text style={styles.infoLabel}>{t('about.version')}</Text>
             <Text style={styles.infoValue}>{appVersion}</Text>
           </View>
           <View style={styles.infoItem}>
             <Ionicons name="hammer" size={20} color="#657786" />
-            <Text style={styles.infoLabel}>Build:</Text>
+            <Text style={styles.infoLabel}>{t('about.build')}</Text>
             <Text style={styles.infoValue}>{buildNumber}</Text>
           </View>
           <View style={styles.infoItem}>
             <Ionicons name="server" size={20} color="#657786" />
-            <Text style={styles.infoLabel}>Environment:</Text>
+            <Text style={styles.infoLabel}>{t('about.environment')}</Text>
             <Text style={styles.infoValue}>{environment}</Text>
           </View>
           <View style={[styles.infoItem, { borderBottomWidth: 0 }]}>
             <Ionicons name="link" size={20} color="#657786" />
-            <Text style={styles.infoLabel}>API:</Text>
+            <Text style={styles.infoLabel}>{t('about.api')}</Text>
             <Text style={[styles.infoValue, { fontSize: 11 }]} numberOfLines={1}>
               {__DEV__ ? apiUrl : 'app.egwallet.com'}
             </Text>
@@ -81,39 +83,39 @@ export default function AboutScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Ionicons name="list" size={24} color="#007AFF" />
-            <Text style={styles.cardTitle}>Supported Features</Text>
+            <Text style={styles.cardTitle}>{t('about.features')}</Text>
           </View>
           <View style={styles.featureItem}>
             <Ionicons name="checkmark-circle" size={20} color="#2E7D32" />
-            <Text style={styles.featureText}>Multi-currency wallets (32+ currencies)</Text>
+            <Text style={styles.featureText}>{t('about.feature1')}</Text>
           </View>
           <View style={styles.featureItem}>
             <Ionicons name="checkmark-circle" size={20} color="#2E7D32" />
-            <Text style={styles.featureText}>Send money between wallets</Text>
+            <Text style={styles.featureText}>{t('about.feature2')}</Text>
           </View>
           <View style={styles.featureItem}>
             <Ionicons name="checkmark-circle" size={20} color="#2E7D32" />
-            <Text style={styles.featureText}>Real-time exchange rates</Text>
+            <Text style={styles.featureText}>{t('about.feature3')}</Text>
           </View>
           <View style={styles.featureItem}>
             <Ionicons name="checkmark-circle" size={20} color="#2E7D32" />
-            <Text style={styles.featureText}>Transaction history</Text>
+            <Text style={styles.featureText}>{t('about.feature4')}</Text>
           </View>
           <View style={styles.featureItem}>
             <Ionicons name="checkmark-circle" size={20} color="#2E7D32" />
-            <Text style={styles.featureText}>Payment requests</Text>
+            <Text style={styles.featureText}>{t('about.feature5')}</Text>
           </View>
           <View style={styles.featureItem}>
             <Ionicons name="checkmark-circle" size={20} color="#2E7D32" />
-            <Text style={styles.featureText}>Virtual cards</Text>
+            <Text style={styles.featureText}>{t('about.feature6')}</Text>
           </View>
           <View style={styles.featureItem}>
             <Ionicons name="checkmark-circle" size={20} color="#2E7D32" />
-            <Text style={styles.featureText}>Budget tracking</Text>
+            <Text style={styles.featureText}>{t('about.feature7')}</Text>
           </View>
           <View style={[styles.featureItem, { borderBottomWidth: 0 }]}>
             <Ionicons name="checkmark-circle" size={20} color="#2E7D32" />
-            <Text style={styles.featureText}>Payroll system</Text>
+            <Text style={styles.featureText}>{t('about.feature8')}</Text>
           </View>
         </View>
 
@@ -121,15 +123,15 @@ export default function AboutScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Ionicons name="pricetag" size={24} color="#007AFF" />
-            <Text style={styles.cardTitle}>Limits & Fees</Text>
+            <Text style={styles.cardTitle}>{t('about.limitsAndFees')}</Text>
           </View>
           <View style={styles.limitItem}>
             <Ionicons name="time" size={20} color="#657786" />
-            <Text style={styles.limitText}>Daily sending limit: $5,000 USD per 24 hours</Text>
+            <Text style={styles.limitText}>{t('about.dailyLimit')}</Text>
           </View>
           <View style={styles.limitItem}>
             <Ionicons name="wallet" size={20} color="#657786" />
-            <Text style={styles.limitText}>Wallet capacity: $250,000 USD</Text>
+            <Text style={styles.limitText}>{t('about.walletCap')}</Text>
           </View>
           {/* Fee schedule */}
           <View style={{ marginTop: 8 }}>
@@ -148,32 +150,32 @@ export default function AboutScreen() {
               </View>
             ))}
           </View>
-          <Text style={styles.feeNote}>All fees displayed before confirmation. No hidden charges.</Text>
+          <Text style={styles.feeNote}>{t('about.feeNote')}</Text>
         </View>
 
         {/* Links */}
         <TouchableOpacity style={styles.linkButton} onPress={handlePrivacyPolicy}>
           <Ionicons name="shield" size={20} color="#007AFF" />
-          <Text style={styles.linkText}>Privacy Policy</Text>
+          <Text style={styles.linkText}>{t('about.privacyPolicy')}</Text>
           <Ionicons name="open" size={16} color="#007AFF" />
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.linkButton} onPress={handleTerms}>
           <Ionicons name="document-text" size={20} color="#007AFF" />
-          <Text style={styles.linkText}>Terms of Service</Text>
+          <Text style={styles.linkText}>{t('about.termsOfService')}</Text>
           <Ionicons name="open" size={16} color="#007AFF" />
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.linkButton} onPress={handleSupport}>
           <Ionicons name="mail" size={20} color="#007AFF" />
-          <Text style={styles.linkText}>Contact Support</Text>
+          <Text style={styles.linkText}>{t('about.contactSupport')}</Text>
           <Ionicons name="send" size={16} color="#007AFF" />
         </TouchableOpacity>
 
         {/* Copyright */}
         <View style={styles.footer}>
-          <Text style={styles.copyright}>© 2026 EGWallet. All rights reserved.</Text>
-          <Text style={styles.taglineFooter}>Built for Africa, by Africans.</Text>
+          <Text style={styles.copyright}>{t('about.copyright')}</Text>
+          <Text style={styles.taglineFooter}>{t('about.taglineFooter')}</Text>
         </View>
       </View>
     </ScrollView>

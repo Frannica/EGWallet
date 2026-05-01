@@ -5,7 +5,25 @@ import { login as apiLogin, register as apiRegister, me as apiMe, listWallets } 
 import { API_BASE } from '../api/client';
 import { getDeviceFingerprint, getDeviceDisplayName, getDeviceType } from '../utils/deviceInfo';
 import { clearLocalUserData } from '../utils/localBalance';
-import { detectCountryCode } from '../config/regional';
+import { detectCountryCode, autoDetectRegion } from '../config/regional';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const CURRENCY_DETECTED_KEY = '@egwallet:currency_detected';
+const LANGUAGE_STORAGE_KEY = '@egwallet:language';
+
+async function syncLanguageToBackend(token: string) {
+  try {
+    const lang = await AsyncStorage.getItem(LANGUAGE_STORAGE_KEY);
+    if (!lang) return;
+    await fetch(`${API_BASE}/user/language`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ language: lang }),
+    });
+  } catch {
+    // Non-critical
+  }
+}
 
 type AuthState = {
   user: { id: string; email: string; preferredCurrency?: string; autoConvertIncoming?: boolean; region?: string } | null;
@@ -73,6 +91,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           try {
             const profile = await apiMe(t);
             setUser(profile);
+            syncLanguageToBackend(t);
           } catch (apiError) {
             // Access token invalid — try refresh token before signing out
             if (__DEV__) console.warn('Token restore failed, trying refresh...', apiError);
@@ -150,30 +169,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       try {
         const profile = await apiMe(t);
-        // If the user has no preferredCurrency stored (old account), infer from device locale
+        // If the user has no preferredCurrency stored (old account), infer from device locale.
+        // Guard: only persist to backend once per device via AsyncStorage flag.
         if (!profile.preferredCurrency) {
+          const alreadyDetected = await AsyncStorage.getItem(CURRENCY_DETECTED_KEY).catch(() => null);
           const code = detectCountryCode();
-          if (code) {
-            // Minimal inline map for the login-time fallback — full map lives on backend
-            const FALLBACK: Record<string, string> = {
-              GQ: 'XAF', CM: 'XAF', CF: 'XAF', TD: 'XAF', CG: 'XAF', GA: 'XAF',
-              SN: 'XOF', CI: 'XOF', ML: 'XOF', BF: 'XOF', BJ: 'XOF', NE: 'XOF', TG: 'XOF', GW: 'XOF',
-              NG: 'NGN', GH: 'GHS', ZA: 'ZAR', KE: 'KES', TZ: 'TZS', ET: 'ETB',
-              EG: 'EGP', MA: 'MAD', DZ: 'DZD', TN: 'TND',
-              BR: 'BRL', AR: 'ARS', CL: 'CLP', CO: 'COP', MX: 'MXN', PE: 'PEN',
-              CN: 'CNY', JP: 'JPY', KR: 'KRW', IN: 'INR', ID: 'IDR', PH: 'PHP',
-              SG: 'SGD', MY: 'MYR', TH: 'THB', VN: 'VND', PK: 'PKR',
-              AU: 'AUD', NZ: 'NZD', CA: 'CAD',
-              GB: 'GBP', CH: 'CHF', SE: 'SEK', NO: 'NOK', DK: 'DKK',
-              SA: 'SAR', AE: 'AED', QA: 'QAR', KW: 'KWD',
-              RU: 'RUB', TR: 'TRY', UA: 'UAH',
-            };
-            profile.preferredCurrency = FALLBACK[code] ?? 'USD';
-          } else {
-            profile.preferredCurrency = 'USD';
+          const FALLBACK: Record<string, string> = {
+            GQ: 'XAF', CM: 'XAF', CF: 'XAF', TD: 'XAF', CG: 'XAF', GA: 'XAF',
+            SN: 'XOF', CI: 'XOF', ML: 'XOF', BF: 'XOF', BJ: 'XOF', NE: 'XOF', TG: 'XOF', GW: 'XOF',
+            NG: 'NGN', GH: 'GHS', ZA: 'ZAR', KE: 'KES', TZ: 'TZS', ET: 'ETB',
+            EG: 'EGP', MA: 'MAD', DZ: 'DZD', TN: 'TND',
+            BR: 'BRL', AR: 'ARS', CL: 'CLP', CO: 'COP', MX: 'MXN', PE: 'PEN',
+            CN: 'CNY', JP: 'JPY', KR: 'KRW', IN: 'INR', ID: 'IDR', PH: 'PHP',
+            SG: 'SGD', MY: 'MYR', TH: 'THB', VN: 'VND', PK: 'PKR',
+            AU: 'AUD', NZ: 'NZD', CA: 'CAD',
+            GB: 'GBP', CH: 'CHF', SE: 'SEK', NO: 'NOK', DK: 'DKK',
+            SA: 'SAR', AE: 'AED', QA: 'QAR', KW: 'KWD',
+            RU: 'RUB', TR: 'TRY', UA: 'UAH',
+          };
+          const detected = code ? (FALLBACK[code] ?? 'USD') : 'USD';
+          profile.preferredCurrency = detected;
+          // Persist to backend only once (first time no currency is found)
+          if (!alreadyDetected) {
+            try {
+              await fetch(`${API_BASE}/auth/update-currency`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t}` },
+                body: JSON.stringify({ preferredCurrency: detected }),
+              });
+              await AsyncStorage.setItem(CURRENCY_DETECTED_KEY, '1');
+            } catch {
+              // Non-critical — currency is still set locally
+            }
           }
         }
         setUser(profile);
+        syncLanguageToBackend(t);
       } catch (profileError) {
         // Token saved but profile fetch failed - still allow login
         if (__DEV__) console.warn('Profile fetch failed after login', profileError);
@@ -211,35 +242,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           type: 'Mobile',
         };
       }
-    
-    const res = await apiRegister(email, password, region, deviceInfo);
-    const t = res.token;
-    const rt = res.refreshToken;
-    await SecureStore.setItemAsync(TOKEN_KEY, t);
-    if (rt) await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, rt);
-    await clearLocalUserData();
-    setToken(t);
-    
-    try {
-      const profile = await apiMe(t);
-      setUser(profile);
-    } catch (profileError) {
-      // Token saved but profile fetch failed - still allow signup
-      if (__DEV__) console.warn('Profile fetch failed after signup', profileError);
-      setUser({ id: res.userId || 'unknown', email });
+
+      // Auto-detect region from device locale if caller didn't supply one
+      const effectiveRegion = region ?? (() => {
+        try { return autoDetectRegion(); } catch { return undefined; }
+      })();
+      // Mark detection as done so the signIn path skips the one-time persist
+      AsyncStorage.setItem(CURRENCY_DETECTED_KEY, '1').catch(() => {});
+
+      const res = await apiRegister(email, password, effectiveRegion, deviceInfo);
+      const t = res.token;
+      const rt = res.refreshToken;
+      await SecureStore.setItemAsync(TOKEN_KEY, t);
+      if (rt) await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, rt);
+      await clearLocalUserData();
+      setToken(t);
+
+      try {
+        const profile = await apiMe(t);
+        setUser(profile);
+      } catch (profileError) {
+        // Token saved but profile fetch failed - still allow signup
+        if (__DEV__) console.warn('Profile fetch failed after signup', profileError);
+        setUser({ id: res.userId || 'unknown', email });
+      }
+    } catch (error: any) {
+      // Clear any partial state
+      setToken(null);
+      setUser(null);
+
+      // Re-throw with better error message
+      if (error.message?.includes('connection') || error.message?.includes('network')) {
+        throw new Error('Network error. Please check your internet connection.');
+      }
+      throw error;
     }
-  } catch (error: any) {
-    // Clear any partial state
-    setToken(null);
-    setUser(null);
-    
-    // Re-throw with better error message
-    if (error.message?.includes('connection') || error.message?.includes('network')) {
-      throw new Error('Network error. Please check your internet connection.');
-    }
-    throw error;
   }
-}
 
   async function signOut() {
     // Revoke refresh token on backend

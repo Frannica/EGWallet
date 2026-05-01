@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
 import { majorToMinor } from '../utils/currency';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface Balance {
   currency: string;
@@ -56,6 +57,7 @@ type ActiveTab = 'employees' | 'payroll' | 'history';
 
 export default function EmployerDashboardScreen() {
   const auth = useAuth();
+  const { t } = useLanguage();
 
   const [profile, setProfile] = useState<EmployerProfile | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -169,7 +171,7 @@ export default function EmployerDashboardScreen() {
 
   async function handleRegister() {
     if (!companyName.trim() || !taxId.trim()) {
-      Alert.alert('Error', 'Company name and Tax ID are required');
+      Alert.alert(t('common.error'), t('employer.registerRequired'));
       return;
     }
     setLoading(true);
@@ -204,10 +206,10 @@ export default function EmployerDashboardScreen() {
       });
 
       await loadAll();
-      Alert.alert('Success', `"${companyName}" is now registered and verified!\n\nNext: Add employees, fund your wallet, then run payroll.`);
+      Alert.alert(t('common.success'), t('employer.registrationSuccess'));
     } catch (e: any) {
       // Backend unavailable — show demo success
-      Alert.alert('Company Registered ✅', `"${companyName}" is registered!\n\nNext: Add employees, fund your wallet, then run payroll.`);
+      Alert.alert(t('employer.registrationSuccessDemo'), t('employer.registrationSuccessDemo'));
     } finally {
       setLoading(false);
     }
@@ -225,10 +227,10 @@ export default function EmployerDashboardScreen() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Fund failed');
       await loadProfile();
-      Alert.alert('Wallet Funded', `Added 1,000,000 ${payrollCurrency} to your funding wallet.\nNew balance: ${data.balance.amount.toLocaleString()} ${payrollCurrency}`);
+      Alert.alert(t('employer.walletFunded'), t('employer.walletFundedMsg'));
     } catch (e: any) {
       // Backend unavailable — show demo success
-      Alert.alert('Wallet Funded ✅', `Added 1,000,000 ${payrollCurrency} to your funding wallet.`);
+      Alert.alert(t('employer.walletFundedDemo'), t('employer.walletFundedMsg'));
     } finally {
       setLoading(false);
     }
@@ -236,7 +238,7 @@ export default function EmployerDashboardScreen() {
 
   async function handleAddEmployee() {
     if (!employeeEmail.trim()) {
-      Alert.alert('Error', 'Employee email is required');
+      Alert.alert(t('common.error'), t('employer.employeeEmailRequired'));
       return;
     }
     setLoading(true);
@@ -253,7 +255,7 @@ export default function EmployerDashboardScreen() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to add employee');
       await loadEmployees();
-      Alert.alert('Employee Added', `${employeeEmail} has been added to your payroll list.`);
+      Alert.alert(t('employer.employeeAddedTitle'), t('employer.employeeAdded'));
     } catch (e: any) {
       // Backend unavailable — add employee locally
       const localEmp: Employee = {
@@ -266,7 +268,7 @@ export default function EmployerDashboardScreen() {
         status: 'active',
       };
       setEmployees(prev => [...prev, localEmp]);
-      Alert.alert('Employee Added ✅', `${employeeEmail} has been added to your payroll list.`);
+      Alert.alert(t('employer.employeeAddedDemo'), t('employer.employeeAdded'));
     } finally {
       setLoading(false);
     }
@@ -275,7 +277,7 @@ export default function EmployerDashboardScreen() {
   async function handleUploadPayroll() {
     const readyCount = employees.filter(e => e.walletId && e.status === 'active').length;
     if (readyCount === 0) {
-      Alert.alert('No Employees', 'Add at least one employee with a wallet before uploading payroll.');
+      Alert.alert(t('employer.noEmployeesTitle'), t('employer.noEmployeesAlert'));
       return;
     }
     const preview = employees
@@ -283,7 +285,7 @@ export default function EmployerDashboardScreen() {
       .map(e => `• ${e.workerEmail}: ${payrollAmount} ${payrollCurrency}`)
       .join('\n');
     Alert.alert(
-      'Payroll Loaded ✅',
+      t('employer.payrollLoaded'),
       `${readyCount} employee(s) ready for payment:\n\n${preview}\n\nPress "Run Payroll" to execute.`,
       [{ text: 'OK' }]
     );
@@ -292,13 +294,13 @@ export default function EmployerDashboardScreen() {
   async function handleRunPayroll() {
     const readyEmployees = employees.filter(e => e.walletId && e.status === 'active');
     if (readyEmployees.length === 0) {
-      Alert.alert('No Employees Ready', 'Add employees first. They must be registered EGWallet users with a wallet.');
+      Alert.alert(t('employer.noEmployeesReadyTitle'), t('employer.noEmployeesReadyAlert'));
       return;
     }
 
     const amount = parseFloat(payrollAmount.replace(/,/g, ''));
     if (isNaN(amount) || amount <= 0) {
-      Alert.alert('Invalid Amount', 'Enter a positive payroll amount');
+      Alert.alert(t('common.invalidAmount'), t('employer.invalidAmount'));
       return;
     }
 
@@ -310,7 +312,7 @@ export default function EmployerDashboardScreen() {
 
     if (fundingBalance < totalMinor) {
       Alert.alert(
-        'Insufficient Funds',
+        t('employer.insufficientFunds'),
         `Funding wallet has ${fundingBalance.toLocaleString()} ${payrollCurrency} (minor units), but need ${totalMinor.toLocaleString()}.\n\nTap "Fund Wallet (Demo)" to add test funds.`
       );
       return;
@@ -318,12 +320,12 @@ export default function EmployerDashboardScreen() {
 
     const total = amount * readyEmployees.length; // major units, for display only
     Alert.alert(
-      'Confirm Payroll',
+      t('employer.confirmPayroll'),
       `Pay ${readyEmployees.length} employee(s)?\n\nAmount: ${amount.toLocaleString()} ${payrollCurrency} each\nTotal: ${total.toLocaleString()} ${payrollCurrency}`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Run Payroll',
+          text: t('employer.runPayrollBtn'),
           onPress: async () => {
             setLoading(true);
             try {
@@ -354,7 +356,7 @@ export default function EmployerDashboardScreen() {
               setActiveTab('history');
 
               Alert.alert(
-                data.failureCount === 0 ? 'Payroll Complete ✅' : 'Payroll Partial ⚠️',
+                data.failureCount === 0 ? t('employer.payrollComplete') : t('employer.payrollPartial'),
                 `✅ ${data.successCount} paid successfully\n❌ ${data.failureCount} failed\n\nBatch ID: ${data.batchId}`
               );
             } catch (e: any) {
@@ -375,7 +377,7 @@ export default function EmployerDashboardScreen() {
                 })),
               });
               setActiveTab('history');
-              Alert.alert('Payroll Complete ✅', `✅ ${successCount} employee(s) paid successfully\n\nBatch ID: ${batchId}`);
+              Alert.alert(t('employer.payrollComplete'), t('employer.payrollSuccessMsg').replace('{count}', String(successCount)).replace('{batchId}', batchId));
             } finally {
               setLoading(false);
             }
@@ -399,7 +401,7 @@ export default function EmployerDashboardScreen() {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Loading employer data...</Text>
+        <Text style={styles.loadingText}>{t('employer.loading')}</Text>
       </View>
     );
   }
@@ -416,15 +418,12 @@ export default function EmployerDashboardScreen() {
           <View style={styles.card}>
             <View style={styles.cardHeader}>
               <Ionicons name="business" size={24} color="#007AFF" />
-              <Text style={styles.sectionTitle}>REGISTER AS EMPLOYER</Text>
+              <Text style={styles.sectionTitle}>{t('employer.registerTitle').toUpperCase()}</Text>
             </View>
-            <Text style={styles.helpText}>
-              Set up your employer account to manage employees and run payroll.
-              Pre-filled with demo data — tap Register to get started.
-            </Text>
+            <Text style={styles.helpText}>{t('employer.registerHelp')}</Text>
 
             <View style={styles.formGroup}>
-              <Text style={styles.label}>Company Name *</Text>
+              <Text style={styles.label}>{t('employer.companyName')}</Text>
               <TextInput
                 style={styles.input}
                 value={companyName}
@@ -435,7 +434,7 @@ export default function EmployerDashboardScreen() {
             </View>
 
             <View style={styles.formGroup}>
-              <Text style={styles.label}>Tax ID *</Text>
+              <Text style={styles.label}>{t('employer.taxId')}</Text>
               <TextInput
                 style={styles.input}
                 value={taxId}
@@ -446,7 +445,7 @@ export default function EmployerDashboardScreen() {
             </View>
 
             <View style={styles.formGroup}>
-              <Text style={styles.label}>Number of Employees</Text>
+              <Text style={styles.label}>{t('employer.numEmployees')}</Text>
               <TextInput
                 style={styles.input}
                 value={employeeCount}
@@ -467,7 +466,7 @@ export default function EmployerDashboardScreen() {
                 : (
                   <>
                     <Ionicons name="business" size={18} color="#fff" />
-                    <Text style={styles.primaryButtonText}>Register Employer</Text>
+                    <Text style={styles.primaryButtonText}>{t('employer.registerButton')}</Text>
                   </>
                 )
               }
@@ -482,12 +481,12 @@ export default function EmployerDashboardScreen() {
             <View style={styles.card}>
               <View style={styles.cardHeader}>
                 <Ionicons name="business" size={24} color="#007AFF" />
-                <Text style={styles.sectionTitle}>EMPLOYER PROFILE</Text>
+                <Text style={styles.sectionTitle}>{t('employer.profileTitle').toUpperCase()}</Text>
               </View>
 
               <View style={styles.infoRow}>
                 <Ionicons name="briefcase" size={18} color="#657786" />
-                <Text style={styles.infoLabel}>Company</Text>
+                <Text style={styles.infoLabel}>{t('employer.company')}</Text>
                 <Text style={styles.infoValue} numberOfLines={1}>{profile.companyName}</Text>
               </View>
 
@@ -497,18 +496,18 @@ export default function EmployerDashboardScreen() {
                   size={18}
                   color={profile.verificationStatus === 'verified' ? '#34C759' : '#FF9500'}
                 />
-                <Text style={styles.infoLabel}>Status</Text>
+                <Text style={styles.infoLabel}>{t('employer.status')}</Text>
                 <Text style={[
                   styles.infoValue,
                   { color: profile.verificationStatus === 'verified' ? '#34C759' : '#FF9500' },
                 ]}>
-                  {profile.verificationStatus === 'verified' ? 'Verified ✅' : 'Pending verification...'}
+                  {profile.verificationStatus === 'verified' ? t('employer.verified') : t('employer.pendingVerification')}
                 </Text>
               </View>
 
               <View style={styles.infoRow}>
                 <Ionicons name="wallet" size={18} color="#657786" />
-                <Text style={styles.infoLabel}>Funding Wallet</Text>
+                <Text style={styles.infoLabel}>{t('employer.fundingWallet')}</Text>
                 <Text style={styles.infoValue}>
                   {formatBalance(getFundingBalance())} {payrollCurrency}
                 </Text>
@@ -516,7 +515,7 @@ export default function EmployerDashboardScreen() {
 
               <View style={styles.infoRow}>
                 <Ionicons name="receipt" size={18} color="#657786" />
-                <Text style={styles.infoLabel}>Batches Run</Text>
+                <Text style={styles.infoLabel}>{t('employer.batchesRun')}</Text>
                 <Text style={styles.infoValue}>{profile.totalBatches}</Text>
               </View>
 
@@ -526,7 +525,7 @@ export default function EmployerDashboardScreen() {
                 disabled={loading}
               >
                 <Ionicons name="add-circle" size={18} color="#007AFF" />
-                <Text style={styles.secondaryButtonText}>Fund Wallet (Demo +1,000,000)</Text>
+                <Text style={styles.secondaryButtonText}>{t('employer.fundDemo')}</Text>
               </TouchableOpacity>
             </View>
 
@@ -540,10 +539,10 @@ export default function EmployerDashboardScreen() {
                 >
                   <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
                     {tab === 'employees'
-                      ? `Employees (${employees.length})`
+                      ? `${t('employer.tabEmployees')} (${employees.length})`
                       : tab === 'payroll'
-                        ? 'Run Payroll'
-                        : `History (${payrollHistory.length})`}
+                        ? t('employer.tabPayroll')
+                        : `${t('employer.tabHistory')} (${payrollHistory.length})`}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -554,14 +553,12 @@ export default function EmployerDashboardScreen() {
               <View style={styles.card}>
                 <View style={styles.cardHeader}>
                   <Ionicons name="person-add" size={24} color="#007AFF" />
-                  <Text style={styles.sectionTitle}>ADD EMPLOYEE</Text>
+                  <Text style={styles.sectionTitle}>{t('employer.addEmployeeTitle').toUpperCase()}</Text>
                 </View>
-                <Text style={styles.helpText}>
-                  Employee must be a registered EGWallet user. Pre-filled with your own account for testing.
-                </Text>
+                <Text style={styles.helpText}>{t('employer.addEmployeeHelp')}</Text>
 
                 <View style={styles.formGroup}>
-                  <Text style={styles.label}>Email *</Text>
+                  <Text style={styles.label}>{t('employer.emailRequired')}</Text>
                   <TextInput
                     style={styles.input}
                     value={employeeEmail}
@@ -574,23 +571,23 @@ export default function EmployerDashboardScreen() {
                 </View>
 
                 <View style={styles.formGroup}>
-                  <Text style={styles.label}>Name</Text>
+                  <Text style={styles.label}>{t('employer.nameLabel')}</Text>
                   <TextInput
                     style={styles.input}
                     value={employeeName}
                     onChangeText={setEmployeeName}
-                    placeholder="Full Name"
+                    placeholder={t('employer.placeholderFullName')}
                     placeholderTextColor="#aaa"
                   />
                 </View>
 
                 <View style={styles.formGroup}>
-                  <Text style={styles.label}>Position</Text>
+                  <Text style={styles.label}>{t('employer.positionLabel')}</Text>
                   <TextInput
                     style={styles.input}
                     value={employeePosition}
                     onChangeText={setEmployeePosition}
-                    placeholder="Software Engineer"
+                    placeholder={t('employer.placeholderRole')}
                     placeholderTextColor="#aaa"
                   />
                 </View>
@@ -605,7 +602,7 @@ export default function EmployerDashboardScreen() {
                     : (
                       <>
                         <Ionicons name="person-add" size={18} color="#fff" />
-                        <Text style={styles.primaryButtonText}>Add Employee</Text>
+                        <Text style={styles.primaryButtonText}>{t('employer.addEmployeeButton')}</Text>
                       </>
                     )
                   }
@@ -615,7 +612,7 @@ export default function EmployerDashboardScreen() {
                 {employees.length > 0 && (
                   <View style={styles.employeeList}>
                     <Text style={styles.subSectionTitle}>
-                      Added Employees ({employees.length})
+                      {t('employer.addedEmployees')} ({employees.length})
                     </Text>
                     {employees.map(emp => (
                       <View key={emp.id} style={styles.employeeRow}>
@@ -629,7 +626,7 @@ export default function EmployerDashboardScreen() {
                         </View>
                         <View style={[styles.statusBadge, emp.walletId ? styles.statusGreen : styles.statusOrange]}>
                           <Text style={styles.statusBadgeText}>
-                            {emp.walletId ? '✅ Ready' : '⚠️ No wallet'}
+                            {emp.walletId ? t('employer.ready') : t('employer.noWallet')}
                           </Text>
                         </View>
                       </View>
@@ -644,21 +641,21 @@ export default function EmployerDashboardScreen() {
               <View style={styles.card}>
                 <View style={styles.cardHeader}>
                   <Ionicons name="cash" size={24} color="#007AFF" />
-                  <Text style={styles.sectionTitle}>PAYROLL</Text>
+                  <Text style={styles.sectionTitle}>{t('employer.payrollTitle').toUpperCase()}</Text>
                 </View>
 
                 {employees.length === 0 ? (
                   <View style={styles.emptyState}>
                     <Ionicons name="people-outline" size={40} color="#C1C9D2" />
-                    <Text style={styles.emptyText}>Add employees first to run payroll.</Text>
+                    <Text style={styles.emptyText}>{t('employer.noEmployeesReady')}</Text>
                     <TouchableOpacity onPress={() => setActiveTab('employees')}>
-                      <Text style={styles.linkText}>→ Go to Employees tab</Text>
+                      <Text style={styles.linkText}>{t('employer.goToEmployees')}</Text>
                     </TouchableOpacity>
                   </View>
                 ) : (
                   <>
                     <View style={styles.formGroup}>
-                      <Text style={styles.label}>Amount per Employee</Text>
+                      <Text style={styles.label}>{t('employer.amountPerEmployee')}</Text>
                       <TextInput
                         style={styles.input}
                         value={payrollAmount}
@@ -670,7 +667,7 @@ export default function EmployerDashboardScreen() {
                     </View>
 
                     <View style={styles.formGroup}>
-                      <Text style={styles.label}>Currency</Text>
+                      <Text style={styles.label}>{t('common.currency')}</Text>
                       <TextInput
                         style={styles.input}
                         value={payrollCurrency}
@@ -683,23 +680,23 @@ export default function EmployerDashboardScreen() {
                     </View>
 
                     <View style={styles.formGroup}>
-                      <Text style={styles.label}>Memo</Text>
+                      <Text style={styles.label}>{t('employer.memo')}</Text>
                       <TextInput
                         style={styles.input}
                         value={payrollMemo}
                         onChangeText={setPayrollMemo}
-                        placeholder="Monthly Salary"
+                        placeholder={t('employer.placeholderSalary')}
                         placeholderTextColor="#aaa"
                       />
                     </View>
 
                     {/* Payroll Preview Table */}
-                    <Text style={styles.subSectionTitle}>Payroll Preview</Text>
+                    <Text style={styles.subSectionTitle}>{t('employer.payrollPreview')}</Text>
                     <View style={styles.table}>
                       <View style={styles.tableHeader}>
-                        <Text style={[styles.tableCell, styles.tableCellWide, styles.tableHeaderText]}>Employee</Text>
-                        <Text style={[styles.tableCell, styles.tableHeaderText]}>Amount</Text>
-                        <Text style={[styles.tableCell, styles.tableHeaderText]}>CCY</Text>
+                        <Text style={[styles.tableCell, styles.tableCellWide, styles.tableHeaderText]}>{t('employer.employee')}</Text>
+                        <Text style={[styles.tableCell, styles.tableHeaderText]}>{t('employer.amount')}</Text>
+                        <Text style={[styles.tableCell, styles.tableHeaderText]}>{t('employer.ccy')}</Text>
                       </View>
                       {employees.filter(e => e.status === 'active').map(emp => (
                         <View key={emp.id} style={styles.tableRow}>
@@ -712,7 +709,7 @@ export default function EmployerDashboardScreen() {
                       ))}
                       <View style={styles.tableTotalRow}>
                         <Text style={[styles.tableCell, styles.tableCellWide, styles.tableTotalText]}>
-                          TOTAL ({employees.filter(e => e.status === 'active').length})
+                          {t('employer.total')} ({employees.filter(e => e.status === 'active').length})
                         </Text>
                         <Text style={[styles.tableCell, styles.tableTotalText]}>
                           {((parseFloat(payrollAmount.replace(/,/g, '')) || 0) * employees.filter(e => e.status === 'active').length).toLocaleString()}
@@ -728,7 +725,7 @@ export default function EmployerDashboardScreen() {
                         onPress={handleUploadPayroll}
                       >
                         <Ionicons name="cloud-upload" size={17} color="#007AFF" />
-                        <Text style={styles.secondaryButtonText}>Upload Payroll</Text>
+                        <Text style={styles.secondaryButtonText}>{t('employer.uploadPayroll')}</Text>
                       </TouchableOpacity>
 
                       <TouchableOpacity
@@ -741,7 +738,7 @@ export default function EmployerDashboardScreen() {
                           : (
                             <>
                               <Ionicons name="play" size={17} color="#fff" />
-                              <Text style={styles.primaryButtonText}>Run Payroll</Text>
+                              <Text style={styles.primaryButtonText}>{t('employer.runPayroll')}</Text>
                             </>
                           )
                         }
@@ -757,15 +754,15 @@ export default function EmployerDashboardScreen() {
               <View style={styles.card}>
                 <View style={styles.cardHeader}>
                   <Ionicons name="receipt" size={24} color="#007AFF" />
-                  <Text style={styles.sectionTitle}>PAYROLL HISTORY</Text>
+                  <Text style={styles.sectionTitle}>{t('employer.payrollHistoryTitle').toUpperCase()}</Text>
                 </View>
 
                 {payrollHistory.length === 0 ? (
                   <View style={styles.emptyState}>
                     <Ionicons name="receipt-outline" size={40} color="#C1C9D2" />
-                    <Text style={styles.emptyText}>No payroll batches yet.</Text>
+                    <Text style={styles.emptyText}>{t('employer.noBatches')}</Text>
                     <TouchableOpacity onPress={() => setActiveTab('payroll')}>
-                      <Text style={styles.linkText}>→ Go to Payroll tab</Text>
+                      <Text style={styles.linkText}>{t('employer.goToPayroll')}</Text>
                     </TouchableOpacity>
                   </View>
                 ) : (
@@ -801,7 +798,7 @@ export default function EmployerDashboardScreen() {
           <View style={styles.card}>
             <View style={styles.cardHeader}>
               <Ionicons name="checkmark-circle" size={24} color="#34C759" />
-              <Text style={styles.sectionTitle}>TRANSACTION LOG</Text>
+              <Text style={styles.sectionTitle}>{t('employer.transactionLog').toUpperCase()}</Text>
             </View>
 
             <Text style={styles.batchId} numberOfLines={1}>Batch: {lastBatchResult.batchId}</Text>
@@ -835,7 +832,7 @@ export default function EmployerDashboardScreen() {
               onPress={() => setLastBatchResult(null)}
             >
               <Ionicons name="close" size={16} color="#007AFF" />
-              <Text style={styles.secondaryButtonText}>Dismiss</Text>
+              <Text style={styles.secondaryButtonText}>{t('employer.dismiss')}</Text>
             </TouchableOpacity>
           </View>
         )}

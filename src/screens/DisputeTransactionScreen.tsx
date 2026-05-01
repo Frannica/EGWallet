@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Alert, ActivityIndicator, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
 import { formatCurrency } from '../utils/currency';
+import { useLanguage } from '../i18n/LanguageContext';
+
+const SUPPORT_EMAIL = 'support@egwalletfinance.com';
 
 type DisputeReason = 'unauthorized' | 'wrong_amount' | 'not_received' | 'duplicate' | 'other';
 
@@ -20,6 +23,7 @@ type Transaction = {
 
 export default function DisputeTransactionScreen() {
   const auth = useAuth();
+  const { t } = useLanguage();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [disputeReason, setDisputeReason] = useState<DisputeReason>('unauthorized');
@@ -29,11 +33,11 @@ export default function DisputeTransactionScreen() {
   const [aiSuggestion, setAiSuggestion] = useState('');
 
   const disputeReasons: { value: DisputeReason; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-    { value: 'unauthorized', label: 'Unauthorized Transaction', icon: 'shield-outline' },
-    { value: 'wrong_amount', label: 'Incorrect Amount', icon: 'calculator-outline' },
-    { value: 'not_received', label: 'Payment Not Received', icon: 'close-circle-outline' },
-    { value: 'duplicate', label: 'Duplicate Charge', icon: 'copy-outline' },
-    { value: 'other', label: 'Other Issue', icon: 'ellipsis-horizontal-outline' },
+    { value: 'unauthorized', label: t('dispute.unauthorized'), icon: 'shield-outline' },
+    { value: 'wrong_amount', label: t('dispute.incorrectAmount'), icon: 'calculator-outline' },
+    { value: 'not_received', label: t('dispute.notReceived'), icon: 'close-circle-outline' },
+    { value: 'duplicate', label: t('dispute.duplicate'), icon: 'copy-outline' },
+    { value: 'other', label: t('dispute.otherIssue'), icon: 'ellipsis-horizontal-outline' },
   ];
 
   useEffect(() => {
@@ -77,11 +81,11 @@ export default function DisputeTransactionScreen() {
     if (!selectedTransaction) return;
 
     const reasonLabels: Record<DisputeReason, string> = {
-      unauthorized: 'This appears to be an unauthorized transaction. To help resolve this quickly:\n\n• Check if you recognize the recipient\n• Verify the transaction wasn\'t made by an authorized user\n• Review your recent device login history\n• Consider enabling biometric authentication\n\nWe\'ll investigate and may temporarily freeze your account for security.',
-      wrong_amount: 'For incorrect amount disputes:\n\n• Verify the agreed-upon amount\n• Check for currency conversion fees (1.15%)\n• Review the transaction details\n• Provide any supporting documentation (receipts, messages)\n\nWe\'ll contact the recipient to confirm the correct amount.',
-      not_received: 'If payment wasn\'t received:\n\n• Confirm the transaction status is "completed"\n• Verify the recipient\'s wallet ID\n• Check for network delays (usually < 1 minute)\n• Ask recipient to check their transaction history\n\nMost issues resolve within 24 hours. We\'ll track this payment.',
-      duplicate: 'For duplicate charges:\n\n• Verify both transactions have the same amount and recipient\n• Check transaction timestamps\n• Review your send history\n\nWe\'ll refund one transaction if confirmed as duplicate.',
-      other: 'Please provide detailed information about your issue. The more details you provide, the faster we can help resolve it.\n\nInclude:\n• What you expected to happen\n• What actually happened\n• Any error messages\n• Screenshots if available',
+      unauthorized: t('dispute.aiSuggestion.unauthorized'),
+      wrong_amount: t('dispute.aiSuggestion.wrongAmount'),
+      not_received: t('dispute.aiSuggestion.notReceived'),
+      duplicate: t('dispute.aiSuggestion.duplicate'),
+      other: t('dispute.aiSuggestion.other'),
     };
 
     setAiSuggestion(reasonLabels[disputeReason]);
@@ -89,40 +93,87 @@ export default function DisputeTransactionScreen() {
 
   async function handleSubmitDispute() {
     if (!selectedTransaction) {
-      Alert.alert('Error', 'Please select a transaction to dispute');
+      Alert.alert(t('common.error'), t('dispute.selectTxError'));
       return;
     }
 
     if (!description.trim()) {
-      Alert.alert('Error', 'Please describe the issue');
+      Alert.alert(t('common.error'), t('dispute.describeError'));
+      return;
+    }
+
+    if (description.trim().length < 10) {
+      Alert.alert(t('common.error'), t('dispute.minCharsError'));
       return;
     }
 
     setSubmitting(true);
 
+    const ticketNum = `EGW-${Math.floor(10000 + Math.random() * 90000)}`;
+    const reasonLabel = disputeReasons.find(r => r.value === disputeReason)?.label ?? disputeReason;
+    const txDate = new Date(selectedTransaction.timestamp ?? selectedTransaction.createdAt ?? 0).toLocaleDateString();
+
+    // Use server-generated ticket if backend responds — fall back to local one
+    // if the backend is unreachable so the email can still be sent.
+    let finalTicket = ticketNum;
     try {
-      const res = await fetch(`${API_BASE}/disputes`, {
+      const resp = await fetch(`${API_BASE}/disputes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${auth.token}` },
         body: JSON.stringify({
           transactionId: selectedTransaction.id,
           reason: disputeReason,
           description: description.trim(),
-          userEmail: auth.user?.email,
         }),
       });
-      if (!res.ok) throw new Error('api_down');
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data?.dispute?.ticketNumber) finalTicket = data.dispute.ticketNumber;
+      }
     } catch (_) {
-      // Fall through to success — always confirm to user
+      // Backend unavailable — email is the guaranteed delivery channel below
     } finally {
       setSubmitting(false);
     }
 
-    const ticketNum = `EGW-${Math.floor(10000 + Math.random() * 90000)}`;
+    // Always open the device mail client so the dispute lands in the support inbox
+    // regardless of backend availability.
+    const emailSubject = encodeURIComponent(`[${finalTicket}] Dispute: ${reasonLabel} — Tx ${selectedTransaction.id}`);
+    const emailBody = encodeURIComponent(
+      `Ticket: ${finalTicket}\n` +
+      `User: ${auth.user?.email ?? 'unknown'}\n` +
+      `Transaction ID: ${selectedTransaction.id}\n` +
+      `Transaction Date: ${txDate}\n` +
+      `Amount: ${formatCurrency(selectedTransaction.amount, selectedTransaction.currency)}\n` +
+      `Reason: ${reasonLabel}\n\n` +
+      `Description:\n${description.trim()}\n\n` +
+      `— Sent from EGWallet App`
+    );
+    const mailtoUrl = `mailto:${SUPPORT_EMAIL}?subject=${emailSubject}&body=${emailBody}`;
+
     Alert.alert(
-      'Dispute Submitted ✅',
-      `Your dispute has been submitted (Ticket ${ticketNum}). Our team will review it and respond within 2-3 business days. You'll receive updates via email.`,
-      [{ text: 'OK', onPress: () => { setSelectedTransaction(null); setDescription(''); setDisputeReason('unauthorized'); } }]
+      t('dispute.submittedTitle'),
+      `Ticket ${finalTicket} created.\n\nYour mail app will open so you can send this dispute directly to ${SUPPORT_EMAIL}. Our team responds within 2–3 business days.`,
+      [
+        {
+          text: t('dispute.sendEmailButton'),
+          onPress: async () => {
+            try {
+              await Linking.openURL(mailtoUrl);
+            } catch (_) {
+              Alert.alert(t('dispute.emailFailedTitle'), t('dispute.emailFailedMsg'));
+            }
+            setSelectedTransaction(null);
+            setDescription('');
+            setDisputeReason('unauthorized');
+          },
+        },
+        {
+          text: t('dispute.doneButton'),
+          style: 'cancel',
+          onPress: () => { setSelectedTransaction(null); setDescription(''); setDisputeReason('unauthorized'); },
+        },
+      ]
     );
   }
 
@@ -138,18 +189,18 @@ export default function DisputeTransactionScreen() {
     <ScrollView style={styles.container}>
       <View style={styles.header}>
         <Ionicons name="alert-circle" size={48} color="#FF9500" />
-        <Text style={styles.title}>Dispute Transaction</Text>
+        <Text style={styles.title}>{t('dispute.title')}</Text>
         <Text style={styles.subtitle}>
-          We'll help resolve any issues with your transactions
+          {t('dispute.subtitle')}
         </Text>
       </View>
 
       {/* Select Transaction */}
       <View style={styles.section}>
-        <Text style={styles.label}>Select Transaction to Dispute</Text>
+        <Text style={styles.label}>{t('dispute.selectTx')}</Text>
         {transactions.length === 0 ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>No recent transactions found</Text>
+            <Text style={styles.emptyText}>{t('dispute.noTx')}</Text>
           </View>
         ) : (
           <View style={styles.transactionList}>
@@ -170,7 +221,7 @@ export default function DisputeTransactionScreen() {
                   />
                 </View>
                 <View style={styles.transactionInfo}>
-                  <Text style={styles.transactionType}>{transaction.type}</Text>
+                  <Text style={styles.transactionType}>{transaction.type === 'send' ? t('dispute.txTypeSend') : transaction.type === 'receive' ? t('dispute.txTypeReceive') : t('dispute.txTypeWithdrawal')}</Text>
                   <Text style={styles.transactionDate}>
                     {new Date(transaction.timestamp ?? transaction.createdAt ?? 0).toLocaleDateString()}
                   </Text>
@@ -191,7 +242,7 @@ export default function DisputeTransactionScreen() {
         <>
           {/* Dispute Reason */}
           <View style={styles.section}>
-            <Text style={styles.label}>Reason for Dispute</Text>
+            <Text style={styles.label}>{t('dispute.reason')}</Text>
             <View style={styles.reasonList}>
               {disputeReasons.map(reason => (
                 <TouchableOpacity
@@ -226,7 +277,7 @@ export default function DisputeTransactionScreen() {
             <View style={styles.aiSuggestionBox}>
               <View style={styles.aiHeader}>
                 <Ionicons name="sparkles" size={20} color="#007AFF" />
-                <Text style={styles.aiTitle}>AI Assistant Recommendation</Text>
+                <Text style={styles.aiTitle}>{t('dispute.aiRecommendation')}</Text>
               </View>
               <Text style={styles.aiText}>{aiSuggestion}</Text>
             </View>
@@ -234,15 +285,15 @@ export default function DisputeTransactionScreen() {
 
           {/* Description */}
           <View style={styles.section}>
-            <Text style={styles.label}>Describe the Issue</Text>
+            <Text style={styles.label}>{t('dispute.describeIssue')}</Text>
             <Text style={styles.hint}>
-              Provide as much detail as possible to help us resolve this quickly
+              {t('dispute.hint')}
             </Text>
             <TextInput
               style={styles.textArea}
               value={description}
               onChangeText={setDescription}
-              placeholder="What happened? Include any relevant details, amounts, dates, or communications..."
+              placeholder={t('dispute.descPlaceholder')}
               placeholderTextColor="#AAB8C2"
               multiline
               numberOfLines={8}
@@ -263,7 +314,7 @@ export default function DisputeTransactionScreen() {
             ) : (
               <>
                 <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
-                <Text style={styles.submitButtonText}>Submit Dispute</Text>
+                <Text style={styles.submitButtonText}>{t('dispute.submitButton')}</Text>
               </>
             )}
           </TouchableOpacity>
@@ -271,7 +322,7 @@ export default function DisputeTransactionScreen() {
           <View style={styles.timelineInfo}>
             <Ionicons name="time" size={16} color="#657786" />
             <Text style={styles.timelineText}>
-              Typical resolution time: 2-3 business days. You'll receive email updates.
+              {t('dispute.resolutionNote')} {t('dispute.sentToSupport')}
             </Text>
           </View>
         </>

@@ -16,6 +16,8 @@ const SUITES = [
   ['Phase 10 — Overdraft exploit fix',                   require('./regression/phase10.test')],
   ['Phase 11 — Feature audit fixes',                     require('./regression/phase11.test')],
   ['Phase 12 — Bell/ViewAll audit + WalletScreen logs',  require('./regression/phase12.test')],
+  ['Phase 13 — Critical withdrawal safety',              require('./regression/phase13.test')],
+  ['Phase 14 — Balance sync, dedup & dispute security',  require('./regression/phase14.test')],
 ];
 
 // ── Runner ────────────────────────────────────────────────────────────────────

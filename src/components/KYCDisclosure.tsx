@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text } from 'react-native';
 import { getRegionalConfig } from '../config/regional';
 import { FEE_SCHEDULE } from '../config/fees';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface KYCDisclosureProps {
   region: 'GQ' | 'AF' | 'EU' | 'OTHER';
@@ -13,6 +14,7 @@ interface KYCDisclosureProps {
  */
 export function KYCDisclosure({ region }: KYCDisclosureProps) {
   const config = getRegionalConfig(region);
+  const { t } = useLanguage();
 
   return (
     <View style={{ backgroundColor: '#f5f5f5' }}>
@@ -20,43 +22,43 @@ export function KYCDisclosure({ region }: KYCDisclosureProps) {
         {/* Daily Limits */}
         <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 16, marginBottom: 16 }}>
           <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 12, color: '#007AFF' }}>
-            💰 Daily Transaction Limits
+            {t('kyc.dailyLimitsTitle')}
           </Text>
           <View style={{ backgroundColor: '#f0f7ff', padding: 12, borderRadius: 6, marginBottom: 12 }}>
             <Text style={{ color: '#00539b', fontWeight: '600', fontSize: 14 }}>
-              Daily Sending Limit: ${config.daily_limit_usd.toLocaleString()} USD
+            {t('kyc.dailySendingLimit')}: ${config.daily_limit_usd.toLocaleString()} USD
             </Text>
             <Text style={{ color: '#00539b', fontSize: 12, marginTop: 4 }}>
               (~{Math.round(config.daily_limit_usd * 600).toLocaleString()} {config.currency})
             </Text>
           </View>
           <Text style={{ color: '#666', fontSize: 13 }}>
-            This is the maximum amount you can send in a 24-hour period.
+            {t('kyc.dailyLimitDesc')}
           </Text>
         </View>
 
         {/* Wallet Capacity */}
         <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 16, marginBottom: 16 }}>
           <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 12, color: '#007AFF' }}>
-            📊 Wallet Capacity
+            {t('kyc.walletCapacityTitle')}
           </Text>
           <View style={{ backgroundColor: '#f0f7ff', padding: 12, borderRadius: 6, marginBottom: 12 }}>
             <Text style={{ color: '#00539b', fontWeight: '600', fontSize: 14 }}>
-              Maximum Balance: $250,000 USD
+            {t('kyc.maxBalance')}
             </Text>
             <Text style={{ color: '#00539b', fontSize: 12, marginTop: 4 }}>
               (~150,000,000 {config.currency})
             </Text>
           </View>
           <Text style={{ color: '#666', fontSize: 13 }}>
-            Your wallet cannot hold more than this amount. You'll receive a warning when approaching the limit.
+            {t('kyc.walletCapacityDesc')}
           </Text>
         </View>
 
         {/* Fees Section */}
         <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 16, marginBottom: 16 }}>
           <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 12, color: '#007AFF' }}>
-            💳 Fees & Charges
+            {t('kyc.feesTitle')}
           </Text>
           {FEE_SCHEDULE.map((item) => (
             <View
@@ -75,20 +77,20 @@ export function KYCDisclosure({ region }: KYCDisclosureProps) {
             </View>
           ))}
           <Text style={{ color: '#999', fontSize: 12, marginTop: 12, fontStyle: 'italic' }}>
-            All fees are shown before you confirm any transaction. No hidden charges.
+            {t('kyc.feesDisclaimer')}
           </Text>
         </View>
 
         {/* Regional Info */}
         <View style={{ backgroundColor: '#f5f5f5', borderRadius: 8, padding: 16, borderLeftWidth: 4, borderLeftColor: '#007AFF' }}>
           <Text style={{ fontSize: 14, fontWeight: '600', marginBottom: 8, color: '#333' }}>
-            Regional Information
+            {t('kyc.regionalInfoTitle')}
           </Text>
           <Text style={{ color: '#666', fontSize: 13, marginBottom: 4 }}>
-            Region: {region === 'GQ' ? '🇬🇶 Equatorial Guinea' : region === 'AF' ? '🌍 Africa' : '🌎 Global'}
+            {t('kyc.regionLabel')} {region === 'GQ' ? `🇬🇶 ${t('kyc.regionGQ')}` : region === 'AF' ? `🌍 ${t('kyc.regionAF')}` : `🌎 ${t('kyc.regionGlobal')}`}
           </Text>
           <Text style={{ color: '#666', fontSize: 13 }}>
-            Primary Currency: {config.currency}
+            {t('kyc.primaryCurrency')} {config.currency}
           </Text>
         </View>
       </View>

@@ -23,6 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { API_BASE } from '../api/client';
+import { useLanguage } from '../i18n/LanguageContext';
 import { majorToMinor, formatCurrency, getCurrencySymbol, getCurrencyName, CURRENCY_INFO } from '../utils/currency';
 import { creditLocalBalance } from '../utils/localBalance';
 import { TOPUP_FREE_LIMIT, TOPUP_FEE_RATE } from '../config/fees';
@@ -122,6 +123,7 @@ function StripePaymentSheetFlow({
 }) {
   const stripe = useStripe!();
   const [ready, setReady] = useState(false);
+  const { t } = useLanguage();
 
   useEffect(() => {
     stripe.initPaymentSheet({
@@ -149,7 +151,7 @@ function StripePaymentSheetFlow({
       disabled={!ready}
     >
       <Ionicons name="card" size={18} color="#fff" />
-      <Text style={styles.primaryButtonText}>Pay with Card</Text>
+      <Text style={styles.primaryButtonText}>{t('deposit.payWithCard')}</Text>
     </TouchableOpacity>
   );
 }
@@ -161,6 +163,7 @@ export default function DepositScreen() {
   const auth = useAuth();
   const navigation = useNavigation();
   const route = useRoute();
+  const { t } = useLanguage();
   const params = route.params as { walletId?: string } | undefined;
 
   const [walletId, setWalletId] = useState<string>(params?.walletId || '');
@@ -228,7 +231,7 @@ export default function DepositScreen() {
   function handleAddDepositMethod() {
     if (addCardType === 'bank') {
       if (!bankAccountNum.trim() || !bankRoutingNum.trim() || !cardHolder.trim()) {
-        Alert.alert('Missing Info', 'Please fill in all bank account fields.');
+        Alert.alert(t('send.missingInfo'), t('deposit.missingBankFields'));
         return;
       }
       const last4 = bankAccountNum.slice(-4).padStart(4, '\u2022');
@@ -240,7 +243,7 @@ export default function DepositScreen() {
       handleDeposit();
     } else {
       if (!cardNumber.trim() || !cardHolder.trim() || !cardExpiry.trim() || !cardCvc.trim()) {
-        Alert.alert('Missing Info', 'Please fill in all card fields including CVC.');
+        Alert.alert(t('send.missingInfo'), t('deposit.missingCardFields'));
         return;
       }
       const last4 = cardNumber.replace(/\s/g, '').slice(-4);
@@ -312,7 +315,7 @@ export default function DepositScreen() {
     if (__DEV__) console.log('[Deposit] button pressed');
     const numAmount = parsedAmount();
     if (numAmount < 1) {
-      Alert.alert('Too Small', 'Please enter a valid deposit amount.');
+      Alert.alert(t('common.error'), t('deposit.tooSmall'));
       return;
     }
     // Convert major units (what user types) → minor units (what backend/wallet stores)
@@ -353,12 +356,12 @@ export default function DepositScreen() {
 
       if (isAuthError) {
         await auth.handleTokenExpired();
-        Alert.alert('Session Expired', 'Your session has expired. Please sign in again.');
+        Alert.alert(t('common.sessionExpired'), t('deposit.sessionExpired'));
       } else {
         // Backend unavailable — show a clear error instead of silently crediting funds
         Alert.alert(
           'Service Unavailable',
-          'Could not connect to the server. Please check your connection and try again.',
+          t('deposit.serviceUnavailable'),
         );
       }
     } finally {
@@ -413,7 +416,7 @@ export default function DepositScreen() {
     } catch (e: any) {
       // Backend unavailable — show pending confirmation
       Alert.alert(
-        'Deposit Submitted ✅',
+        t('deposit.depositSubmitted'),
         'Your payment is being processed. Funds will appear in your wallet shortly.',
         [{ text: 'Done', onPress: () => (navigation as any).goBack() }]
       );
@@ -440,10 +443,10 @@ export default function DepositScreen() {
             <View style={pmStyles.header}>
               <Text style={pmStyles.title}>
                 {showAddCardForm
-                  ? addCardType === 'bank' ? 'Add Bank Account'
-                  : addCardType === 'credit' ? 'Add Credit Card'
-                  : 'Add Debit Card'
-                  : 'Choose Payment Method'}
+                  ? addCardType === 'bank' ? t('deposit.addBankAccount')
+                  : addCardType === 'credit' ? t('deposit.addCreditCard')
+                  : t('deposit.addDebitCard')
+                  : t('deposit.choosePaymentMethod')}
               </Text>
               <TouchableOpacity onPress={() => { setShowPaymentMethodModal(false); resetAddCardForm(); }}>
                 <Ionicons name="close" size={24} color="#14171A" />
@@ -458,7 +461,7 @@ export default function DepositScreen() {
                     <View style={pmStyles.selectedBanner}>
                       <Ionicons name={pmIcon(selectedPaymentMethod.type) as any} size={18} color={pmColor(selectedPaymentMethod.type)} />
                       <Text style={pmStyles.selectedText}>
-                        {selectedPaymentMethod.label} \u2022\u2022\u2022\u2022 {selectedPaymentMethod.last4} (selected)
+                        {selectedPaymentMethod.label} \u2022\u2022\u2022\u2022 {selectedPaymentMethod.last4} {t('deposit.selectedSuffix')}
                       </Text>
                     </View>
                   )}
@@ -466,7 +469,7 @@ export default function DepositScreen() {
                   {/* Saved methods */}
                   {savedPaymentMethods.length > 0 && (
                     <>
-                      <Text style={pmStyles.sectionLabel}>SAVED METHODS</Text>
+                      <Text style={pmStyles.sectionLabel}>{t('deposit.savedMethods')}</Text>
                       {savedPaymentMethods.map(m => (
                         <TouchableOpacity
                           key={m.id}
@@ -488,7 +491,7 @@ export default function DepositScreen() {
                         </TouchableOpacity>
                       ))}
                       <View style={pmStyles.divider} />
-                      <Text style={pmStyles.sectionLabel}>ADD NEW</Text>
+                      <Text style={pmStyles.sectionLabel}>{t('deposit.addNew')}</Text>
                     </>
                   )}
 
@@ -498,8 +501,8 @@ export default function DepositScreen() {
                       <Ionicons name="card" size={22} color="#1565C0" />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={pmStyles.optionLabel}>Debit Card</Text>
-                      <Text style={pmStyles.optionSub}>Visa, Mastercard, Verve</Text>
+                      <Text style={pmStyles.optionLabel}>{t('send.debitCard')}</Text>
+                      <Text style={pmStyles.optionSub}>{t('deposit.visaMcVerve')}</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={18} color="#9BAAB8" />
                   </TouchableOpacity>
@@ -509,8 +512,8 @@ export default function DepositScreen() {
                       <Ionicons name="card-outline" size={22} color="#6A1B9A" />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={pmStyles.optionLabel}>Credit Card</Text>
-                      <Text style={pmStyles.optionSub}>Visa, Mastercard, Amex</Text>
+                      <Text style={pmStyles.optionLabel}>{t('send.creditCard')}</Text>
+                      <Text style={pmStyles.optionSub}>{t('deposit.visaMcAmex')}</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={18} color="#9BAAB8" />
                   </TouchableOpacity>
@@ -520,8 +523,8 @@ export default function DepositScreen() {
                       <Ionicons name="business-outline" size={22} color="#2E7D32" />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={pmStyles.optionLabel}>Bank Account</Text>
-                      <Text style={pmStyles.optionSub}>Direct bank transfer</Text>
+                      <Text style={pmStyles.optionLabel}>{t('deposit.bankAccount')}</Text>
+                      <Text style={pmStyles.optionSub}>{t('deposit.directBankTransfer')}</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={18} color="#9BAAB8" />
                   </TouchableOpacity>
@@ -530,21 +533,21 @@ export default function DepositScreen() {
                 <>
                   <TouchableOpacity style={pmStyles.backRow} onPress={() => { setShowAddCardForm(false); setAddCardType(null); }}>
                     <Ionicons name="arrow-back" size={18} color="#1565C0" />
-                    <Text style={pmStyles.backText}>Back</Text>
+                    <Text style={pmStyles.backText}>{t('deposit.back')}</Text>
                   </TouchableOpacity>
 
                   {addCardType === 'bank' ? (
                     <>
-                      <Text style={pmStyles.fieldLabel}>ACCOUNT HOLDER NAME</Text>
-                      <TextInput value={cardHolder} onChangeText={setCardHolder} placeholder="Full name" placeholderTextColor="#AAB8C2" style={pmStyles.input} />
-                      <Text style={pmStyles.fieldLabel}>ACCOUNT NUMBER</Text>
-                      <TextInput value={bankAccountNum} onChangeText={setBankAccountNum} placeholder="Enter account number" placeholderTextColor="#AAB8C2" keyboardType="number-pad" style={pmStyles.input} />
-                      <Text style={pmStyles.fieldLabel}>ROUTING / SORT CODE</Text>
-                      <TextInput value={bankRoutingNum} onChangeText={setBankRoutingNum} placeholder="Enter routing number" placeholderTextColor="#AAB8C2" keyboardType="number-pad" style={pmStyles.input} />
+                      <Text style={pmStyles.fieldLabel}>{t('deposit.accountHolderName')}</Text>
+                      <TextInput value={cardHolder} onChangeText={setCardHolder} placeholder={t('deposit.fullName')} placeholderTextColor="#AAB8C2" style={pmStyles.input} />
+                      <Text style={pmStyles.fieldLabel}>{t('deposit.accountNumber')}</Text>
+                      <TextInput value={bankAccountNum} onChangeText={setBankAccountNum} placeholder={t('deposit.enterAccountNum')} placeholderTextColor="#AAB8C2" keyboardType="number-pad" style={pmStyles.input} />
+                      <Text style={pmStyles.fieldLabel}>{t('deposit.routingCode')}</Text>
+                      <TextInput value={bankRoutingNum} onChangeText={setBankRoutingNum} placeholder={t('deposit.enterRoutingNum')} placeholderTextColor="#AAB8C2" keyboardType="number-pad" style={pmStyles.input} />
                     </>
                   ) : (
                     <>
-                      <Text style={pmStyles.fieldLabel}>CARD NUMBER</Text>
+                      <Text style={pmStyles.fieldLabel}>{t('deposit.cardNumber')}</Text>
                       <TextInput
                         value={cardNumber}
                         onChangeText={v => setCardNumber(v.replace(/\D/g, '').replace(/(.{4})/g, '$1 ').trim())}
@@ -554,9 +557,9 @@ export default function DepositScreen() {
                         maxLength={19}
                         style={pmStyles.input}
                       />
-                      <Text style={pmStyles.fieldLabel}>CARDHOLDER NAME</Text>
-                      <TextInput value={cardHolder} onChangeText={setCardHolder} placeholder="Name as on card" placeholderTextColor="#AAB8C2" style={pmStyles.input} />
-                      <Text style={pmStyles.fieldLabel}>EXPIRY DATE</Text>
+                      <Text style={pmStyles.fieldLabel}>{t('deposit.cardholderName')}</Text>
+                      <TextInput value={cardHolder} onChangeText={setCardHolder} placeholder={t('deposit.nameAsOnCard')} placeholderTextColor="#AAB8C2" style={pmStyles.input} />
+                      <Text style={pmStyles.fieldLabel}>{t('deposit.expiryDate')}</Text>
                       <TextInput
                         value={cardExpiry}
                         onChangeText={v => {
@@ -570,7 +573,7 @@ export default function DepositScreen() {
                         maxLength={5}
                         style={pmStyles.input}
                       />
-                      <Text style={pmStyles.fieldLabel}>CVC / CVV</Text>
+                      <Text style={pmStyles.fieldLabel}>{t('deposit.cvc')}</Text>
                       <TextInput
                         value={cardCvc}
                         onChangeText={v => setCardCvc(v.replace(/\D/g, '').slice(0, 4))}
@@ -587,9 +590,9 @@ export default function DepositScreen() {
                   <TouchableOpacity style={pmStyles.confirmButton} onPress={handleAddDepositMethod} disabled={loading}>
                     {loading
                       ? <ActivityIndicator color="#FFF" />
-                      : <Text style={pmStyles.confirmButtonText}>Confirm & Deposit</Text>}
+                      : <Text style={pmStyles.confirmButtonText}>{t('deposit.confirmDeposit')}</Text>}
                   </TouchableOpacity>
-                  <Text style={pmStyles.secureNote}>\uD83D\uDD12 Your payment details are encrypted and secure.</Text>
+                  <Text style={pmStyles.secureNote}>{t('deposit.secureNote')}</Text>
                 </>
               )}
             </ScrollView>
@@ -620,8 +623,8 @@ export default function DepositScreen() {
           >
             <Ionicons name="add" size={30} color="#fff" />
           </LinearGradient>
-          <Text style={styles.heroTitle}>Add Money</Text>
-          <Text style={styles.heroSubtitle}>Fund your wallet instantly</Text>
+          <Text style={styles.heroTitle}>{t('deposit.addMoney')}</Text>
+          <Text style={styles.heroSubtitle}>{t('deposit.fundWallet')}</Text>
         </View>
 
         {/* Mode Banner */}
@@ -630,8 +633,8 @@ export default function DepositScreen() {
             <Ionicons name="information-circle-outline" size={18} color="#1565C0" />
             <Text style={styles.infoBannerText}>
               {StripeProvider
-                ? 'Stripe is available — real card payments enabled.'
-                : 'Demo Mode — no real money is charged. Funds are credited instantly for testing.'}
+                ? t('deposit.stripeAvailable')
+                : t('deposit.demoMode')}
             </Text>
           </View>
         )}
@@ -647,11 +650,11 @@ export default function DepositScreen() {
             >
               <Ionicons name="wallet-outline" size={14} color="#fff" />
             </LinearGradient>
-            <Text style={styles.cardTitle}>DEPOSIT AMOUNT</Text>
+            <Text style={styles.cardTitle}>{t('deposit.depositAmount')}</Text>
           </View>
 
           {/* Preset amounts */}
-          <Text style={styles.label}>Quick Select</Text>
+          <Text style={styles.label}>{t('deposit.quickSelect')}</Text>
           <View style={styles.presetGrid}>
             {PRESET_AMOUNTS.map(p => (
               <TouchableOpacity
@@ -668,7 +671,7 @@ export default function DepositScreen() {
           </View>
 
           {/* Custom amount */}
-          <Text style={styles.label}>Enter Amount</Text>
+          <Text style={styles.label}>{t('deposit.enterAmount')}</Text>
           <View style={styles.inputWrapper}>
             <Text style={styles.inputCurrencyLabel}>{currency}</Text>
             <TextInput
@@ -682,7 +685,7 @@ export default function DepositScreen() {
           </View>
 
           {/* Currency picker */}
-          <Text style={styles.label}>Currency</Text>
+          <Text style={styles.label}>{t('deposit.currency')}</Text>
           <TouchableOpacity
             style={styles.currencySelector}
             onPress={() => { setCurrencySearch(''); setShowCurrencyModal(true); }}
@@ -705,7 +708,7 @@ export default function DepositScreen() {
             <View style={styles.currencyModalOverlay}>
               <View style={styles.currencyModalSheet}>
                 <View style={styles.currencyModalHeader}>
-                  <Text style={styles.currencyModalTitle}>Select Currency</Text>
+                  <Text style={styles.currencyModalTitle}>{t('deposit.selectCurrency')}</Text>
                   <TouchableOpacity onPress={() => setShowCurrencyModal(false)}>
                     <Ionicons name="close" size={24} color="#14171A" />
                   </TouchableOpacity>
@@ -717,7 +720,7 @@ export default function DepositScreen() {
                   <TextInput
                     value={currencySearch}
                     onChangeText={setCurrencySearch}
-                    placeholder="Search currencies..."
+                    placeholder={t('deposit.searchCurrencies')}
                     placeholderTextColor="#9BAAB8"
                     style={styles.currencySearchInput}
                     autoCorrect={false}
@@ -733,7 +736,7 @@ export default function DepositScreen() {
                       onPress={() => setCurrencyTab('africa')}
                     >
                       <Text style={[styles.currencyTabText, currencyTab === 'africa' && styles.currencyTabTextActive]}>
-                        🌍 Africa
+                        🌍 {t('deposit.africa')}
                       </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
@@ -741,7 +744,7 @@ export default function DepositScreen() {
                       onPress={() => setCurrencyTab('world')}
                     >
                       <Text style={[styles.currencyTabText, currencyTab === 'world' && styles.currencyTabTextActive]}>
-                        🌐 World
+                        🌐 {t('deposit.world')}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -799,24 +802,24 @@ export default function DepositScreen() {
                     />
                     <Text style={[styles.feeTierText, { color: isActuallyFree ? '#2E7D32' : '#1565C0' }]}>
                       {isActuallyFree
-                        ? `${feeInfo.freeTopupsRemaining} free top-up${feeInfo.freeTopupsRemaining !== 1 ? 's' : ''} remaining`
-                        : `Standard rate applies (${(TOPUP_FEE_RATE * 100).toFixed(1)}%)`
+                        ? `${feeInfo.freeTopupsRemaining} ${feeInfo.freeTopupsRemaining !== 1 ? t('deposit.freeTopupsPlural') : t('deposit.freeTopupsSingular')}`
+                        : `${t('deposit.standardRateApplies')} (${(TOPUP_FEE_RATE * 100).toFixed(1)}%)`
                       }
                     </Text>
                   </View>
                 )}
                 <View style={styles.feeRow}>
-                  <Text style={styles.feeLabel}>You pay</Text>
+                  <Text style={styles.feeLabel}>{t('deposit.youPay')}</Text>
                   <Text style={styles.feeValue}>{formatCurrency(totalCharged, currency)}</Text>
                 </View>
                 <View style={styles.feeRow}>
-                  <Text style={styles.feeLabel}>Fee</Text>
+                  <Text style={styles.feeLabel}>{t('deposit.fee')}</Text>
                   <Text style={[styles.feeValue, feeMinor === 0 && styles.feeFree]}>
-                    {feeMinor === 0 ? 'Free' : `-${formatCurrency(feeMinor, currency)}`}
+                    {feeMinor === 0 ? t('deposit.free') : `-${formatCurrency(feeMinor, currency)}`}
                   </Text>
                 </View>
                 <View style={[styles.feeRow, styles.feeTotal]}>
-                  <Text style={styles.feeTotalLabel}>Added to wallet</Text>
+                  <Text style={styles.feeTotalLabel}>{t('deposit.addedToWallet')}</Text>
                   <Text style={styles.feeTotalValue}>{formatCurrency(amtMinor, currency)}</Text>
                 </View>
               </View>
@@ -845,14 +848,14 @@ export default function DepositScreen() {
                     ? (
                       <>
                         <Ionicons name="checkmark-circle" size={20} color="#fff" />
-                        <Text style={styles.primaryButtonText}>Deposit Successful ✅</Text>
+                        <Text style={styles.primaryButtonText}>{t('deposit.depositSuccessful')}</Text>
                       </>
                     )
                     : (
                       <>
                         <Ionicons name="card" size={20} color="#fff" />
                         <Text style={styles.primaryButtonText}>
-                          {`Deposit ${numAmount > 0 ? numAmount.toLocaleString() : '—'} ${currency}`}
+                          {`${t('deposit.depositAction')} ${numAmount > 0 ? numAmount.toLocaleString() : '—'} ${currency}`}
                         </Text>
                       </>
                     )
@@ -868,7 +871,7 @@ export default function DepositScreen() {
                   publishableKey={stripeIntent.publishableKey}
                   clientSecret={stripeIntent.clientSecret}
                   onSuccess={handleStripeSuccess}
-                  onError={msg => Alert.alert('Payment Error', msg)}
+                  onError={msg => Alert.alert(t('common.error'), msg)}
                 />
               </StripeProvider>
             )
@@ -891,7 +894,7 @@ export default function DepositScreen() {
                       : (
                         <>
                           <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
-                          <Text style={styles.primaryButtonText}>Confirm Deposit</Text>
+                          <Text style={styles.primaryButtonText}>{t('deposit.confirm')}</Text>
                         </>
                       )
                     }
@@ -906,27 +909,27 @@ export default function DepositScreen() {
             style={styles.cancelButton}
             onPress={() => { setStripeIntent(null); setMode(null); }}
           >
-            <Text style={styles.cancelText}>Cancel</Text>
+            <Text style={styles.cancelText}>{t('common.cancel')}</Text>
           </TouchableOpacity>
         )}
 
         {/* How it works */}
         <View style={styles.howItWorks}>
-          <Text style={styles.howTitle}>How deposits work</Text>
+          <Text style={styles.howTitle}>{t('deposit.howItWorks')}</Text>
           {StripeProvider ? (
             <>
-              <View style={styles.howItem}><View style={styles.howDot} /><Text style={styles.howItemText}>Enter an amount and select a currency</Text></View>
-              <View style={styles.howItem}><View style={styles.howDot} /><Text style={styles.howItemText}>Complete payment with your card via Stripe</Text></View>
-              <View style={styles.howItem}><View style={styles.howDot} /><Text style={styles.howItemText}>Funds appear in your wallet instantly</Text></View>
+              <View style={styles.howItem}><View style={styles.howDot} /><Text style={styles.howItemText}>{t('deposit.how1')}</Text></View>
+              <View style={styles.howItem}><View style={styles.howDot} /><Text style={styles.howItemText}>{t('deposit.how2')}</Text></View>
+              <View style={styles.howItem}><View style={styles.howDot} /><Text style={styles.howItemText}>{t('deposit.how3')}</Text></View>
             </>
           ) : (
             <>
               <View style={styles.demoTag}>
-                <Text style={styles.demoTagText}>🧪 DEMO MODE — no real money is charged</Text>
+                <Text style={styles.demoTagText}>{t('deposit.demoMode')}</Text>
               </View>
-              <View style={styles.howItem}><View style={styles.howDot} /><Text style={styles.howItemText}>Enter an amount and tap Deposit</Text></View>
-              <View style={styles.howItem}><View style={styles.howDot} /><Text style={styles.howItemText}>Funds are credited to your wallet immediately</Text></View>
-              <View style={styles.howItem}><View style={styles.howDot} /><Text style={styles.howItemText}>In production, real Stripe payments replace this flow</Text></View>
+              <View style={styles.howItem}><View style={styles.howDot} /><Text style={styles.howItemText}>{t('deposit.demoHow1')}</Text></View>
+              <View style={styles.howItem}><View style={styles.howDot} /><Text style={styles.howItemText}>{t('deposit.demoHow2')}</Text></View>
+              <View style={styles.howItem}><View style={styles.howDot} /><Text style={styles.howItemText}>{t('deposit.demoHow3')}</Text></View>
             </>
           )}
         </View>

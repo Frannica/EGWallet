@@ -7,6 +7,7 @@ import { createVirtualCard, getVirtualCards, toggleCardFreeze, deleteVirtualCard
 import { listWallets } from '../api/auth';
 import { useFocusEffect } from '@react-navigation/native';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
+import { useLanguage } from '../i18n/LanguageContext';
 import { CardSkeleton } from '../components/SkeletonLoader';
 import { useToast } from '../utils/toast';
 
@@ -23,6 +24,7 @@ interface VirtualCard {
 
 export default function CardScreen() {
   const auth = useAuth();
+  const { t } = useLanguage();
   const { isOnline } = useNetworkStatus();
   const toast = useToast();
   const [loading, setLoading] = useState(false);
@@ -101,12 +103,12 @@ export default function CardScreen() {
     if (isCreating) return;
 
     Alert.alert(
-      'Create Virtual Card',
-      'Create a new virtual card for online purchases and digital payments.',
+      t('card.createVirtualCardTitle'),
+      t('card.createVirtualCardMsg'),
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Create',
+          text: t('card.createAction'),
           onPress: async () => {
             try {
               setIsCreating(true);
@@ -114,7 +116,7 @@ export default function CardScreen() {
               const walletId = wallets[0]?.id || 'demo';
               await createVirtualCard(auth.token!, walletId, 'USD', 'My Virtual Card');
               console.log('[Card] Created via API');
-              toast.show('Virtual card created ✅');
+              toast.show(t('card.cardCreated'));
               loadCards();
             } catch (error: any) {
               // Backend unavailable — create a local demo card so the screen never shows failure
@@ -130,7 +132,7 @@ export default function CardScreen() {
                 status: 'active',
               };
               setCards(prev => [...prev.filter(c => c.id !== 'demo-default'), demoCard]);
-              toast.show('Virtual card created ✅');
+              toast.show(t('card.cardCreated'));
             } finally {
               setLoading(false);
               setIsCreating(false);
@@ -147,7 +149,7 @@ export default function CardScreen() {
 
     Alert.alert(
       `${action} Card`,
-      `${action} this virtual card?`,
+      card?.status === 'active' ? t('card.freezeConfirmMsg') : t('card.unfreezeConfirmMsg'),
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -174,7 +176,7 @@ export default function CardScreen() {
   };
 
   const handleDelete = async (cardId: string) => {
-    Alert.alert('Delete Card', 'Are you sure?', [
+    Alert.alert(t('card.deleteCard'), t('common.areYouSure'), [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive', onPress: async () => {
@@ -205,7 +207,7 @@ export default function CardScreen() {
           <View style={styles.backIconWrap}>
             <Ionicons name="arrow-back" size={20} color="#1565C0" />
           </View>
-          <Text style={styles.backText}>My Cards</Text>
+          <Text style={styles.backText}>{t('card.title')}</Text>
         </TouchableOpacity>
 
         <View style={styles.cardDisplay}>
@@ -224,7 +226,7 @@ export default function CardScreen() {
             <Text style={styles.cardNumber}>{maskCardNumber(selectedCard.cardNumber)}</Text>
             <View style={styles.cardFooter}>
               <View>
-                <Text style={styles.cardLabel}>EXPIRES</Text>
+                <Text style={styles.cardLabel}>{t('card.expires').toUpperCase()}</Text>
                 <Text style={styles.cardValue}>{selectedCard.expiryMonth}/{selectedCard.expiryYear}</Text>
               </View>
               <View>
@@ -240,23 +242,23 @@ export default function CardScreen() {
 
         <View style={styles.cardInfo}>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Card Number</Text>
+            <Text style={styles.infoLabel}>{t('card.number')}</Text>
             <Text style={styles.infoValue}>{selectedCard.cardNumber}</Text>
           </View>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>CVV</Text>
+            <Text style={styles.infoLabel}>{t('card.cvv')}</Text>
             <Text style={styles.infoValue}>{selectedCard.cvv}</Text>
           </View>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Expiry</Text>
+            <Text style={styles.infoLabel}>{t('card.expiry')}</Text>
             <Text style={styles.infoValue}>{selectedCard.expiryMonth}/{selectedCard.expiryYear}</Text>
           </View>
           <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
-            <Text style={styles.infoLabel}>Status</Text>
+            <Text style={styles.infoLabel}>{t('card.status')}</Text>
             <View style={selectedCard.status === 'frozen' ? styles.frozenBadge : styles.activeBadge}>
               <View style={selectedCard.status === 'frozen' ? styles.frozenDot : styles.activeDot} />
               <Text style={selectedCard.status === 'frozen' ? styles.frozenText : styles.activeText}>
-                {selectedCard.status === 'frozen' ? 'Frozen' : 'Active'}
+              {selectedCard.status === 'frozen' ? t('card.frozen') : t('card.active')}
               </Text>
             </View>
           </View>
@@ -270,7 +272,7 @@ export default function CardScreen() {
         >
           <Ionicons name={selectedCard.status === 'active' ? 'snow' : 'play-circle'} size={20} color={selectedCard.status === 'active' ? '#1565C0' : '#00897B'} />
           <Text style={[styles.actionBtnText, { color: selectedCard.status === 'active' ? '#1565C0' : '#00897B' }]}>
-            {selectedCard.status === 'active' ? 'Freeze Card' : 'Unfreeze Card'}
+            {selectedCard.status === 'active' ? t('card.freeze') : t('card.unfreeze')}
           </Text>
         </TouchableOpacity>
 
@@ -281,7 +283,7 @@ export default function CardScreen() {
           activeOpacity={0.75}
         >
           <Ionicons name="trash" size={20} color="#DC2626" />
-          <Text style={[styles.actionBtnText, { color: '#DC2626' }]}>Delete Card</Text>
+          <Text style={[styles.actionBtnText, { color: '#DC2626' }]}>{t('card.deleteCard')}</Text>
         </TouchableOpacity>
       </Animated.ScrollView>
     );
@@ -291,14 +293,14 @@ export default function CardScreen() {
     <Animated.ScrollView style={[styles.container, { opacity: fadeAnim }]} contentContainerStyle={styles.content}>
       <OfflineErrorBanner visible={!isOnline} onRetry={() => { loadCards(); loadWallets(); }} />
       <View style={styles.header}>
-        <Text style={styles.title}>My Cards</Text>
+        <Text style={styles.title}>{t('card.title')}</Text>
         {cards.length < 5 ? (
           <TouchableOpacity style={styles.addButton} onPress={handleCreateCard} disabled={loading} activeOpacity={0.75}>
             <Ionicons name="add" size={22} color="#1565C0" />
           </TouchableOpacity>
         ) : (
           <View style={styles.cardLimitBadge}>
-            <Text style={styles.cardLimitText}>5/5 max</Text>
+            <Text style={styles.cardLimitText}>{t('card.maxLimit')}</Text>
           </View>
         )}
       </View>
@@ -314,11 +316,11 @@ export default function CardScreen() {
           <View style={styles.emptyIconBg}>
             <Ionicons name="card-outline" size={40} color="#1565C0" />
           </View>
-          <Text style={styles.emptyTitle}>No Cards Yet</Text>
-          <Text style={styles.emptyText}>Create a virtual card for secure online payments</Text>
+          <Text style={styles.emptyTitle}>{t('card.noCards')}</Text>
+          <Text style={styles.emptyText}>{t('card.noCardsDesc')}</Text>
           <TouchableOpacity style={styles.createFirstButton} onPress={handleCreateCard} disabled={loading} activeOpacity={0.8}>
             <Ionicons name="add-circle" size={20} color="#FFFFFF" />
-            <Text style={styles.createFirstButtonText}>Create Card</Text>
+            <Text style={styles.createFirstButtonText}>{t('card.createCard')}</Text>
           </TouchableOpacity>
         </View>
       ) : (
@@ -339,13 +341,13 @@ export default function CardScreen() {
                 <Ionicons name="card" size={22} color="#1565C0" />
                 <View style={styles.cardMiniInfo}>
                   <Text style={styles.cardMiniNumber}>{maskCardNumber(card.cardNumber)}</Text>
-                  <Text style={styles.cardMiniExpiry}>Expires {card.expiryMonth}/{card.expiryYear}</Text>
+                  <Text style={styles.cardMiniExpiry}>{t('card.expires')} {card.expiryMonth}/{card.expiryYear}</Text>
                 </View>
               </View>
               <View style={styles.cardMiniStatus}>
                 <View style={card.status === 'frozen' ? styles.frozenBadge : styles.activeBadge}>
                   <Text style={card.status === 'frozen' ? styles.frozenText : styles.activeText}>
-                    {card.status === 'frozen' ? 'Frozen' : 'Active'}
+                    {card.status === 'frozen' ? t('card.frozen') : t('card.active')}
                   </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color="#9BAAB8" />

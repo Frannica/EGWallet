@@ -2,9 +2,11 @@ import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useBiometric } from '../auth/BiometricContext';
+import { useLanguage } from '../i18n/LanguageContext';
 
 export default function BiometricLock() {
   const { unlock, biometricType } = useBiometric();
+  const { t } = useLanguage();
 
   useEffect(() => {
     // Automatically trigger biometric auth on mount
@@ -31,13 +33,13 @@ export default function BiometricLock() {
   const getMessage = () => {
     switch (biometricType) {
       case 'fingerprint':
-        return 'Touch fingerprint sensor to unlock';
+        return t('biometric.touchFingerprint');
       case 'face':
-        return 'Look at your device to unlock';
+        return t('biometric.lookAtDevice');
       case 'iris':
-        return 'Look at your device to unlock';
+        return t('biometric.lookAtDevice');
       default:
-        return 'Authenticate to unlock';
+        return t('biometric.authenticate');
     }
   };
 
@@ -48,17 +50,17 @@ export default function BiometricLock() {
           <Ionicons name={getIcon() as any} size={80} color="#007AFF" />
         </View>
         
-        <Text style={styles.title}>EGWallet is Locked</Text>
+        <Text style={styles.title}>{t('biometric.title')}</Text>
         <Text style={styles.subtitle}>{getMessage()}</Text>
 
         <TouchableOpacity style={styles.unlockButton} onPress={attemptUnlock}>
           <Ionicons name="lock-open" size={24} color="#FFFFFF" />
-          <Text style={styles.unlockButtonText}>Unlock</Text>
+          <Text style={styles.unlockButtonText}>{t('biometric.unlock')}</Text>
         </TouchableOpacity>
       </View>
 
       <Text style={styles.footer}>
-        Your wallet is secured with biometric authentication
+        {t('biometric.footer')}
       </Text>
     </View>
   );

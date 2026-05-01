@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { formatCurrency } from '../utils/currency';
+import { useLanguage } from '../i18n/LanguageContext';
 
 type TxType = 'send' | 'receive' | 'deposit' | 'withdrawal';
 type TxStatus = 'completed' | 'pending' | 'failed';
@@ -40,14 +41,26 @@ const STATUS_COLORS: Record<TxStatus, { bg: string; text: string; icon: string }
 export default function ReceiptScreen() {
   const navigation = useNavigation();
   const route = useRoute();
+  const { t } = useLanguage();
   const p = (route.params as Params) ?? {
     amount: 0, currency: 'XAF', recipientName: 'Recipient', timestamp: Date.now(),
   };
 
   const txType = p.type ?? 'send';
   const txStatus = p.status ?? 'completed';
-  const meta = TYPE_META[txType];
-  const statusStyle = STATUS_COLORS[txStatus];
+  const TYPE_META_T: Record<TxType, { headline: string; subtitle: string; icon: string; iconColors: [string, string] }> = {
+    send:       { headline: t('receipt.paymentSent'),        subtitle: t('receipt.transferSuccess'), icon: 'arrow-up-circle',   iconColors: ['#1565C0', '#0A3D7C'] },
+    receive:    { headline: t('receipt.moneyReceived'),      subtitle: t('receipt.fundsAdded'),      icon: 'arrow-down-circle', iconColors: ['#15803D', '#166534'] },
+    deposit:    { headline: t('receipt.depositSuccess'),     subtitle: t('receipt.fundsAdded'),      icon: 'add-circle',        iconColors: ['#A16207', '#854D0E'] },
+    withdrawal: { headline: t('receipt.withdrawalSubmitted'), subtitle: t('receipt.beingProcessed'), icon: 'log-out',           iconColors: ['#F57C00', '#E65100'] },
+  };
+  const STATUS_COLORS_T: Record<TxStatus, { bg: string; text: string; icon: string; label: string }> = {
+    completed: { bg: '#DCFCE7', text: '#15803D', icon: 'checkmark-circle', label: t('receipt.completed') },
+    pending:   { bg: '#FEF9C3', text: '#A16207', icon: 'time',             label: t('receipt.pending') },
+    failed:    { bg: '#FEE2E2', text: '#DC2626', icon: 'close-circle',     label: t('receipt.failed') },
+  };
+  const meta = TYPE_META_T[txType];
+  const statusStyle = STATUS_COLORS_T[txStatus];
 
   const isCrossCurrency = p.receiverCurrency && p.receiverCurrency !== p.currency;
   const hasFee = typeof p.fee === 'number' && p.fee > 0;
@@ -86,36 +99,36 @@ export default function ReceiptScreen() {
 
   // Party line
   if (txType === 'receive') {
-    rows.push({ label: 'From', value: p.recipientName });
+    rows.push({ label: t('common.from'), value: p.recipientName });
   } else if (txType === 'deposit') {
-    rows.push({ label: 'Added to', value: p.recipientName || 'Your Wallet' });
+    rows.push({ label: t('receipt.addedTo'), value: p.recipientName || 'Your Wallet' });
   } else {
-    rows.push({ label: 'To', value: p.recipientName });
+    rows.push({ label: t('common.to'), value: p.recipientName });
     if (p.recipientId && p.recipientId !== p.recipientName) {
-      rows.push({ label: 'Wallet ID', value: p.recipientId.length > 16 ? p.recipientId.substring(0, 16) + '…' : p.recipientId });
+      rows.push({ label: t('receipt.walletId'), value: p.recipientId.length > 16 ? p.recipientId.substring(0, 16) + '…' : p.recipientId });
     }
   }
 
   // Amount + currencies
-  rows.push({ label: 'Amount', value: formatCurrency(p.amount, p.currency), bold: true });
-  if (p.senderCurrency) rows.push({ label: 'Sender currency', value: p.senderCurrency });
+  rows.push({ label: t('common.amount'), value: formatCurrency(p.amount, p.currency), bold: true });
+  if (p.senderCurrency) rows.push({ label: t('receipt.senderCurrency'), value: p.senderCurrency });
   if (isCrossCurrency && p.receiverCurrency) {
-    rows.push({ label: 'Recipient currency', value: p.receiverCurrency, accent: true });
+    rows.push({ label: t('receipt.recipientCurrency'), value: p.receiverCurrency, accent: true });
   }
 
   // Fee
   if (hasFee && p.fee && p.currency) {
-    rows.push({ label: p.feeLabel ?? 'Fee', value: formatCurrency(p.fee, p.currency) });
+    rows.push({ label: p.feeLabel ?? t('receipt.transferFee'), value: formatCurrency(p.fee, p.currency) });
   } else if (txType === 'send' || txType === 'receive') {
-    rows.push({ label: 'Transfer fee', value: 'Free' });
+    rows.push({ label: t('receipt.transferFee'), value: t('common.free') });
   }
 
   // FX rate
-  if (p.fxRate) rows.push({ label: 'FX Rate', value: p.fxRate, accent: true });
+  if (p.fxRate) rows.push({ label: t('receipt.fxRate'), value: p.fxRate, accent: true });
 
   // Date & ref
-  rows.push({ label: 'Date & Time', value: dateStr });
-  rows.push({ label: 'Reference', value: shortRef });
+  rows.push({ label: t('receipt.dateTime'), value: dateStr });
+  rows.push({ label: t('receipt.reference'), value: shortRef });
 
   return (
     <LinearGradient colors={['#DEEEFF', '#F5F9FF', '#FFFFFF']} style={styles.container}>
@@ -135,7 +148,7 @@ export default function ReceiptScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <Ionicons name="receipt" size={18} color="#1565C0" />
-            <Text style={styles.cardTitle}>RECEIPT</Text>
+            <Text style={styles.cardTitle}>{t('receipt.receipt')}</Text>
           </View>
 
           {rows.map(({ label, value, bold, accent }, i) => (
@@ -155,11 +168,11 @@ export default function ReceiptScreen() {
           ))}
 
           <View style={styles.statusRow}>
-            <Text style={styles.rowLabel}>Status</Text>
+            <Text style={styles.rowLabel}>{t('receipt.status')}</Text>
             <View style={[styles.badge, { backgroundColor: statusStyle.bg }]}>
               <Ionicons name={statusStyle.icon as any} size={15} color={statusStyle.text} />
               <Text style={[styles.badgeText, { color: statusStyle.text }]}>
-                {txStatus.charAt(0).toUpperCase() + txStatus.slice(1)}
+                {statusStyle.label}
               </Text>
             </View>
           </View>
@@ -180,7 +193,7 @@ export default function ReceiptScreen() {
         {/* Action buttons */}
         <TouchableOpacity style={styles.shareBtn} onPress={handleShare} activeOpacity={0.8}>
           <Ionicons name="share-social-outline" size={20} color="#1565C0" />
-          <Text style={styles.shareBtnText}>Share Receipt</Text>
+          <Text style={styles.shareBtnText}>{t('receipt.shareReceipt')}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -194,7 +207,7 @@ export default function ReceiptScreen() {
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
           >
-            <Text style={styles.doneBtnText}>Done</Text>
+            <Text style={styles.doneBtnText}>{t('receipt.done')}</Text>
           </LinearGradient>
         </TouchableOpacity>
       </ScrollView>

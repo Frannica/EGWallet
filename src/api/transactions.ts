@@ -1,4 +1,4 @@
-import { API_BASE } from './client';
+import { API_BASE, getApiLanguage } from './client';
 
 /** RFC-4122 v4 UUID using Math.random — no crypto.getRandomValues() needed. */
 function generateId(): string {
@@ -14,7 +14,7 @@ export async function getWalletCurrency(
   walletId: string
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/wallets/${encodeURIComponent(walletId)}/currency`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, 'Accept-Language': getApiLanguage() },
   });
   if (!res.ok) return 'XAF'; // graceful fallback
   const data = await res.json();
@@ -45,7 +45,7 @@ export async function fetchFxQuote(
   try {
     const res = await fetch(
       `${API_BASE}/fx-quote?from=${from}&to=${to}&amount=${amountMinor}`,
-      { headers: { Authorization: `Bearer ${token}` } }
+      { headers: { Authorization: `Bearer ${token}`, 'Accept-Language': getApiLanguage() } }
     );
     if (!res.ok) return null;
     return res.json();
@@ -76,6 +76,7 @@ export async function sendTransaction(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
         'Idempotency-Key': idempotencyKey,
+        'Accept-Language': getApiLanguage(),
       },
       body: JSON.stringify({
         fromWalletId,
@@ -107,7 +108,7 @@ export async function fetchTransactions(
   walletId: string
 ) {
   const res = await fetch(`${API_BASE}/wallets/${walletId}/transactions`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, 'Accept-Language': getApiLanguage() },
   });
 
   if (!res.ok) {
@@ -134,6 +135,7 @@ export async function createPaymentRequest(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
       'Idempotency-Key': idempotencyKey,
+      'Accept-Language': getApiLanguage(),
     },
     body: JSON.stringify({ walletId, amount, currency, memo, idempotencyKey }),
   });
@@ -148,7 +150,7 @@ export async function createPaymentRequest(
 
 export async function getPaymentRequests(token: string) {
   const res = await fetch(`${API_BASE}/payment-requests`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, 'Accept-Language': getApiLanguage() },
   });
 
   if (!res.ok) {
@@ -165,6 +167,7 @@ export async function cancelPaymentRequest(token: string, requestId: string) {
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
+      'Accept-Language': getApiLanguage(),
     },
     body: JSON.stringify({}),
   });
@@ -192,6 +195,7 @@ export async function createVirtualCard(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
       'Idempotency-Key': idempotencyKey,
+      'Accept-Language': getApiLanguage(),
     },
     body: JSON.stringify({ walletId, currency, label, idempotencyKey }),
   });
@@ -206,7 +210,7 @@ export async function createVirtualCard(
 
 export async function getVirtualCards(token: string) {
   const res = await fetch(`${API_BASE}/virtual-cards`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, 'Accept-Language': getApiLanguage() },
   });
 
   if (!res.ok) {
@@ -226,6 +230,7 @@ export async function toggleCardFreeze(token: string, cardId: string) {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
       'Idempotency-Key': idempotencyKey,
+      'Accept-Language': getApiLanguage(),
     },
     body: JSON.stringify({ idempotencyKey }),
   });
@@ -244,6 +249,7 @@ export async function deleteVirtualCard(token: string, cardId: string) {
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
+      'Accept-Language': getApiLanguage(),
     },
   });
 
@@ -270,6 +276,7 @@ export async function createBudget(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
       'Idempotency-Key': idempotencyKey,
+      'Accept-Language': getApiLanguage(),
     },
     body: JSON.stringify({ walletId, currency, monthlyLimit, idempotencyKey }),
   });
@@ -284,7 +291,7 @@ export async function createBudget(
 
 export async function getBudgets(token: string) {
   const res = await fetch(`${API_BASE}/budgets`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, 'Accept-Language': getApiLanguage() },
   });
 
   if (!res.ok) {
@@ -297,7 +304,7 @@ export async function getBudgets(token: string) {
 
 export async function getBudgetAnalytics(token: string, budgetId: string) {
   const res = await fetch(`${API_BASE}/budgets/${budgetId}/analytics`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, 'Accept-Language': getApiLanguage() },
   });
 
   if (!res.ok) {
@@ -314,6 +321,7 @@ export async function deleteBudget(token: string, budgetId: string) {
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
+      'Accept-Language': getApiLanguage(),
     },
   });
 

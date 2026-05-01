@@ -5,6 +5,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
+import { useLanguage } from '../i18n/LanguageContext';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,7 @@ interface PaymentRequest {
 export default function PayRequestScreen({ route, navigation }: any) {
   const { requestId } = route.params || {};
   const auth = useAuth();
+  const { t } = useLanguage();
 
   const [request, setRequest] = useState<PaymentRequest | null>(null);
   const [requesterEmail, setRequesterEmail] = useState('');
@@ -44,7 +46,7 @@ export default function PayRequestScreen({ route, navigation }: any) {
 
   useEffect(() => {
     if (!requestId) {
-      setError('Invalid payment link.');
+      setError(t('payRequest.invalidLink'));
       setLoading(false);
       return;
     }
@@ -60,18 +62,18 @@ export default function PayRequestScreen({ route, navigation }: any) {
           setRequesterEmail(data.requesterEmail || '');
         }
       })
-      .catch(() => setError('Could not load this payment request. Check your internet connection and try again.'))
+      .catch(() => setError(t('payRequest.loadError')))
       .finally(() => setLoading(false));
   }, [requestId]);
 
   const handlePay = async () => {
     if (!auth.token) {
       Alert.alert(
-        'Login Required',
-        'Please log in to pay this request.',
+        t('payRequest.loginRequired'),
+        t('payRequest.loginMsg'),
         [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Log In', onPress: () => navigation.navigate('Auth') },
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: t('payRequest.logIn'), onPress: () => navigation.navigate('Auth') },
         ]
       );
       return;
@@ -85,7 +87,7 @@ export default function PayRequestScreen({ route, navigation }: any) {
       });
       const walletsData = await walletsRes.json();
       const walletId = walletsData.wallets?.[0]?.id;
-      if (!walletId) throw new Error('No wallet found. Please try again.');
+      if (!walletId) throw new Error(t('payRequest.noWallet'));
 
       const payRes = await fetch(`${API_BASE}/payment-requests/${request.id}/pay`, {
         method: 'POST',
@@ -101,12 +103,12 @@ export default function PayRequestScreen({ route, navigation }: any) {
       const displayAmount = minorToMajor(request.amount, request.currency).toFixed(2);
       setRequest(prev => prev ? { ...prev, status: 'paid' } : prev);
       Alert.alert(
-        'Payment Sent! ✅',
-        `You paid ${displayAmount} ${request.currency} successfully.`,
-        [{ text: 'Done', onPress: () => navigation.goBack() }]
+        t('payRequest.paymentSentTitle'),
+        t('payRequest.paymentSentMsg').replace('{{amount}}', displayAmount).replace('{{currency}}', request.currency),
+        [{ text: t('common.done'), onPress: () => navigation.goBack() }]
       );
     } catch (e: any) {
-      Alert.alert('Payment Failed', e.message || 'Could not process payment.');
+      Alert.alert(t('payRequest.paymentFailed'), e.message || t('payRequest.couldNotProcess'));
     } finally {
       setPaying(false);
     }
@@ -118,7 +120,7 @@ export default function PayRequestScreen({ route, navigation }: any) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color="#1565C0" />
-        <Text style={styles.loadingText}>Loading payment request…</Text>
+        <Text style={styles.loadingText}>{t('payRequest.loading')}</Text>
       </View>
     );
   }
@@ -131,7 +133,7 @@ export default function PayRequestScreen({ route, navigation }: any) {
         <Ionicons name="alert-circle-outline" size={52} color="#E53935" />
         <Text style={styles.errorText}>{error || 'Request not found.'}</Text>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={styles.backBtnText}>Go Back</Text>
+          <Text style={styles.backBtnText}>{t('payRequest.goBack')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -155,11 +157,11 @@ export default function PayRequestScreen({ route, navigation }: any) {
         </View>
 
         <Text style={styles.title}>
-          {isPaid ? 'Already Paid' : isCancelled ? 'Request Cancelled' : 'Payment Request'}
+          {isPaid ? t('payRequest.alreadyPaid') : isCancelled ? t('payRequest.requestCancelled') : t('payRequest.paymentRequest')}
         </Text>
 
-        <Text style={styles.fromLabel}>Requested by</Text>
-        <Text style={styles.fromValue}>{requesterEmail || 'EGWallet User'}</Text>
+        <Text style={styles.fromLabel}>{t('payRequest.requestedBy')}</Text>
+        <Text style={styles.fromValue}>{requesterEmail || t('payRequest.egWalletUser')}</Text>
 
         <Text style={styles.amount}>
           {displayAmount.toFixed(2)}
@@ -191,19 +193,19 @@ export default function PayRequestScreen({ route, navigation }: any) {
         {isPaid && (
           <View style={styles.statusBadge}>
             <Ionicons name="checkmark-circle" size={18} color="#2e7d32" />
-            <Text style={[styles.statusText, { color: '#2e7d32' }]}> Paid</Text>
+            <Text style={[styles.statusText, { color: '#2e7d32' }]}> {t('payRequest.paid')}</Text>
           </View>
         )}
 
         {isCancelled && (
           <View style={styles.statusBadge}>
             <Ionicons name="close-circle" size={18} color="#999" />
-            <Text style={[styles.statusText, { color: '#999' }]}> Cancelled</Text>
+            <Text style={[styles.statusText, { color: '#999' }]}> {t('payRequest.cancelled')}</Text>
           </View>
         )}
 
         <TouchableOpacity style={styles.backLink} onPress={() => navigation.goBack()}>
-          <Text style={styles.backLinkText}>← Back</Text>
+          <Text style={styles.backLinkText}>{t('payRequest.back')}</Text>
         </TouchableOpacity>
       </View>
     </View>

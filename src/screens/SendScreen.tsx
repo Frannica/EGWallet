@@ -5,12 +5,13 @@ import { useAuth } from '../auth/AuthContext';
 import { listWallets } from '../api/auth';
 import { sendTransaction, getWalletCurrency, fetchFxQuote, FxQuote } from '../api/transactions';
 import { API_BASE } from '../api/client';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { majorToMinor, minorToMajor, decimalsFor, formatCurrency, CURRENCY_INFO } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { useToast } from '../utils/toast';
-import { getLocalBalances, debitLocalBalance, syncLocalBalancesFromBackend, mergeWithLocalBalances, logLocalTransaction } from '../utils/localBalance';
+import { getLocalBalances, debitLocalBalance, syncLocalBalancesFromBackend, mergeWithLocalBalances, logLocalTransaction, getPendingWithdrawals, addPendingWithdrawal, clearPendingWithdrawal } from '../utils/localBalance';
 import { WITHDRAW_LOCAL_RATE, WITHDRAW_INTL_RATE, FX_CONVERSION_RATE } from '../config/fees';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface PaymentMethod {
   id: string;
@@ -24,6 +25,7 @@ const FEE_PERCENTAGE = 0;
 
 export default function SendScreen() {
   const auth = useAuth();
+  const { t } = useLanguage();
   const { isOnline } = useNetworkStatus();
   const toast = useToast();
   const LOCAL_CURRENCIES = ['XAF', 'XOF'];
@@ -43,7 +45,7 @@ export default function SendScreen() {
   const [bankName, setBankName] = useState<string>('');
   const [accountNumber, setAccountNumber] = useState<string>('');
   const [accountName, setAccountName] = useState<string>('');
-  const [withdrawalMethod, setWithdrawalMethod] = useState<'bank' | 'mobile' | 'debit' | 'credit'>('bank');
+  const [withdrawalMethod, setWithdrawalMethod] = useState<'bank' | 'mobile' | 'debit' | 'credit'>('debit');
   const [isIntlWithdrawal, setIsIntlWithdrawal] = useState(false);
   const [withdrawalCardNumber, setWithdrawalCardNumber] = useState<string>('');
   const [withdrawalCardExpiry, setWithdrawalCardExpiry] = useState<string>('');
@@ -71,6 +73,24 @@ export default function SendScreen() {
   const navigation = useNavigation();
 
   useEffect(() => { loadWallets(); }, [auth.token]);
+
+  // Re-sync balances (only) when screen comes back into focus — e.g. returning
+  // from the Receipt screen after a withdrawal. Does NOT reset currency or
+  // fromWalletId so the user's in-progress form is preserved.
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!auth.token) return;
+      (async () => {
+        try {
+          const res = await listWallets(auth.token!);
+          await syncLocalBalancesFromBackend(res.wallets || []);
+          const localBalances = await getLocalBalances();
+          const merged = mergeWithLocalBalances(res.wallets || [], localBalances);
+          setWallets(merged);
+        } catch { /* silent — stale local data is fine */ }
+      })();
+    }, [auth.token])
+  );
 
   // Debounced FX lookup: when wallet ID or amount/currency changes, fetch quote
   useEffect(() => {
@@ -125,23 +145,34 @@ export default function SendScreen() {
 
   async function onSend() {
     if (__DEV__) console.log('[Send] Send button pressed — amount:', amount, currency, 'mode:', activeTab, 'to:', toWalletId);
-    if (!auth.token) return Alert.alert('Error', 'Not authenticated');
-    if (!fromWalletId) return Alert.alert('Error', 'Select source wallet');
+    if (!auth.token) return Alert.alert(t('common.error'), t('common.notAuthenticated'));
+    if (!fromWalletId) return Alert.alert(t('common.error'), t('send.selectSourceWallet'));
     const amt = parseFloat(amount.replace(/,/g, ''));
-    if (!amt || amt <= 0) return Alert.alert('Error', 'Enter valid amount');
+    if (!amt || amt <= 0) return Alert.alert(t('common.error'), t('send.enterValidAmount'));
     
     if (activeTab === 'transfer') {
-      if (!toWalletId.trim()) return Alert.alert('Error', 'Enter destination wallet ID');
+      if (!toWalletId.trim()) return Alert.alert(t('common.error'), t('send.enterDestWalletId'));
     } else {
       // Withdrawal validation
-      if (withdrawalMethod === 'debit') {
-        if (!withdrawalCardNumber.trim()) return Alert.alert('Error', 'Enter card number');
-        if (!withdrawalCardExpiry.trim()) return Alert.alert('Error', 'Enter card expiry');
-        if (!accountName.trim()) return Alert.alert('Error', 'Enter cardholder name');
+      if (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') {
+        if (!withdrawalCardNumber.trim()) return Alert.alert(t('common.error'), t('send.enterCardNumber'));
+        if (!withdrawalCardExpiry.trim()) return Alert.alert(t('common.error'), t('send.enterCardExpiry'));
+        if (!accountName.trim()) return Alert.alert(t('common.error'), t('send.enterCardholderName'));
       } else {
-        if (!bankName.trim()) return Alert.alert('Error', 'Enter bank name');
-        if (!accountNumber.trim()) return Alert.alert('Error', 'Enter account number');
-        if (!accountName.trim()) return Alert.alert('Error', 'Enter account holder name');
+        if (!bankName.trim()) return Alert.alert(t('common.error'), t('send.enterBankName'));
+        if (!accountNumber.trim()) return Alert.alert(t('common.error'), t('send.enterAccountNumber'));
+        if (!accountName.trim()) return Alert.alert(t('common.error'), t('send.enterAccountHolderName'));
+      }
+      // Bank withdrawal: warn about processing time before proceeding
+      if (withdrawalMethod === 'bank') {
+        return Alert.alert(
+          t('send.bankWithdrawal'),
+          t('send.bankWithdrawalMsg'),
+          [
+            { text: t('common.cancel'), style: 'cancel' },
+            { text: t('common.continue'), onPress: () => checkBalanceAndProceed(amt) },
+          ]
+        );
       }
     }
     
@@ -158,7 +189,12 @@ export default function SendScreen() {
     const localMinor = localBalances[currency] || 0;
     const localMajor = localMinor / Math.pow(10, decimalsFor(currency));
     // Conservative: if local balance data exists, take the minimum to prevent spending stale funds
-    const balanceMajor = localMinor > 0 ? Math.min(backendMajor, localMajor) : backendMajor;
+    const grossMajor = localMinor > 0 ? Math.min(backendMajor, localMajor) : backendMajor;
+    // Subtract any locally tracked pending withdrawals to get true available balance
+    const pendingWithdrawals = await getPendingWithdrawals();
+    const pendingMinor = pendingWithdrawals[currency] || 0;
+    const pendingMajor = pendingMinor / Math.pow(10, decimalsFor(currency));
+    const balanceMajor = Math.max(0, grossMajor - pendingMajor);
 
     if (balanceMajor >= amt) {
       setScamAcknowledged(false);
@@ -167,11 +203,14 @@ export default function SendScreen() {
       // Insufficient balance — direct user to add money instead of a non-functional card form
       const shortfall = (amt - balanceMajor).toFixed(2);
       Alert.alert(
-        'Insufficient Balance',
-        `You only have ${balanceMajor.toFixed(2)} ${currency} available.\n\nAdd ${shortfall} ${currency} more to complete this transfer.`,
+        t('send.insufficientBalance'),
+        t('send.insufficientBalanceMsg')
+          .replace('{balance}', balanceMajor.toFixed(2))
+          .replace('{currency}', currency)
+          .replace('{shortfall}', shortfall),
         [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Add Money', onPress: () => (navigation as any).navigate('Deposit', { walletId: fromWalletId }) },
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: t('deposit.addMoney'), onPress: () => (navigation as any).navigate('Deposit', { walletId: fromWalletId }) },
         ]
       );
     }
@@ -192,7 +231,7 @@ export default function SendScreen() {
   function handleAddPaymentMethod() {
     if (addCardType === 'bank') {
       if (!bankAccountNum.trim() || !bankRoutingNum.trim() || !cardHolder.trim()) {
-        Alert.alert('Missing Info', 'Please fill in all fields.');
+        Alert.alert(t('send.missingInfo'), t('send.pleaseFillFields'));
         return;
       }
       const last4 = bankAccountNum.slice(-4).padStart(4, '•');
@@ -209,7 +248,7 @@ export default function SendScreen() {
       completeSendWithPaymentMethod(method);
     } else {
       if (!cardNumber.trim() || !cardHolder.trim() || !cardExpiry.trim()) {
-        Alert.alert('Missing Info', 'Please fill in all fields.');
+        Alert.alert(t('send.missingInfo'), t('send.pleaseFillFields'));
         return;
       }
       const last4 = cardNumber.replace(/\s/g, '').slice(-4);
@@ -241,11 +280,11 @@ export default function SendScreen() {
 
   async function completeSendWithPaymentMethod(method: PaymentMethod) {
     if (__DEV__) console.log('[Send] completeSendWithPaymentMethod — method:', method.label);
-    if (!auth.token || !fromWalletId) return Alert.alert('Error', 'Not authenticated');
+    if (!auth.token || !fromWalletId) return Alert.alert(t('common.error'), t('common.notAuthenticated'));
     const amt = parseFloat(amount.replace(/,/g, ''));
-    if (!amt || amt <= 0) return Alert.alert('Error', 'Enter valid amount');
+    if (!amt || amt <= 0) return Alert.alert(t('common.error'), t('send.enterValidAmount'));
     const amountMinor = majorToMinor(amt, currency);
-    if (!toWalletId) return Alert.alert('Error', 'Enter destination wallet ID');
+    if (!toWalletId) return Alert.alert(t('common.error'), t('send.enterDestWalletId'));
     setLoading(true);
     try {
       const res = await sendTransaction(auth.token, fromWalletId, toWalletId, amountMinor, currency);
@@ -255,7 +294,7 @@ export default function SendScreen() {
       setToWalletId('');
       setSelectedPaymentMethod(method);
       setShowPaymentMethodModal(false);
-      toast.show('Payment Sent \u2705');
+      toast.show(t('send.paymentSentToast'));
       (navigation as any).navigate('Receipt', {
         amount: amountMinor,
         currency,
@@ -268,7 +307,7 @@ export default function SendScreen() {
         status: 'completed',
       });
     } catch (e: any) {
-      Alert.alert('Transaction Failed', e?.message || 'Backend unavailable. Please try again.');
+      Alert.alert(t('send.transactionFailed'), e?.message || t('send.backendUnavailable'));
     } finally {
       setLoading(false);
     }
@@ -281,22 +320,33 @@ export default function SendScreen() {
     const amt = parseFloat(amount.replace(/,/g, ''));
     const amountMinor = majorToMinor(amt, currency);
 
-    // Client-side balance guard — prevents submission when local balance is known-insufficient.
-    // This is defence-in-depth; the backend enforces the real check.
-    const localBals = await getLocalBalances();
-    const localAvailable = localBals[currency] ?? 0;
-    const walletBalance = wallets[0]?.balances?.find((b: any) => b.currency === currency)?.amount ?? 0;
-    const effectiveBalance = localAvailable > 0 ? localAvailable : walletBalance;
-    if (effectiveBalance > 0 && amountMinor > effectiveBalance) {
-      Alert.alert(
-        'Insufficient Funds',
-        `You only have ${minorToMajor(effectiveBalance, currency).toFixed(2)} ${currency} available.`
-      );
-      return;
-    }
-    
+    // Set loading FIRST — collapses the TOCTOU window between two rapid taps.
+    // Any re-render from here disables the confirm button (disabled={loading}).
     setLoading(true);
     try {
+      // Client-side balance guard — defence-in-depth; backend enforces the real check.
+      const localBals = await getLocalBalances();
+      const localAvailable = localBals[currency] ?? 0;
+      const walletBalance = wallets[0]?.balances?.find((b: any) => b.currency === currency)?.amount ?? 0;
+      const effectiveBalance = localAvailable > 0 ? localAvailable : walletBalance;
+      // Subtract any already-pending local withdrawals from available balance
+      const pendingWithdrawals = await getPendingWithdrawals();
+      const alreadyPendingMinor = pendingWithdrawals[currency] || 0;
+      const trueAvailable = Math.max(0, effectiveBalance - alreadyPendingMinor);
+      // Block if insufficient — note: no short-circuit on zero (zero balance must also be blocked)
+      if (amountMinor > trueAvailable) {
+        Alert.alert(
+          t('send.insufficientFunds'),
+          t('send.insufficientFundsMsg')
+            .replace('{balance}', minorToMajor(trueAvailable, currency).toFixed(2))
+            .replace('{currency}', currency)
+        );
+        return;
+      }
+
+      // Lock funds locally before the network request (pending deduction prevents double-spend)
+      await addPendingWithdrawal(currency, amountMinor);
+
       const response = await fetch(`${API_BASE}/withdrawals`, {
         method: 'POST',
         headers: {
@@ -324,6 +374,7 @@ export default function SendScreen() {
       // Debit local balance and log locally (backend stores withdrawals
       // in db.withdrawals, NOT db.transactions, so we must log here)
       await debitLocalBalance(currency, amountMinor);
+      await clearPendingWithdrawal(currency, amountMinor);
       await logLocalTransaction({
         type: 'withdrawal',
         direction: 'out',
@@ -353,7 +404,9 @@ export default function SendScreen() {
         status: 'pending',
       });
     } catch (e: any) {
-      Alert.alert('Transaction Failed', e?.message || 'Backend unavailable. Please try again.');
+      // Release the pending lock on failure so user can retry
+      await clearPendingWithdrawal(currency, amountMinor);
+      Alert.alert(t('send.transactionFailed'), e?.message || t('send.backendUnavailable'));
       return;
     } finally {
       setLoading(false);
@@ -428,16 +481,16 @@ export default function SendScreen() {
 
   async function onSendConfirmed() {
     if (__DEV__) console.log('[Send] Confirm & Send pressed — currency:', currency);
-    if (!auth.token) return Alert.alert('Error', 'Not authenticated');
-    if (!fromWalletId) return Alert.alert('Error', 'Select source wallet');
+    if (!auth.token) return Alert.alert(t('common.error'), t('common.notAuthenticated'));
+    if (!fromWalletId) return Alert.alert(t('common.error'), t('send.selectSourceWallet'));
     const amt = parseFloat(amount.replace(/,/g, ''));
-    if (!amt || amt <= 0) return Alert.alert('Error', 'Enter valid amount');
+    if (!amt || amt <= 0) return Alert.alert(t('common.error'), t('send.enterValidAmount'));
     const amountMinor = majorToMinor(amt, currency);
-    if (!toWalletId) return Alert.alert('Error', 'Enter destination wallet ID');
+    if (!toWalletId) return Alert.alert(t('common.error'), t('send.enterDestWalletId'));
     
     // Check scam acknowledgement for high amounts
     if (isHighAmount() && !scamAcknowledged) {
-      return Alert.alert('Acknowledgement Required', 'Please confirm you understand the scam warning before sending.');
+      return Alert.alert(t('send.acknowledgeRequired'), t('send.acknowledgeRequiredMsg'));
     }
 
     setLoading(true);
@@ -447,7 +500,7 @@ export default function SendScreen() {
       await loadWallets();
       setAmount('');
       setShowConfirmation(false);
-      toast.show('Payment Sent \u2705');
+      toast.show(t('send.paymentSentToast'));
       (navigation as any).navigate('Receipt', {
         amount: amountMinor,
         currency,
@@ -465,7 +518,7 @@ export default function SendScreen() {
       });
       setToWalletId('');
     } catch (e: any) {
-      Alert.alert('Transaction Failed', e?.message || 'Backend unavailable. Please try again.');
+      Alert.alert(t('send.transactionFailed'), e?.message || t('send.backendUnavailable'));
       return;
     } finally {
       setLoading(false);
@@ -506,7 +559,7 @@ export default function SendScreen() {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
-                {showAddCardForm ? (addCardType === 'bank' ? 'Add Bank Account' : addCardType === 'credit' ? 'Add Credit Card' : 'Add Debit Card') : 'Add Payment Method'}
+                {showAddCardForm ? (addCardType === 'bank' ? t('send.addBankAccount') : addCardType === 'credit' ? t('send.addCreditCard') : t('send.addDebitCard')) : t('send.addPaymentMethod')}
               </Text>
               <TouchableOpacity onPress={() => { setShowPaymentMethodModal(false); setShowAddCardForm(false); setAddCardType(null); }}>
                 <Ionicons name="close" size={24} color="#14171A" />
@@ -520,14 +573,14 @@ export default function SendScreen() {
                   <View style={styles.insufficientBanner}>
                     <Ionicons name="information-circle" size={20} color="#1565C0" />
                     <Text style={styles.insufficientText}>
-                      Your wallet balance is insufficient for this transfer. Choose a payment method to complete it.
+                      {t('send.insufficientBanner')}
                     </Text>
                   </View>
 
                   {/* Saved methods */}
                   {savedPaymentMethods.length > 0 && (
                     <>
-                      <Text style={styles.pmSectionLabel}>SAVED METHODS</Text>
+                      <Text style={styles.pmSectionLabel}>{t('send.savedMethods')}</Text>
                       {savedPaymentMethods.map(method => (
                         <TouchableOpacity
                           key={method.id}
@@ -545,7 +598,7 @@ export default function SendScreen() {
                         </TouchableOpacity>
                       ))}
                       <View style={styles.pmDivider} />
-                      <Text style={styles.pmSectionLabel}>ADD NEW</Text>
+                      <Text style={styles.pmSectionLabel}>{t('send.addNew')}</Text>
                     </>
                   )}
 
@@ -555,8 +608,7 @@ export default function SendScreen() {
                       <Ionicons name="card" size={22} color="#1565C0" />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.pmLabel}>Add Debit Card</Text>
-                      <Text style={styles.pmSub}>Visa, Mastercard, Verve</Text>
+                      <Text style={styles.pmLabel}>{t('send.addDebitCard')}</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={18} color="#9BAAB8" />
                   </TouchableOpacity>
@@ -566,8 +618,7 @@ export default function SendScreen() {
                       <Ionicons name="card-outline" size={22} color="#6A1B9A" />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.pmLabel}>Add Credit Card</Text>
-                      <Text style={styles.pmSub}>Visa, Mastercard, Amex</Text>
+                      <Text style={styles.pmLabel}>{t('send.addCreditCard')}</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={18} color="#9BAAB8" />
                   </TouchableOpacity>
@@ -577,8 +628,7 @@ export default function SendScreen() {
                       <Ionicons name="business-outline" size={22} color="#2E7D32" />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.pmLabel}>Add Bank Account</Text>
-                      <Text style={styles.pmSub}>Direct bank transfer</Text>
+                      <Text style={styles.pmLabel}>{t('send.addBankAccount')}</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={18} color="#9BAAB8" />
                   </TouchableOpacity>
@@ -587,33 +637,33 @@ export default function SendScreen() {
                 <>
                   <TouchableOpacity style={styles.pmBackRow} onPress={() => { setShowAddCardForm(false); setAddCardType(null); }}>
                     <Ionicons name="arrow-back" size={18} color="#1565C0" />
-                    <Text style={styles.pmBackText}>Back</Text>
+                    <Text style={styles.pmBackText}>{t('deposit.back')}</Text>
                   </TouchableOpacity>
 
                   {addCardType === 'bank' ? (
                     <>
-                      <Text style={styles.pmFormLabel}>ACCOUNT HOLDER NAME</Text>
+                      <Text style={styles.pmFormLabel}>{t('deposit.accountHolderName')}</Text>
                       <TextInput
                         value={cardHolder}
                         onChangeText={setCardHolder}
-                        placeholder="Full name"
+                        placeholder={t('deposit.fullName')}
                         placeholderTextColor="#AAB8C2"
                         style={styles.pmInput}
                       />
-                      <Text style={styles.pmFormLabel}>ACCOUNT NUMBER</Text>
+                      <Text style={styles.pmFormLabel}>{t('deposit.accountNumber')}</Text>
                       <TextInput
                         value={bankAccountNum}
                         onChangeText={setBankAccountNum}
-                        placeholder="Enter account number"
+                        placeholder={t('deposit.enterAccountNum')}
                         placeholderTextColor="#AAB8C2"
                         keyboardType="number-pad"
                         style={styles.pmInput}
                       />
-                      <Text style={styles.pmFormLabel}>ROUTING / SORT CODE</Text>
+                      <Text style={styles.pmFormLabel}>{t('deposit.routingCode')}</Text>
                       <TextInput
                         value={bankRoutingNum}
                         onChangeText={setBankRoutingNum}
-                        placeholder="Enter routing number"
+                        placeholder={t('deposit.enterRoutingNum')}
                         placeholderTextColor="#AAB8C2"
                         keyboardType="number-pad"
                         style={styles.pmInput}
@@ -621,7 +671,7 @@ export default function SendScreen() {
                     </>
                   ) : (
                     <>
-                      <Text style={styles.pmFormLabel}>CARD NUMBER</Text>
+                      <Text style={styles.pmFormLabel}>{t('deposit.cardNumber')}</Text>
                       <TextInput
                         value={cardNumber}
                         onChangeText={v => setCardNumber(v.replace(/\D/g, '').replace(/(.{4})/g, '$1 ').trim())}
@@ -631,15 +681,15 @@ export default function SendScreen() {
                         maxLength={19}
                         style={styles.pmInput}
                       />
-                      <Text style={styles.pmFormLabel}>CARDHOLDER NAME</Text>
+                      <Text style={styles.pmFormLabel}>{t('deposit.cardholderName')}</Text>
                       <TextInput
                         value={cardHolder}
                         onChangeText={setCardHolder}
-                        placeholder="Name as on card"
+                        placeholder={t('deposit.nameAsOnCard')}
                         placeholderTextColor="#AAB8C2"
                         style={styles.pmInput}
                       />
-                      <Text style={styles.pmFormLabel}>EXPIRY DATE</Text>
+                      <Text style={styles.pmFormLabel}>{t('deposit.expiryDate')}</Text>
                       <TextInput
                         value={cardExpiry}
                         onChangeText={v => {
@@ -657,9 +707,9 @@ export default function SendScreen() {
                   )}
 
                   <TouchableOpacity style={styles.pmConfirmButton} onPress={handleAddPaymentMethod} disabled={loading}>
-                    {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.pmConfirmButtonText}>Pay Now</Text>}
+                    {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.pmConfirmButtonText}>{t('send.payNow')}</Text>}
                   </TouchableOpacity>
-                  <Text style={styles.pmSecureNote}>🔒 Your payment details are encrypted and secure.</Text>
+                  <Text style={styles.pmSecureNote}>{t('deposit.secureNote')}</Text>
                 </>
               )}
             </ScrollView>
@@ -680,7 +730,7 @@ export default function SendScreen() {
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>🚨 Scam Warning Signs</Text>
+            <Text style={styles.modalTitle}>🚨 {t('send.scamWarningSigns')}</Text>
             <TouchableOpacity onPress={() => setShowScamTips(false)}>
               <Ionicons name="close" size={24} color="#14171A" />
             </TouchableOpacity>
@@ -690,55 +740,55 @@ export default function SendScreen() {
             <View style={styles.tipItem}>
               <Ionicons name="alert-circle" size={24} color="#D32F2F" />
               <View style={styles.tipContent}>
-                <Text style={styles.tipTitle}>Pressure to send money quickly</Text>
-                <Text style={styles.tipText}>Scammers create urgency. Take your time to verify.</Text>
+                <Text style={styles.tipTitle}>{t('send.scamTip1Title')}</Text>
+                <Text style={styles.tipText}>{t('send.scamTip1Text')}</Text>
               </View>
             </View>
             
             <View style={styles.tipItem}>
               <Ionicons name="heart-dislike" size={24} color="#D32F2F" />
               <View style={styles.tipContent}>
-                <Text style={styles.tipTitle}>Romance or friendship scams</Text>
-                <Text style={styles.tipText}>Never send money to people you met online and haven't met in person.</Text>
+                <Text style={styles.tipTitle}>{t('send.scamTip2Title')}</Text>
+                <Text style={styles.tipText}>{t('send.scamTip2Text')}</Text>
               </View>
             </View>
             
             <View style={styles.tipItem}>
               <Ionicons name="trophy" size={24} color="#D32F2F" />
               <View style={styles.tipContent}>
-                <Text style={styles.tipTitle}>"You won!" messages</Text>
-                <Text style={styles.tipText}>Legitimate prizes don't require upfront payment or fees.</Text>
+                <Text style={styles.tipTitle}>{t('send.scamTip3Title')}</Text>
+                <Text style={styles.tipText}>{t('send.scamTip3Text')}</Text>
               </View>
             </View>
             
             <View style={styles.tipItem}>
               <Ionicons name="shield-checkmark" size={24} color="#D32F2F" />
               <View style={styles.tipContent}>
-                <Text style={styles.tipTitle}>Impersonation scams</Text>
-                <Text style={styles.tipText}>Verify identities through official channels, not links they provide.</Text>
+                <Text style={styles.tipTitle}>{t('send.scamTip4Title')}</Text>
+                <Text style={styles.tipText}>{t('send.scamTip4Text')}</Text>
               </View>
             </View>
             
             <View style={styles.tipItem}>
               <Ionicons name="card" size={24} color="#D32F2F" />
               <View style={styles.tipContent}>
-                <Text style={styles.tipTitle}>Investment opportunities</Text>
-                <Text style={styles.tipText}>Be wary of guaranteed high returns or "insider" opportunities.</Text>
+                <Text style={styles.tipTitle}>{t('send.scamTip5Title')}</Text>
+                <Text style={styles.tipText}>{t('send.scamTip5Text')}</Text>
               </View>
             </View>
             
             <View style={styles.tipItem}>
               <Ionicons name="hand-left" size={24} color="#D32F2F" />
               <View style={styles.tipContent}>
-                <Text style={styles.tipTitle}>Charity scams</Text>
-                <Text style={styles.tipText}>Verify charities through official databases before donating.</Text>
+                <Text style={styles.tipTitle}>{t('send.scamTip6Title')}</Text>
+                <Text style={styles.tipText}>{t('send.scamTip6Text')}</Text>
               </View>
             </View>
             
             <View style={styles.safetyBox}>
               <Ionicons name="checkmark-circle" size={24} color="#2E7D32" />
               <Text style={styles.safetyText}>
-                <Text style={styles.safetyBold}>Stay Safe:</Text> Only send money to people you know and trust personally. When in doubt, stop and verify.
+                <Text style={styles.safetyBold}>{t('send.staySafe')}</Text> {t('send.staySafeText')}
               </Text>
             </View>
           </ScrollView>
@@ -747,7 +797,7 @@ export default function SendScreen() {
             style={styles.modalCloseButton} 
             onPress={() => setShowScamTips(false)}
           >
-            <Text style={styles.modalCloseText}>Got it</Text>
+            <Text style={styles.modalCloseText}>{t('common.gotIt')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -762,13 +812,13 @@ export default function SendScreen() {
         {paymentMethodModal}
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.confirmHeader}>
-            <Text style={styles.confirmTitle}>{activeTab === 'transfer' ? 'Review Transaction' : 'Review Withdrawal'}</Text>
-            <Text style={styles.confirmSubtitle}>Please confirm the details below</Text>
+            <Text style={styles.confirmTitle}>{activeTab === 'transfer' ? t('send.reviewTransaction') : t('send.reviewWithdrawal')}</Text>
+          <Text style={styles.confirmSubtitle}>{t('send.confirmDetails')}</Text>
             {selectedPaymentMethod && (
               <View style={styles.pmBadge}>
                 <Ionicons name={getPaymentMethodIcon(selectedPaymentMethod.type) as any} size={14} color="#1565C0" />
                 <Text style={styles.pmBadgeText}>
-                  Paying from: {selectedPaymentMethod.label} •••• {selectedPaymentMethod.last4}
+                  {t('send.payingFrom')}: {selectedPaymentMethod.label} •••• {selectedPaymentMethod.last4}
                 </Text>
               </View>
             )}
@@ -776,47 +826,47 @@ export default function SendScreen() {
 
           <View style={styles.summaryCard}>
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>From Wallet</Text>
+              <Text style={styles.summaryLabel}>{t('send.fromWallet')}</Text>
               <Text style={styles.summaryValue}>{fromWalletId?.substring(0, 12)}...</Text>
             </View>
             {activeTab === 'transfer' ? (
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>To Wallet</Text>
+                <Text style={styles.summaryLabel}>{t('send.toWallet')}</Text>
                 <Text style={styles.summaryValue}>{toWalletId.substring(0, 12)}...</Text>
               </View>
             ) : (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? (
               <>
                 <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Card Number</Text>
+                  <Text style={styles.summaryLabel}>{t('card.number')}</Text>
                   <Text style={styles.summaryValue}>•••• •••• •••• {withdrawalCardNumber.replace(/\s/g, '').slice(-4)}</Text>
                 </View>
                 <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Expiry</Text>
+                  <Text style={styles.summaryLabel}>{t('card.expiry')}</Text>
                   <Text style={styles.summaryValue}>{withdrawalCardExpiry}</Text>
                 </View>
                 <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Cardholder</Text>
+                  <Text style={styles.summaryLabel}>{t('send.cardholder')}</Text>
                   <Text style={styles.summaryValue}>{accountName}</Text>
                 </View>
               </>
             ) : (
               <>
                 <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>{withdrawalMethod === 'bank' ? 'Bank' : 'Mobile Operator'}</Text>
+                  <Text style={styles.summaryLabel}>{withdrawalMethod === 'bank' ? t('send.bankWithdrawal') : t('send.mobileOperator')}</Text>
                   <Text style={styles.summaryValue}>{bankName}</Text>
                 </View>
                 <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>{withdrawalMethod === 'bank' ? 'Account' : 'Phone'}</Text>
+                  <Text style={styles.summaryLabel}>{withdrawalMethod === 'bank' ? t('send.accountLabel') : t('send.phoneLabel')}</Text>
                   <Text style={styles.summaryValue}>{accountNumber}</Text>
                 </View>
                 <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Name</Text>
+                  <Text style={styles.summaryLabel}>{t('send.name')}</Text>
                   <Text style={styles.summaryValue}>{accountName}</Text>
                 </View>
               </>
             )}
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Currency</Text>
+              <Text style={styles.summaryLabel}>{t('common.currency')}</Text>
               <Text style={styles.summaryValueBold}>{currency}</Text>
             </View>
           </View>
@@ -824,59 +874,59 @@ export default function SendScreen() {
           <View style={styles.amountCard}>
             {/* You send / You withdraw */}
             <View style={styles.amountRow}>
-              <Text style={styles.amountLabel}>{activeTab === 'withdraw' ? 'You withdraw' : 'You send'}</Text>
+              <Text style={styles.amountLabel}>{activeTab === 'withdraw' ? t('send.youWithdraw') : t('send.youSend')}</Text>
               <Text style={styles.amountValue}>{formatCurrency(majorToMinor(preview.amount, currency), currency)}</Text>
             </View>
             {/* Sender / Your currency */}
             <View style={styles.amountRow}>
-              <Text style={styles.amountLabel}>{activeTab === 'withdraw' ? 'Your currency' : 'Sender currency'}</Text>
+              <Text style={styles.amountLabel}>{activeTab === 'withdraw' ? t('send.yourCurrency') : t('send.senderCurrency')}</Text>
               <Text style={styles.amountLabel}>{currency}</Text>
             </View>
             {activeTab === 'withdraw' && preview.fee > 0 && (
               <View style={styles.amountRow}>
                 <Text style={styles.amountLabel}>
-                  {preview.feeRate ? `Withdrawal Fee (${(preview.feeRate * 100).toFixed(2)}%)` : 'Withdrawal Fee'}
-                  {isIntlWithdrawal ? ' · International' : ' · Local'}
+                  {preview.feeRate ? `${t('send.withdrawalFee')} (${(preview.feeRate * 100).toFixed(2)}%)` : t('send.withdrawalFee')}
+                  {isIntlWithdrawal ? ` · ${t('send.international')}` : ` · ${t('send.local')}`}
                 </Text>
                 <Text style={styles.feeValue}>-{formatCurrency(majorToMinor(preview.fee, currency), currency)}</Text>
               </View>
             )}
             {activeTab === 'transfer' && preview.isCrossCurrency && (
               <View style={styles.amountRow}>
-                <Text style={styles.amountLabel}>FX Conversion Fee (1.15%)</Text>
+                <Text style={styles.amountLabel}>{t('send.fxConversionFee')}</Text>
                 <Text style={styles.feeValue}>-{formatCurrency(preview.fxFeeAmount, preview.receiverCurrency)}</Text>
               </View>
             )}
             {activeTab === 'transfer' && !preview.isCrossCurrency && (
               <View style={styles.amountRow}>
-                <Text style={styles.amountLabel}>Transfer Fee</Text>
-                <Text style={[styles.feeValue, { color: '#2E7D32' }]}>Free</Text>
+                <Text style={styles.amountLabel}>{t('send.transferFee')}</Text>
+                <Text style={[styles.feeValue, { color: '#2E7D32' }]}>{t('send.free')}</Text>
               </View>
             )}
             {/* FX rate */}
             {preview.isCrossCurrency && preview.rateDisplay && (
               <View style={styles.amountRow}>
-                <Text style={[styles.amountLabel, { color: '#7C3AED', fontSize: 12 }]}>FX Rate</Text>
+                <Text style={[styles.amountLabel, { color: '#7C3AED', fontSize: 12 }]}>{t('send.fxRate')}</Text>
                 <Text style={[styles.amountLabel, { color: '#7C3AED', fontSize: 12 }]}>{preview.rateDisplay}</Text>
               </View>
             )}
             {/* Recipient currency */}
             {preview.isCrossCurrency && (
               <View style={styles.amountRow}>
-                <Text style={[styles.amountLabel, { color: '#7C3AED' }]}>Recipient currency</Text>
+                <Text style={[styles.amountLabel, { color: '#7C3AED' }]}>{t('send.recipientCurrency')}</Text>
                 <Text style={[styles.amountLabel, { color: '#7C3AED' }]}>{preview.receiverCurrency}</Text>
               </View>
             )}
             {/* They receive / You receive — total row */}
             <View style={[styles.amountRow, styles.totalRow]}>
-              <Text style={styles.totalLabel}>{activeTab === 'withdraw' ? 'You receive' : 'They receive'}</Text>
+              <Text style={styles.totalLabel}>{activeTab === 'withdraw' ? t('send.youReceive') : t('send.theyReceive')}</Text>
               <Text style={styles.totalValue}>
                 {formatCurrency(preview.receiverGetsMinor, preview.receiverCurrency)}
               </Text>
             </View>
             {/* Total charged from wallet */}
             <View style={[styles.amountRow, { borderTopWidth: 1, borderTopColor: '#E8F0FC', marginTop: 4, paddingTop: 10 }]}>
-              <Text style={[styles.amountLabel, { fontWeight: '700', color: '#0D1B2E' }]}>Total charged from wallet</Text>
+              <Text style={[styles.amountLabel, { fontWeight: '700', color: '#0D1B2E' }]}>{t('send.totalCharged')}</Text>
               <Text style={[styles.amountValue, { color: '#0D1B2E' }]}>{formatCurrency(majorToMinor(preview.amount, currency), currency)}</Text>
             </View>
           </View>
@@ -884,10 +934,10 @@ export default function SendScreen() {
           <View style={styles.infoBox}>
             <Text style={styles.infoText}>
               {activeTab === 'withdraw'
-                ? `ℹ️ ${isIntlWithdrawal ? 'International' : 'Local'} withdrawal fee: ${isIntlWithdrawal ? '1.75%' : '1.28%'} deducted from the amount.`
+                ? `ℹ️ ${isIntlWithdrawal ? 'International' : 'Local'} ${t('send.withdrawalFeeInfo')}: ${isIntlWithdrawal ? t('send.intlFeeHint') : t('send.localFeeHint')} deducted from the amount.`
                 : preview.isCrossCurrency
-                  ? `ℹ️ A 1.15% FX conversion fee is deducted from the converted amount (${preview.receiverCurrency}).`
-                  : 'ℹ️ Same-currency transfers are free. No fees apply.'
+                  ? `ℹ️ ${t('send.fxFeeInfo')} is deducted from the converted amount (${preview.receiverCurrency}).`
+                  : t('send.sameCurrencyFree')
               }
             </Text>
           </View>
@@ -896,16 +946,16 @@ export default function SendScreen() {
           <View style={styles.scamWarning}>
             <View style={styles.scamWarningHeader}>
               <Ionicons name="warning" size={20} color="#D32F2F" />
-              <Text style={styles.scamWarningTitle}>Scam warning</Text>
+              <Text style={styles.scamWarningTitle}>{t('send.scamWarning')}</Text>
             </View>
             <Text style={styles.scamWarningText}>
-              Don't send money to charities, people you met online, or anyone you don't personally know. If someone is pressuring you, stop and verify first.
+              {t('send.scamWarningText')}
             </Text>
             <TouchableOpacity 
               style={styles.learnMoreButton}
               onPress={() => setShowScamTips(true)}
             >
-              <Text style={styles.learnMoreText}>Learn scam signs</Text>
+              <Text style={styles.learnMoreText}>{t('send.learnScamSigns')}</Text>
               <Ionicons name="chevron-forward" size={16} color="#1565C0" />
             </TouchableOpacity>
           </View>
@@ -923,7 +973,7 @@ export default function SendScreen() {
                 )}
               </View>
               <Text style={styles.checkboxLabel}>
-                I understand. I'm sending to someone I trust.
+                {t('send.scamAcknowledge')}
               </Text>
             </TouchableOpacity>
           )}
@@ -934,7 +984,7 @@ export default function SendScreen() {
               onPress={() => setShowConfirmation(false)}
               disabled={loading}
             >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+              <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
             <TouchableOpacity 
               style={[
@@ -948,7 +998,7 @@ export default function SendScreen() {
               {loading ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.confirmButtonText}>{activeTab === 'withdraw' ? 'Confirm Withdrawal' : 'Confirm & Send'}</Text>
+                <Text style={styles.confirmButtonText}>{activeTab === 'withdraw' ? t('send.confirmWithdrawal') : t('send.confirmAndSend')}</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -964,8 +1014,8 @@ export default function SendScreen() {
       {paymentMethodModal}
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
-          <Text style={styles.title}>Send Money</Text>
-          <Text style={styles.subtitle}>{activeTab === 'transfer' ? 'Transfer funds to another wallet' : 'Withdraw to your bank account'}</Text>
+          <Text style={styles.title}>{t('send.title')}</Text>
+          <Text style={styles.subtitle}>{activeTab === 'transfer' ? t('send.transferSubtitle') : t('send.withdrawSubtitle')}</Text>
         </View>
 
         {/* Tab Switcher */}
@@ -975,29 +1025,29 @@ export default function SendScreen() {
             onPress={() => setActiveTab('transfer')}
           >
             <Ionicons name="send" size={18} color={activeTab === 'transfer' ? '#1565C0' : '#657786'} />
-            <Text style={[styles.tabText, activeTab === 'transfer' && styles.tabTextActive]}>Transfer</Text>
+            <Text style={[styles.tabText, activeTab === 'transfer' && styles.tabTextActive]}>{t('send.transfer')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.tab, activeTab === 'withdraw' && styles.tabActive]}
             onPress={() => setActiveTab('withdraw')}
           >
             <Ionicons name="cash-outline" size={18} color={activeTab === 'withdraw' ? '#1565C0' : '#657786'} />
-            <Text style={[styles.tabText, activeTab === 'withdraw' && styles.tabTextActive]}>Withdraw</Text>
+            <Text style={[styles.tabText, activeTab === 'withdraw' && styles.tabTextActive]}>{t('wallet.withdraw')}</Text>
           </TouchableOpacity>
         </View>
 
         {loading && wallets.length === 0 ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#1565C0" />
-            <Text style={styles.loadingText}>Loading wallets...</Text>
+            <Text style={styles.loadingText}>{t('send.loadingWallets')}</Text>
           </View>
         ) : (
           <>
             <View style={styles.section}>
-              <Text style={styles.label}>From Wallet</Text>
+              <Text style={styles.label}>{t('send.fromWallet')}</Text>
               {wallets.length === 0 ? (
                 <View style={styles.emptyWallet}>
-                  <Text style={styles.emptyWalletText}>Demo Wallet (XAF 0.00)</Text>
+                  <Text style={styles.emptyWalletText}>{t('send.demoWallet')} (XAF 0.00)</Text>
                 </View>
               ) : (
                 <View style={styles.walletSelector}>
@@ -1040,11 +1090,11 @@ export default function SendScreen() {
             {activeTab === 'transfer' ? (
               <>
                 <View style={styles.section}>
-                  <Text style={styles.label}>Recipient (Wallet ID or @username)</Text>
+                  <Text style={styles.label}>{t('send.recipient')}</Text>
                   <TextInput
                     value={toWalletId}
                     onChangeText={setToWalletId}
-                    placeholder="Enter wallet ID or @username"
+                    placeholder={t('send.recipientPlaceholder')}
                     placeholderTextColor="#AAB8C2"
                     autoCapitalize="none"
                     editable={!loading}
@@ -1054,36 +1104,63 @@ export default function SendScreen() {
               </>
             ) : (
               <>
+                {/* Available / Pending Balance Banner */}
+                {(() => {
+                  const w = wallets.find(x => x.id === fromWalletId);
+                  const bal = (w?.balances || []).find((b: any) => b.currency === currency);
+                  const availableMinor = bal?.amount ?? 0;
+                  const pendingMinor: number = w?.holdBalance?.[currency] ?? 0;
+                  if (!w) return null;
+                  return (
+                    <View style={styles.balanceSummaryBanner}>
+                      <View style={styles.balanceSummaryRow}>
+                        <Text style={styles.balanceSummaryLabel}>{t('send.availableToWithdraw')}</Text>
+                        <Text style={styles.balanceSummaryValue}>{formatCurrency(availableMinor, currency)}</Text>
+                      </View>
+                      {pendingMinor > 0 && (
+                        <View style={styles.balanceSummaryRow}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Ionicons name="time-outline" size={13} color="#E65100" />
+                            <Text style={[styles.balanceSummaryLabel, { color: '#E65100' }]}>{t('send.pendingWithdrawal')}</Text>
+                          </View>
+                          <Text style={[styles.balanceSummaryValue, { color: '#E65100' }]}>-{formatCurrency(pendingMinor, currency)}</Text>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })()}
                 <View style={styles.section}>
-                  <Text style={styles.label}>Withdrawal Method</Text>
+                  <Text style={styles.label}>{t('send.withdrawalMethod')}</Text>
                   <View style={styles.methodSelector}>
-                    <TouchableOpacity
-                      style={[styles.methodOption, withdrawalMethod === 'bank' && styles.methodOptionActive]}
-                      onPress={() => setWithdrawalMethod('bank')}
-                    >
-                      <Ionicons name="business" size={20} color={withdrawalMethod === 'bank' ? '#1565C0' : '#657786'} />
-                      <Text style={[styles.methodText, withdrawalMethod === 'bank' && styles.methodTextActive]}>Bank</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.methodOption, withdrawalMethod === 'mobile' && styles.methodOptionActive]}
-                      onPress={() => setWithdrawalMethod('mobile')}
-                    >
-                      <Ionicons name="phone-portrait" size={20} color={withdrawalMethod === 'mobile' ? '#1565C0' : '#657786'} />
-                      <Text style={[styles.methodText, withdrawalMethod === 'mobile' && styles.methodTextActive]}>Mobile Money</Text>
-                    </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.methodOption, withdrawalMethod === 'debit' && styles.methodOptionActive]}
                       onPress={() => setWithdrawalMethod('debit')}
                     >
                       <Ionicons name="card" size={20} color={withdrawalMethod === 'debit' ? '#1565C0' : '#657786'} />
-                      <Text style={[styles.methodText, withdrawalMethod === 'debit' && styles.methodTextActive]}>Debit Card</Text>
+                      <Text style={[styles.methodText, withdrawalMethod === 'debit' && styles.methodTextActive]}>{t('send.debitCard')}</Text>
+                      <Text style={styles.methodBadge}>{t('send.instant')}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.methodOption, withdrawalMethod === 'credit' && styles.methodOptionActive]}
                       onPress={() => setWithdrawalMethod('credit')}
                     >
                       <Ionicons name="card-outline" size={20} color={withdrawalMethod === 'credit' ? '#1565C0' : '#657786'} />
-                      <Text style={[styles.methodText, withdrawalMethod === 'credit' && styles.methodTextActive]}>Credit Card</Text>
+                      <Text style={[styles.methodText, withdrawalMethod === 'credit' && styles.methodTextActive]}>{t('send.creditCard')}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.methodOption, withdrawalMethod === 'bank' && styles.methodOptionActive]}
+                      onPress={() => setWithdrawalMethod('bank')}
+                    >
+                      <Ionicons name="business" size={20} color={withdrawalMethod === 'bank' ? '#1565C0' : '#657786'} />
+                      <Text style={[styles.methodText, withdrawalMethod === 'bank' && styles.methodTextActive]}>{t('send.bank')}</Text>
+                      <Text style={styles.methodBadgeSlow}>{t('send.bankDays')}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.methodOption, withdrawalMethod === 'mobile' && styles.methodOptionActive]}
+                      onPress={() => setWithdrawalMethod('mobile')}
+                    >
+                      <Ionicons name="phone-portrait" size={20} color={withdrawalMethod === 'mobile' ? '#1565C0' : '#657786'} />
+                      <Text style={[styles.methodText, withdrawalMethod === 'mobile' && styles.methodTextActive]}>{t('send.mobileMoney')}</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -1099,11 +1176,11 @@ export default function SendScreen() {
                       {isIntlWithdrawal && <Ionicons name="checkmark" size={14} color="#fff" />}
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.intlToggleLabel}>International withdrawal</Text>
+                      <Text style={styles.intlToggleLabel}>{t('send.internationalWithdrawal')}</Text>
                       <Text style={styles.intlToggleHint}>
                         {isIntlWithdrawal
-                          ? 'Fee: 1.75% — overseas bank account'
-                          : 'Fee: 1.28% — local bank or mobile money'}
+                          ? t('send.intlFeeHint')
+                          : t('send.localFeeHint')}
                       </Text>
                     </View>
                   </TouchableOpacity>
@@ -1112,7 +1189,7 @@ export default function SendScreen() {
                 {(withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? (
                   <>
                     <View style={styles.section}>
-                      <Text style={styles.label}>Card Number</Text>
+                      <Text style={styles.label}>{t('card.number')}</Text>
                       <TextInput
                         value={withdrawalCardNumber}
                         onChangeText={v => setWithdrawalCardNumber(v.replace(/\D/g, '').replace(/(.{4})/g, '$1 ').trim())}
@@ -1125,7 +1202,7 @@ export default function SendScreen() {
                       />
                     </View>
                     <View style={styles.section}>
-                      <Text style={styles.label}>Expiry Date</Text>
+                      <Text style={styles.label}>{t('send.expiryDate')}</Text>
                       <TextInput
                         value={withdrawalCardExpiry}
                         onChangeText={v => {
@@ -1142,11 +1219,11 @@ export default function SendScreen() {
                       />
                     </View>
                     <View style={styles.section}>
-                      <Text style={styles.label}>Cardholder Name</Text>
+                      <Text style={styles.label}>{t('send.cardholderName')}</Text>
                       <TextInput
                         value={accountName}
                         onChangeText={setAccountName}
-                        placeholder="Name as on card"
+                        placeholder={t('deposit.nameAsOnCard')}
                         placeholderTextColor="#AAB8C2"
                         editable={!loading}
                         style={styles.input}
@@ -1156,7 +1233,7 @@ export default function SendScreen() {
                 ) : (
                   <>
                     <View style={styles.section}>
-                      <Text style={styles.label}>{withdrawalMethod === 'bank' ? 'Bank Name' : 'Mobile Operator'}</Text>
+                      <Text style={styles.label}>{withdrawalMethod === 'bank' ? t('send.bankWithdrawal') : t('send.mobileOperator')}</Text>
                       <TextInput
                         value={bankName}
                         onChangeText={setBankName}
@@ -1168,7 +1245,7 @@ export default function SendScreen() {
                     </View>
 
                     <View style={styles.section}>
-                      <Text style={styles.label}>{withdrawalMethod === 'bank' ? 'Account Number' : 'Phone Number'}</Text>
+                      <Text style={styles.label}>{withdrawalMethod === 'bank' ? t('send.accountLabel') : t('send.phoneLabel')}</Text>
                       <TextInput
                         value={accountNumber}
                         onChangeText={setAccountNumber}
@@ -1181,7 +1258,7 @@ export default function SendScreen() {
                     </View>
 
                     <View style={styles.section}>
-                      <Text style={styles.label}>Account Holder Name</Text>
+                      <Text style={styles.label}>{t('send.accountHolderName')}</Text>
                       <TextInput
                         value={accountName}
                         onChangeText={setAccountName}
@@ -1197,7 +1274,7 @@ export default function SendScreen() {
             )}
 
             <View style={styles.section}>
-              <Text style={styles.label}>Amount</Text>
+              <Text style={styles.label}>{t('send.amount')}</Text>
               <View style={styles.amountInputContainer}>
                 <TextInput
                   value={amount}
@@ -1215,7 +1292,7 @@ export default function SendScreen() {
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.label}>Send Currency</Text>
+              <Text style={styles.label}>{t('send.sendCurrency')}</Text>
 
               {/* Wallet balance currencies — shown as chips with amounts */}
               {(() => {
@@ -1226,7 +1303,7 @@ export default function SendScreen() {
                 if (ownedBalances.length === 0) return null;
                 return (
                   <View style={{ marginBottom: 10 }}>
-                    <Text style={{ fontSize: 11, color: '#9BAEC8', marginBottom: 6 }}>Your balances</Text>
+                    <Text style={{ fontSize: 11, color: '#9BAEC8', marginBottom: 6 }}>{t('send.yourBalances')}</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                       {ownedBalances.map((b: any) => (
                         <TouchableOpacity
@@ -1255,7 +1332,7 @@ export default function SendScreen() {
               >
                 <Ionicons name={showAllCurrencies ? 'chevron-up' : 'chevron-down'} size={14} color="#1565C0" style={{ marginRight: 4 }} />
                 <Text style={{ fontSize: 12, color: '#1565C0', fontWeight: '600' }}>
-                  {showAllCurrencies ? 'Hide other currencies' : 'Send in a different currency'}
+                  {showAllCurrencies ? t('send.hideCurrencies') : t('send.sendInDifferentCurrency')}
                 </Text>
               </TouchableOpacity>
               {showAllCurrencies && (
@@ -1281,7 +1358,7 @@ export default function SendScreen() {
 
             {isInternational && activeTab === 'transfer' && (
               <View style={styles.intlBadge}>
-                <Text style={styles.intlBadgeText}>🌍 International Transfer</Text>
+                <Text style={styles.intlBadgeText}>{t('send.internationalTransfer')}</Text>
               </View>
             )}
 
@@ -1290,7 +1367,7 @@ export default function SendScreen() {
               <View style={styles.fxPreviewCard}>
                 <View style={styles.fxPreviewRow}>
                   <View style={styles.fxPreviewItem}>
-                    <Text style={styles.fxPreviewLabel}>You send</Text>
+                    <Text style={styles.fxPreviewLabel}>{t('send.youSend')}</Text>
                     <Text style={styles.fxPreviewAmountText}>
                       {formatCurrency(majorToMinor(parseFloat(amount.replace(/,/g, '')), currency), currency)}
                     </Text>
@@ -1298,7 +1375,7 @@ export default function SendScreen() {
                   </View>
                   <Ionicons name="arrow-forward-circle" size={30} color="#7C3AED" />
                   <View style={styles.fxPreviewItem}>
-                    <Text style={styles.fxPreviewLabel}>They receive</Text>
+                    <Text style={styles.fxPreviewLabel}>{t('send.theyReceive')}</Text>
                     <Text style={[styles.fxPreviewAmountText, { color: '#2E7D32' }]}>
                       {preview?.isCrossCurrency && fxQuote
                         ? formatCurrency((fxQuote as any).receivedAmountMinorAfterFee ?? fxQuote.receivedAmountMinor, receiverCurrency)
@@ -1310,10 +1387,10 @@ export default function SendScreen() {
                 </View>
                 {preview?.isCrossCurrency ? (
                   <Text style={styles.fxPreviewNote}>
-                    {preview.rateDisplay ? `Rate: ${preview.rateDisplay}  ·  ` : ''}1.15% FX fee included
+                    {preview.rateDisplay ? `${t('send.fxRateLabel')}: ${preview.rateDisplay}  ·  ` : ''}{t('send.fxFeeIncluded')}
                   </Text>
                 ) : (
-                  <Text style={styles.fxPreviewNote}>Same currency · No conversion fee ✓</Text>
+                  <Text style={styles.fxPreviewNote}>{t('send.noConversionFee')}</Text>
                 )}
               </View>
             )}
@@ -1321,8 +1398,8 @@ export default function SendScreen() {
             <View style={styles.infoBox}>
               <Text style={styles.infoText}>
                 {activeTab === 'withdraw'
-                  ? `ℹ️ Fee: ${isIntlWithdrawal ? '1.75% (international)' : '1.28% (local)'} — deducted from withdrawal.`
-                  : 'ℹ️ Transfers are free. A 1.15% FX fee applies only on cross-currency sends.'
+                  ? `ℹ️ ${t('send.intlFeeHint')}${isIntlWithdrawal ? ' (international)' : ` — ${t('send.withdrawalFeeInfo')}`}`
+                  : t('send.transferFreeInfo')
                 }
               </Text>
             </View>
@@ -1331,10 +1408,10 @@ export default function SendScreen() {
             <View style={styles.scamBanner}>
               <View style={styles.scamBannerHeader}>
                 <Ionicons name="shield-checkmark" size={18} color="#D32F2F" />
-                <Text style={styles.scamBannerTitle}>Scam warning</Text>
+                <Text style={styles.scamBannerTitle}>{t('send.scamWarning')}</Text>
               </View>
               <Text style={styles.scamBannerText}>
-                Only send to people you know and trust.
+                {t('send.scamWarningBody')}
               </Text>
             </View>
 
@@ -1361,7 +1438,7 @@ export default function SendScreen() {
               }
             >
               <Text style={styles.sendButtonText}>
-                {activeTab === 'transfer' ? 'Review Transaction' : 'Review Withdrawal'}
+                {activeTab === 'transfer' ? t('send.reviewTransaction') : t('send.reviewWithdrawal')}
               </Text>
             </TouchableOpacity>
           </>
@@ -1459,6 +1536,52 @@ const styles = StyleSheet.create({
   },
   methodTextActive: {
     color: '#1565C0',
+  },
+  methodBadge: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#2E7D32',
+    backgroundColor: '#E8F5E9',
+    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    overflow: 'hidden',
+  },
+  methodBadgeSlow: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#E65100',
+    backgroundColor: '#FFF3E0',
+    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    overflow: 'hidden',
+  },
+  balanceSummaryBanner: {
+    backgroundColor: '#EEF4FF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(21,101,192,0.18)',
+    marginHorizontal: 4,
+    marginBottom: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 6,
+  },
+  balanceSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  balanceSummaryLabel: {
+    fontSize: 13,
+    color: '#5C6E8A',
+    fontWeight: '500',
+  },
+  balanceSummaryValue: {
+    fontSize: 13,
+    color: '#1565C0',
+    fontWeight: '700',
   },
   intlToggle: {
     flexDirection: 'row',

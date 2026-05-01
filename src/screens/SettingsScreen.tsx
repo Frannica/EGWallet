@@ -47,7 +47,7 @@ export default function SettingsScreen() {
   const [bugDescription, setBugDescription] = useState('');
   const [showBugModal, setShowBugModal] = useState(false);
   const [showWalletIdModal, setShowWalletIdModal] = useState(false);
-  const { language: appLanguage, setLanguage: setContextLanguage } = useLanguage();
+  const { language: appLanguage, setLanguage: setContextLanguage, t } = useLanguage();
   const [showLanguagePicker, setShowLanguagePicker] = useState(false);
 
   useEffect(() => {
@@ -87,18 +87,18 @@ export default function SettingsScreen() {
         body: JSON.stringify({ username: clean }),
       });
       const data = await res.json();
-      if (!res.ok) { Alert.alert('Error', data.error || 'Could not set username'); return; }
+      if (!res.ok) { Alert.alert(t('common.error'), data.error || t('settings.couldNotSetUsername')); return; }
       setUsername(data.username);
       setShowUsernameModal(false);
-      Alert.alert('Username Set', `Your handle is now @${data.username}. Others can send you money using @${data.username}.`);
+      Alert.alert(t('settings.usernameSetTitle'), `${t('settings.usernameSetMessage')} @${data.username}.`);
     } catch (e: any) {
-      Alert.alert('Error', 'Network error. Please try again.');
+      Alert.alert(t('common.error'), t('common.networkError'));
     }
   };
 
   const handleSignOut = async () => {
     if (__DEV__) console.log('[Settings] Sign Out pressed');
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+    Alert.alert(t('settings.signOut'), t('settings.signOutConfirm'), [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Sign Out',
@@ -113,8 +113,8 @@ export default function SettingsScreen() {
   const handleDeleteAccount = async () => {
     if (__DEV__) console.log('[Settings] Delete Account pressed');
     Alert.alert(
-      'Delete Account',
-      'Are you sure you want to delete your account? This action cannot be undone. All your data will be permanently deleted.',
+      t('settings.deleteAccount'),
+      t('settings.deleteAccountConfirmFull'),
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -122,8 +122,8 @@ export default function SettingsScreen() {
           style: 'destructive',
           onPress: () => {
             Alert.alert(
-              'Account Deletion',
-              'Please contact support at support@egwallet.com to request account deletion. We will verify your identity and process your request within 30 days.'
+              t('settings.accountDeletionTitle'),
+              t('settings.accountDeletionMessage')
             );
           },
         },
@@ -138,7 +138,7 @@ export default function SettingsScreen() {
 
   const handleBugReport = () => {
     const desc = bugDescription.trim();
-    if (!desc) { Alert.alert('Error', 'Please describe the issue.'); return; }
+    if (!desc) { Alert.alert(t('common.error'), t('settings.describeBugIssue')); return; }
     const subject = encodeURIComponent('Bug Report — EGWallet');
     const body = encodeURIComponent(
       `${desc}\n\n` +
@@ -161,19 +161,27 @@ export default function SettingsScreen() {
       await auth.updatePreferredCurrency(currency);
       setShowCurrencyPicker(false);
       setCurrencySearch('');
-      Alert.alert('Currency Updated ✅', `Your preferred currency is now ${currency} ${getCurrencySymbol(currency)}. All incoming payments will be converted to ${currency}.`);
+      Alert.alert(t('settings.currencyUpdated'), t('settings.currencyNowMsg').replace('{currency}', currency).replace('{currency}', currency));
     } catch (e: any) {
       setShowCurrencyPicker(false);
       setCurrencySearch('');
-      Alert.alert('Currency Updated ✅', `Preferred currency set to ${currency}.`);
+      Alert.alert(t('settings.currencyUpdated'), t('settings.currencyNowMsg').replace('{currency}', currency).replace('{currency}', currency));
     }
   };
 
   const handleChangeLanguage = async (code: SupportedLanguage) => {
     await setContextLanguage(code);
     setShowLanguagePicker(false);
+    // Sync language preference to backend so server-side messages are localised
+    if (auth.token) {
+      fetch(`${API_BASE}/user/language`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${auth.token}` },
+        body: JSON.stringify({ language: code }),
+      }).catch(() => {/* non-critical — best effort */});
+    }
     const lang = LANGUAGES.find(l => l.code === code);
-    Alert.alert('Language Updated', `App language set to ${lang?.name || code}.`);
+    Alert.alert(t('settings.languageUpdated'), `${t('settings.languageUpdatedMessage')} ${lang?.name || code}.`);
   };
 
   const handleToggleAutoConvert = async (enabled: boolean) => {
@@ -181,16 +189,16 @@ export default function SettingsScreen() {
     try {
       await auth.updateAutoConvert(enabled);
       if (enabled) {
-        Alert.alert('Auto-Convert Enabled', `All incoming payments will now be automatically converted to ${auth.user?.preferredCurrency || 'XAF'}.`);
+        Alert.alert(t('settings.autoConvertEnabled'), `${t('settings.autoConvertOnDesc')} ${auth.user?.preferredCurrency || 'XAF'}.`);
       } else {
-        Alert.alert('Auto-Convert Disabled', 'You will now receive payments in the original currency sent. Your wallet can hold multiple currencies.');
+        Alert.alert(t('settings.autoConvertDisabled'), t('settings.autoConvertOffDesc'));
       }
     } catch (e: any) {
       // Setting is stored locally — still show the appropriate success state
       if (enabled) {
-        Alert.alert('Auto-Convert Enabled', `Incoming payments will be converted to ${auth.user?.preferredCurrency || 'XAF'}.`);
+        Alert.alert(t('settings.autoConvertEnabled'), `${t('settings.autoConvertOnDesc')} ${auth.user?.preferredCurrency || 'XAF'}.`);
       } else {
-        Alert.alert('Auto-Convert Disabled', 'You will receive payments in their original currency.');
+        Alert.alert(t('settings.autoConvertDisabled'), t('settings.autoConvertOffDesc'));
       }
     }
   };
@@ -200,17 +208,17 @@ export default function SettingsScreen() {
     try {
       if (enabled) {
         await biometric.enableBiometric();
-        Alert.alert('Biometric Lock Enabled', 'Your wallet will now be locked when you leave the app.');
+        Alert.alert(t('settings.biometricEnabled'), t('settings.biometricEnabledMsg'));
       } else {
         await biometric.disableBiometric();
-        Alert.alert('Biometric Lock Disabled', 'Your wallet will no longer require biometric authentication.');
+        Alert.alert(t('settings.biometricDisabled'), t('settings.biometricDisabledMsg'));
       }
     } catch (e: any) {
       // Show user-facing success — biometric state is managed locally
       if (enabled) {
-        Alert.alert('Biometric Lock Enabled', 'Your wallet is now protected with biometrics.');
+        Alert.alert(t('settings.biometricEnabled'), t('settings.biometricEnabledMsg2'));
       } else {
-        Alert.alert('Biometric Lock Disabled', 'Biometric lock has been turned off.');
+        Alert.alert(t('settings.biometricDisabled'), t('settings.biometricDisabledMsg2'));
       }
     }
   };
@@ -224,7 +232,7 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Ionicons name="person-circle" size={24} color="#007AFF" />
-            <Text style={styles.sectionTitle}>ACCOUNT</Text>
+            <Text style={styles.sectionTitle}>{t('settings.account')}</Text>
           </View>
           <View style={styles.cardContent}>
             <View style={styles.infoRow}>
@@ -238,13 +246,13 @@ export default function SettingsScreen() {
             >
               <Ionicons name="at-circle-outline" size={20} color="#1565C0" />
               <View style={{ flex: 1 }}>
-                <Text style={styles.usernameLabel}>Username</Text>
-                <Text style={styles.usernameValue}>{username ? `@${username}` : 'Tap to set your @handle'}</Text>
+                <Text style={styles.usernameLabel}>{t('settings.username')}</Text>
+                <Text style={styles.usernameValue}>{username ? `@${username}` : t('settings.setUsername')}</Text>
               </View>
               <Ionicons name="create-outline" size={16} color="#9BAEC8" />
             </TouchableOpacity>
             <View style={styles.currencySection}>
-              <Text style={styles.label}>Preferred Receiving Currency:</Text>
+              <Text style={styles.label}>{t('settings.currency')}</Text>
               <TouchableOpacity 
                 onPress={() => setShowCurrencyPicker(true)}
                 style={styles.currencyButton}
@@ -261,7 +269,7 @@ export default function SettingsScreen() {
                 All incoming payments will be automatically converted to this currency
               </Text>
               <Text style={[styles.helpText, { color: '#888', marginTop: 4 }]}>
-                Not your currency? Tap above to manually select the right one.
+                {t('settings.currencyHelpText2')}
               </Text>
             </View>
             
@@ -271,12 +279,12 @@ export default function SettingsScreen() {
                 <View style={styles.toggleContent}>
                   <View style={styles.toggleHeader}>
                     <Ionicons name="swap-horizontal" size={20} color="#007AFF" />
-                    <Text style={styles.toggleTitle}>Auto-Convert Incoming Payments</Text>
+                    <Text style={styles.toggleTitle}>{t('settings.autoConvert')}</Text>
                   </View>
                   <Text style={styles.toggleDescription}>
                     {auth.user?.autoConvertIncoming !== false 
-                      ? `Automatically convert all incoming payments to ${auth.user?.preferredCurrency || 'USD'}`
-                      : 'Receive payments in original currency (multi-currency wallet)'}
+                      ? t('settings.autoConvertOnDesc') + ` ${auth.user?.preferredCurrency || 'USD'}`
+                      : t('settings.autoConvertOffDesc')}
                   </Text>
                 </View>
                 <Switch
@@ -291,7 +299,7 @@ export default function SettingsScreen() {
 
           <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
             <Ionicons name="log-out" size={20} color="#007AFF" />
-            <Text style={styles.signOutText}>Sign Out</Text>
+            <Text style={styles.signOutText}>{t('settings.signOut')}</Text>
           </TouchableOpacity>
         </View>
 
@@ -299,11 +307,11 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Ionicons name="wallet" size={24} color="#1565C0" />
-            <Text style={styles.sectionTitle}>WALLET DETAILS</Text>
+            <Text style={styles.sectionTitle}>{t('settings.walletDetails')}</Text>
           </View>
           <View style={styles.cardContent}>
             <TouchableOpacity style={styles.wdRow} onPress={() => walletInfo && setShowWalletIdModal(true)} activeOpacity={0.7}>
-              <Text style={styles.wdLabel}>Wallet ID</Text>
+              <Text style={styles.wdLabel}>{t('settings.walletId')}</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Text style={styles.wdValue}>
                   {walletInfo ? `${walletInfo.id.substring(0, 14)}...` : '—'}
@@ -312,14 +320,14 @@ export default function SettingsScreen() {
               </View>
             </TouchableOpacity>
             <View style={styles.wdRow}>
-              <Text style={styles.wdLabel}>Status</Text>
+              <Text style={styles.wdLabel}>{t('settings.walletStatus')}</Text>
               <View style={styles.wdStatusBadge}>
                 <View style={styles.wdStatusDot} />
-                <Text style={styles.wdStatusText}>Active</Text>
+                <Text style={styles.wdStatusText}>{t('settings.walletActive')}</Text>
               </View>
             </View>
             <View style={[styles.wdRow, { borderBottomWidth: 0 }]}>
-              <Text style={styles.wdLabel}>Capacity (USD)</Text>
+              <Text style={styles.wdLabel}>{t('settings.walletCapacity')}</Text>
               <Text style={styles.wdValue}>
                 {walletInfo
                   ? `$${Math.round(walletInfo.usdValue / 100).toLocaleString()} / $${walletInfo.maxLimitUSD.toLocaleString()}`
@@ -333,7 +341,7 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Ionicons name="shield-checkmark" size={24} color="#34C759" />
-            <Text style={styles.sectionTitle}>IDENTITY VERIFICATION</Text>
+            <Text style={styles.sectionTitle}>{t('settings.identity')}</Text>
           </View>
           
           <TouchableOpacity 
@@ -342,8 +350,8 @@ export default function SettingsScreen() {
           >
             <Ionicons name="document-text" size={20} color="#007AFF" />
             <View style={styles.settingTextContainer}>
-              <Text style={styles.supportButtonText}>Verify Your Identity</Text>
-              <Text style={styles.settingSubtitle}>Unlock higher limits and premium features</Text>
+              <Text style={styles.supportButtonText}>{t('settings.kycVerify')}</Text>
+              <Text style={styles.settingSubtitle}>{t('settings.kycSubtitle')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color="#007AFF" />
           </TouchableOpacity>
@@ -353,7 +361,7 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Ionicons name="shield-checkmark" size={24} color="#d32f2f" />
-            <Text style={[styles.sectionTitle, { color: '#d32f2f' }]}>PRIVACY & SECURITY</Text>
+            <Text style={[styles.sectionTitle, { color: '#d32f2f' }]}>{t('settings.security')}</Text>
           </View>
           
           {biometric.biometricAvailable && (
@@ -366,10 +374,10 @@ export default function SettingsScreen() {
                 />
                 <View style={styles.settingTextContainer}>
                   <Text style={styles.settingTitle}>
-                    {biometric.biometricType === 'face' ? 'Face' : 'Fingerprint'} Lock
+                    {biometric.biometricType === 'face' ? t('settings.faceLock') : t('settings.fingerprintLock')}
                   </Text>
                   <Text style={styles.settingSubtitle}>
-                    Require {biometric.biometricType === 'face' ? 'face recognition' : 'fingerprint'} to unlock app
+                    {biometric.biometricType === 'face' ? t('settings.faceLockSubtitle') : t('settings.fingerprintLockSubtitle')}
                   </Text>
                 </View>
               </View>
@@ -389,7 +397,7 @@ export default function SettingsScreen() {
             onPress={() => (navigation as any).navigate('TrustedDevices')}
           >
             <Ionicons name="shield" size={20} color="#007AFF" />
-            <Text style={styles.supportButtonText}>Trusted Devices</Text>
+            <Text style={styles.supportButtonText}>{t('settings.trustedDevices')}</Text>
             <Ionicons name="chevron-forward" size={20} color="#007AFF" />
           </TouchableOpacity>
 
@@ -397,7 +405,7 @@ export default function SettingsScreen() {
           
           <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteAccount}>
             <Ionicons name="trash" size={20} color="#d32f2f" />
-            <Text style={styles.deleteText}>Delete Account</Text>
+            <Text style={styles.deleteText}>{t('settings.deleteAccount')}</Text>
           </TouchableOpacity>
         </View>
 
@@ -405,14 +413,14 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Ionicons name="lock-closed" size={24} color="#1565C0" />
-            <Text style={styles.sectionTitle}>SECURITY MODE</Text>
+            <Text style={styles.sectionTitle}>{t('settings.securityMode')}</Text>
           </View>
           <View style={styles.settingRow}>
             <View style={styles.settingLeft}>
               <Ionicons name="lock-closed" size={20} color="#1565C0" />
               <View style={styles.settingTextContainer}>
-                <Text style={styles.settingTitle}>App Lock</Text>
-                <Text style={styles.settingSubtitle}>Require authentication to open app</Text>
+                <Text style={styles.settingTitle}>{t('settings.appLock')}</Text>
+                <Text style={styles.settingSubtitle}>{t('settings.appLockSubtitle')}</Text>
               </View>
             </View>
             <Switch value={appLock} onValueChange={setAppLock} trackColor={{ false: '#E1E8ED', true: '#007AFF' }} thumbColor="#FFFFFF" />
@@ -422,8 +430,8 @@ export default function SettingsScreen() {
             <View style={styles.settingLeft}>
               <Ionicons name="scan" size={20} color="#1565C0" />
               <View style={styles.settingTextContainer}>
-                <Text style={styles.settingTitle}>Face ID / Biometric</Text>
-                <Text style={styles.settingSubtitle}>Unlock with face or fingerprint</Text>
+                <Text style={styles.settingTitle}>{t('settings.faceId')}</Text>
+                <Text style={styles.settingSubtitle}>{t('settings.faceIdSubtitle')}</Text>
               </View>
             </View>
             <Switch
@@ -438,8 +446,8 @@ export default function SettingsScreen() {
             <View style={styles.settingLeft}>
               <Ionicons name="shield-checkmark" size={20} color="#1565C0" />
               <View style={styles.settingTextContainer}>
-                <Text style={styles.settingTitle}>Remember This Device</Text>
-                <Text style={styles.settingSubtitle}>Skip auth on trusted devices</Text>
+                <Text style={styles.settingTitle}>{t('settings.rememberDevice')}</Text>
+                <Text style={styles.settingSubtitle}>{t('settings.rememberDeviceSubtitle')}</Text>
               </View>
             </View>
             <Switch value={trustedDevice} onValueChange={setTrustedDevice} trackColor={{ false: '#E1E8ED', true: '#007AFF' }} thumbColor="#FFFFFF" />
@@ -450,7 +458,7 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Ionicons name="business" size={24} color="#007AFF" />
-            <Text style={styles.sectionTitle}>BUSINESS</Text>
+            <Text style={styles.sectionTitle}>{t('settings.business')}</Text>
           </View>
           <TouchableOpacity
             style={styles.supportButton}
@@ -458,8 +466,8 @@ export default function SettingsScreen() {
           >
             <Ionicons name="people" size={20} color="#007AFF" />
             <View style={styles.settingTextContainer}>
-              <Text style={styles.supportButtonText}>Employer Dashboard</Text>
-              <Text style={styles.settingSubtitle}>Payroll, employees &amp; bulk payments</Text>
+              <Text style={styles.supportButtonText}>{t('settings.employer')}</Text>
+              <Text style={styles.settingSubtitle}>{t('settings.employerSubtitle')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color="#007AFF" />
           </TouchableOpacity>
@@ -469,11 +477,11 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Ionicons name="information-circle" size={24} color="#007AFF" />
-            <Text style={styles.sectionTitle}>APP INFORMATION</Text>
+            <Text style={styles.sectionTitle}>{t('settings.appInfo')}</Text>
           </View>
           <TouchableOpacity style={styles.aboutButton} onPress={handleAbout}>
             <Ionicons name="help-circle" size={20} color="#007AFF" />
-            <Text style={styles.aboutText}>About EGWallet</Text>
+            <Text style={styles.aboutText}>{t('settings.about')}</Text>
             <Ionicons name="chevron-forward" size={20} color="#007AFF" />
           </TouchableOpacity>
         </View>
@@ -482,7 +490,7 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Ionicons name="language" size={24} color="#007AFF" />
-            <Text style={styles.sectionTitle}>LANGUAGE</Text>
+            <Text style={styles.sectionTitle}>{t('settings.languageSection')}</Text>
           </View>
           <TouchableOpacity
             style={styles.supportButton}
@@ -491,7 +499,7 @@ export default function SettingsScreen() {
           >
             <Ionicons name="globe-outline" size={20} color="#007AFF" />
             <View style={styles.settingTextContainer}>
-              <Text style={styles.supportButtonText}>App Language</Text>
+              <Text style={styles.supportButtonText}>{t('settings.appLanguage')}</Text>
               <Text style={styles.settingSubtitle}>
                 {(() => { const l = LANGUAGES.find(l => l.code === appLanguage); return l ? `${l.flag} ${l.name}` : 'English'; })()}
               </Text>
@@ -504,7 +512,7 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Ionicons name="headset" size={24} color="#007AFF" />
-            <Text style={styles.sectionTitle}>SUPPORT</Text>
+            <Text style={styles.sectionTitle}>{t('settings.support')}</Text>
           </View>
           
           <TouchableOpacity 
@@ -512,7 +520,7 @@ export default function SettingsScreen() {
             onPress={() => (navigation as any).navigate('AIChat')}
           >
             <Ionicons name="sparkles" size={20} color="#007AFF" />
-            <Text style={styles.supportButtonText}>AI Assistant (Chat)</Text>
+            <Text style={styles.supportButtonText}>{t('settings.aiAssistant')}</Text>
             <Ionicons name="chevron-forward" size={20} color="#007AFF" />
           </TouchableOpacity>
 
@@ -523,7 +531,7 @@ export default function SettingsScreen() {
             onPress={() => (navigation as any).navigate('HelpCenter')}
           >
             <Ionicons name="help-circle" size={20} color="#007AFF" />
-            <Text style={styles.supportButtonText}>Help Center & FAQs</Text>
+            <Text style={styles.supportButtonText}>{t('settings.helpCenter')}</Text>
             <Ionicons name="chevron-forward" size={20} color="#007AFF" />
           </TouchableOpacity>
 
@@ -534,7 +542,7 @@ export default function SettingsScreen() {
             onPress={() => (navigation as any).navigate('ReportProblem')}
           >
             <Ionicons name="bug" size={20} color="#007AFF" />
-            <Text style={styles.supportButtonText}>Report a Problem</Text>
+            <Text style={styles.supportButtonText}>{t('settings.reportProblem')}</Text>
             <Ionicons name="chevron-forward" size={20} color="#007AFF" />
           </TouchableOpacity>
 
@@ -545,7 +553,7 @@ export default function SettingsScreen() {
             onPress={() => setShowBugModal(true)}
           >
             <Ionicons name="mail-unread" size={20} color="#007AFF" />
-            <Text style={styles.supportButtonText}>Report a Bug (Email)</Text>
+            <Text style={styles.supportButtonText}>{t('settings.reportBug')}</Text>
             <Ionicons name="chevron-forward" size={20} color="#007AFF" />
           </TouchableOpacity>
 
@@ -554,7 +562,7 @@ export default function SettingsScreen() {
           <View style={styles.supportContent}>
             <Ionicons name="mail" size={20} color="#657786" />
             <Text style={styles.supportText}>
-              Email: <Text style={styles.supportEmail}>support@egwallet.com</Text>
+              {t('settings.emailLabel')} <Text style={styles.supportEmail}>support@egwalletfinance.com</Text>
             </Text>
           </View>
         </View>
@@ -566,8 +574,8 @@ export default function SettingsScreen() {
     <Modal visible={showBugModal} transparent animationType="fade">
       <View style={styles.modalOverlay}>
         <View style={styles.usernameModal}>
-          <Text style={styles.usernameModalTitle}>Report a Bug</Text>
-          <Text style={styles.usernameModalSub}>Describe what went wrong. Device info will be attached automatically.</Text>
+          <Text style={styles.usernameModalTitle}>{t('report.bugReport')}</Text>
+          <Text style={styles.usernameModalSub}>{t('settings.bugReportSubtitle')}</Text>
           <TextInput
             style={{
               height: 120,
@@ -582,17 +590,17 @@ export default function SettingsScreen() {
             }}
             value={bugDescription}
             onChangeText={setBugDescription}
-            placeholder="Describe the issue..."
+            placeholder={t('settings.bugDescribePlaceholder')}
             placeholderTextColor="#9BAEC8"
             multiline
             numberOfLines={5}
           />
           <View style={styles.usernameModalBtns}>
             <TouchableOpacity style={styles.umCancelBtn} onPress={() => { setBugDescription(''); setShowBugModal(false); }}>
-              <Text style={styles.umCancelText}>Cancel</Text>
+              <Text style={styles.umCancelText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.umSaveBtn} onPress={handleBugReport}>
-              <Text style={styles.umSaveText}>Send</Text>
+              <Text style={styles.umSaveText}>{t('settings.bugSend')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -603,15 +611,15 @@ export default function SettingsScreen() {
     <Modal visible={showUsernameModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.usernameModal}>
-            <Text style={styles.usernameModalTitle}>Set Username</Text>
-            <Text style={styles.usernameModalSub}>Others can send you money using @{usernameInput || 'yourhandle'}</Text>
+            <Text style={styles.usernameModalTitle}>{t('settings.setUsernameTitle')}</Text>
+            <Text style={styles.usernameModalSub}>{t('settings.usernameModalSubtitle')} @{usernameInput || t('settings.usernamePlaceholder')}</Text>
             <View style={styles.usernameInputRow}>
               <Text style={styles.atSign}>@</Text>
               <TextInput
                 style={styles.usernameInput}
                 value={usernameInput}
                 onChangeText={t => setUsernameInput(t.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase())}
-                placeholder="yourhandle"
+                placeholder={t('settings.usernamePlaceholder')}
                 autoCapitalize="none"
                 maxLength={20}
                 placeholderTextColor="#9BAEC8"
@@ -620,10 +628,10 @@ export default function SettingsScreen() {
             </View>
             <View style={styles.usernameModalBtns}>
               <TouchableOpacity style={styles.umCancelBtn} onPress={() => setShowUsernameModal(false)}>
-                <Text style={styles.umCancelText}>Cancel</Text>
+                <Text style={styles.umCancelText}>{t('common.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.umSaveBtn} onPress={saveUsername}>
-                <Text style={styles.umSaveText}>Save</Text>
+                <Text style={styles.umSaveText}>{t('common.save')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -635,13 +643,13 @@ export default function SettingsScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Currency</Text>
+              <Text style={styles.modalTitle}>{t('settings.selectCurrency')}</Text>
               <TouchableOpacity onPress={() => { setShowCurrencyPicker(false); setCurrencySearch(''); }}>
                 <Ionicons name="close" size={28} color="#007AFF" />
               </TouchableOpacity>
             </View>
             <Text style={styles.modalDescription}>
-              If your country wasn't auto-detected, search and select your currency manually.
+              {t('settings.currencyModalDesc')}
             </Text>
             <TextInput
               style={{
@@ -655,7 +663,7 @@ export default function SettingsScreen() {
                 marginBottom: 10,
                 backgroundColor: '#F0F6FF',
               }}
-              placeholder="Search currency or country..."
+              placeholder={t('settings.searchCurrencyPlaceholder')}
               placeholderTextColor="#9BAEC8"
               value={currencySearch}
               onChangeText={setCurrencySearch}
@@ -703,8 +711,8 @@ export default function SettingsScreen() {
     <Modal visible={showWalletIdModal} transparent animationType="fade">
       <View style={styles.modalOverlay}>
         <View style={styles.usernameModal}>
-          <Text style={styles.usernameModalTitle}>Your Wallet ID</Text>
-          <Text style={styles.usernameModalSub}>Share this ID so others can send you money</Text>
+          <Text style={styles.usernameModalTitle}>{t('settings.yourWalletId')}</Text>
+          <Text style={styles.usernameModalSub}>{t('settings.walletIdDesc')}</Text>
           <TextInput
             style={{
               borderWidth: 1.5,
@@ -728,14 +736,14 @@ export default function SettingsScreen() {
               }}
             >
               <Ionicons name="share-social" size={18} color="#fff" />
-              <Text style={styles.umSaveText}>Share</Text>
+              <Text style={styles.umSaveText}>{t('common.share')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.umCancelBtn, { flex: 1 }]} onPress={() => setShowWalletIdModal(false)}>
-              <Text style={styles.umCancelText}>Close</Text>
+              <Text style={styles.umCancelText}>{t('common.close')}</Text>
             </TouchableOpacity>
           </View>
           <Text style={{ fontSize: 11, color: '#9BAEC8', textAlign: 'center', marginTop: 8 }}>
-            Long-press the ID above to select and copy it
+            {t('settings.longPressId')}
           </Text>
         </View>
       </View>
@@ -746,13 +754,13 @@ export default function SettingsScreen() {
       <View style={styles.modalOverlay}>
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>DISPLAY LANGUAGE</Text>
+            <Text style={styles.modalTitle}>{t('settings.displayLanguage')}</Text>
             <TouchableOpacity onPress={() => setShowLanguagePicker(false)}>
               <Ionicons name="close" size={28} color="#007AFF" />
             </TouchableOpacity>
           </View>
           <Text style={{ fontSize: 13, color: '#657786', paddingHorizontal: 16, paddingBottom: 8 }}>
-            Choose your preferred display language
+            {t('settings.chooseLanguage')}
           </Text>
           <FlatList
             data={LANGUAGES}

@@ -9,18 +9,19 @@ import { Ionicons } from '@expo/vector-icons';
 import { generateAndShareReceipt } from '../utils/receiptGenerator';
 import { TransactionCardSkeleton } from '../components/SkeletonLoader';
 import { getLocalTransactions } from '../utils/localBalance';
+import { useLanguage } from '../i18n/LanguageContext';
 
 type Params = { params: { walletId: string } };
 
-function groupTransactions(txs: any[]): any[] {
+function groupTransactions(txs: any[], labels: [string, string, string, string]): any[] {
   const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
   const yesterdayStart = todayStart - 86400000;
   const weekStart = todayStart - 6 * 86400000;
   const buckets: [string, any[]][] = [
-    ['Today', []],
-    ['Yesterday', []],
-    ['This Week', []],
-    ['Earlier', []],
+    [labels[0], []],
+    [labels[1], []],
+    [labels[2], []],
+    [labels[3], []],
   ];
   for (const tx of txs) {
     const ts =
@@ -47,6 +48,7 @@ export default function TransactionHistory() {
   const walletId = (route.params as any)?.walletId;
   const routeFilter = (route.params as any)?.filter;
   const auth = useAuth();
+  const { t } = useLanguage();
   const [txs, setTxs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -66,10 +68,22 @@ export default function TransactionHistory() {
         getLocalTransactions(),
       ]);
       const backendTxs: any[] = res.transactions || [];
-      // Merge: local txs first so newest deposits/withdrawals appear at top,
-      // deduplicate by id so re-deployed backend entries aren't doubled.
+      // Merge: local txs first so newest deposits/withdrawals appear at top.
+      // Primary dedup: exact id match.
+      // Secondary dedup: type + amount + currency + timestamp within 5-minute
+      // window — catches withdrawal records that appear in BOTH backend
+      // db.withdrawals (UUID id) AND local logLocalTransaction (local-* id).
       const backendIds = new Set(backendTxs.map((t: any) => t.id));
-      const uniqueLocal = localTxs.filter(t => !backendIds.has(t.id));
+      const uniqueLocal = localTxs.filter(local => {
+        if (backendIds.has(local.id)) return false;
+        return !backendTxs.some(
+          (b: any) =>
+            b.type === local.type &&
+            b.amount === local.amount &&
+            b.currency === local.currency &&
+            Math.abs((b.timestamp ?? 0) - local.timestamp) < 5 * 60 * 1000
+        );
+      });
       const combined = [...uniqueLocal, ...backendTxs];
       setTxs(combined);
     } catch (e) {
@@ -101,7 +115,12 @@ export default function TransactionHistory() {
   });
 
   // Group filtered transactions by date period
-  const groupedData = useMemo(() => groupTransactions(filteredTxs), [filteredTxs]);
+  const groupedData = useMemo(() => groupTransactions(filteredTxs, [
+    t('txHistory.today'),
+    t('txHistory.yesterday'),
+    t('txHistory.thisWeek'),
+    t('txHistory.earlier'),
+  ]), [filteredTxs, t]);
 
   // Smart Insights — computed from all loaded transactions, last 7 days
   const insights = useMemo(() => {
@@ -167,10 +186,10 @@ export default function TransactionHistory() {
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
 
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
+    if (diffMins < 1) return t('common.justNow');
+    if (diffMins < 60) return `${diffMins} ${t('common.minsAgo')}`;
+    if (diffHours < 24) return `${diffHours} ${t('common.hoursAgo')}`;
+    if (diffDays < 7) return `${diffDays} ${t('common.daysAgo')}`;
     
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
@@ -198,7 +217,7 @@ export default function TransactionHistory() {
             onPress={() => setFilter('all')}
           >
             <Text style={[styles.filterTabText, filter === 'all' && styles.filterTabTextActive]}>
-              All
+              {t('txHistory.all')}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -207,7 +226,7 @@ export default function TransactionHistory() {
           >
             <Ionicons name="briefcase" size={16} color={filter === 'payroll' ? '#007AFF' : '#657786'} />
             <Text style={[styles.filterTabText, filter === 'payroll' && styles.filterTabTextActive]}>
-              Payroll
+              {t('txHistory.payroll')}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -215,7 +234,7 @@ export default function TransactionHistory() {
             onPress={() => setFilter('sent')}
           >
             <Text style={[styles.filterTabText, filter === 'sent' && styles.filterTabTextActive]}>
-              Sent
+              {t('txHistory.sent')}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -223,7 +242,7 @@ export default function TransactionHistory() {
             onPress={() => setFilter('received')}
           >
             <Text style={[styles.filterTabText, filter === 'received' && styles.filterTabTextActive]}>
-              Received
+              {t('txHistory.received')}
             </Text>
           </TouchableOpacity>
         </View>
@@ -241,30 +260,30 @@ export default function TransactionHistory() {
             <View style={styles.insightsHeader}>
               <View style={styles.insightsTitleRow}>
                 <Ionicons name="flash" size={18} color="#1565C0" />
-                <Text style={styles.insightsTitle}>Smart Insights</Text>
+                <Text style={styles.insightsTitle}>{t('txHistory.smartInsights')}</Text>
               </View>
-              <Text style={styles.insightsPeriod}>This week</Text>
+              <Text style={styles.insightsPeriod}>{t('txHistory.thisWeekLabel')}</Text>
             </View>
             <View style={styles.insightsStats}>
               <View style={styles.insightStat}>
                 <Text style={styles.insightStatValue}>{formatCurrency(insights.spent, insights.currency)}</Text>
-                <Text style={styles.insightStatLabel}>Spent</Text>
+                <Text style={styles.insightStatLabel}>{t('txHistory.spent')}</Text>
               </View>
               <View style={styles.insightDivider} />
               <View style={styles.insightStat}>
                 <Text style={[styles.insightStatValue, { color: '#15803D' }]}>{formatCurrency(insights.received, insights.currency)}</Text>
-                <Text style={styles.insightStatLabel}>Received</Text>
+                <Text style={styles.insightStatLabel}>{t('txHistory.received')}</Text>
               </View>
             </View>
             {insights.topCategory && (insights.spent > 0 || insights.received > 0) && (
               <View style={styles.insightHighlight}>
                 <Text style={styles.insightHighlightText}>
-                  Top category: <Text style={{ fontWeight: '700', color: '#1565C0' }}>{insights.topCategory}</Text>
+                  {t('txHistory.topCategory')} <Text style={{ fontWeight: '700', color: '#1565C0' }}>{insights.topCategory}</Text>
                 </Text>
               </View>
             )}
             <View style={styles.flowChart}>
-              <Text style={styles.flowChartTitle}>Money Flow</Text>
+              <Text style={styles.flowChartTitle}>{t('txHistory.moneyFlow')}</Text>
               <View style={styles.flowBarsContainer}>
                 {(() => {
                   const maxVal = Math.max(insights.spent, insights.received, 1);
@@ -274,11 +293,11 @@ export default function TransactionHistory() {
                     <>
                       <View style={styles.flowBarGroup}>
                         <View style={[styles.flowBar, { height: inH, backgroundColor: '#22C55E' }]} />
-                        <Text style={styles.flowBarLabel}>In</Text>
+                        <Text style={styles.flowBarLabel}>{t('txHistory.in')}</Text>
                       </View>
                       <View style={styles.flowBarGroup}>
                         <View style={[styles.flowBar, { height: outH, backgroundColor: '#F97316' }]} />
-                        <Text style={styles.flowBarLabel}>Out</Text>
+                        <Text style={styles.flowBarLabel}>{t('txHistory.out')}</Text>
                       </View>
                     </>
                   );
@@ -286,14 +305,14 @@ export default function TransactionHistory() {
               </View>
             </View>
             {insights.spent === 0 && insights.received === 0 && (
-              <Text style={styles.insightNoData}>Send or receive money to see your weekly flow</Text>
+              <Text style={styles.insightNoData}>{t('txHistory.noData')}</Text>
             )}
           </View>
         ) : null}
         ListEmptyComponent={
           <View style={{ padding: 32, alignItems: 'center' }}>
             <Text style={{ fontSize: 15, color: '#9BAEC8', textAlign: 'center' }}>
-              No {filter === 'all' ? '' : filter} transactions found.
+              {t('txHistory.noTransactions')}
             </Text>
           </View>
         }
@@ -317,16 +336,16 @@ export default function TransactionHistory() {
           const employerName = item.payrollMetadata?.employerName || 'Employer';
 
           const txTitle = isPayroll
-            ? `Salary from ${employerName}`
+            ? `${t('txHistory.salaryFrom')} ${employerName}`
             : isQrPayment
-            ? (isIn ? 'QR Payment Received' : 'QR Payment Sent')
+            ? (isIn ? t('txHistory.qrPaymentReceived') : t('txHistory.qrPaymentSent'))
             : isPaymentRequest
-            ? 'Payment Request Sent'
+            ? t('txHistory.paymentRequestSent')
             : isWithdrawal
-            ? 'Withdrawal'
+            ? t('txHistory.withdrawal')
             : isIn
-            ? 'Money Received'
-            : 'Money Sent';
+            ? t('txHistory.moneyReceived')
+            : t('txHistory.moneySent');
 
           const txIcon = isPayroll
             ? 'briefcase'
@@ -404,7 +423,7 @@ export default function TransactionHistory() {
                   {/* Reference ID */}
                   {item.id && (
                     <Text style={styles.refId} numberOfLines={1}>
-                      Ref: {item.id.length > 18 ? item.id.substring(0, 18) + '…' : item.id}
+                      {t('txHistory.ref')} {item.id.length > 18 ? item.id.substring(0, 18) + '…' : item.id}
                     </Text>
                   )}
 
@@ -412,7 +431,7 @@ export default function TransactionHistory() {
                     <View style={styles.conversionInfo}>
                       <Ionicons name="swap-horizontal" size={14} color="#007AFF" />
                       <Text style={styles.conversionText}>
-                        Converted to {formatCurrency(item.receivedAmount, item.receivedCurrency)}
+                        {t('txHistory.convertedTo')} {formatCurrency(item.receivedAmount, item.receivedCurrency)}
                       </Text>
                     </View>
                   )}
@@ -431,7 +450,7 @@ export default function TransactionHistory() {
                         onPress={() => generateAndShareReceipt(item, auth.user?.email || 'user@egwallet.com')}
                       >
                         <Ionicons name="document-text" size={16} color="#007AFF" />
-                        <Text style={styles.receiptButtonText}>Receipt</Text>
+                        <Text style={styles.receiptButtonText}>{t('txHistory.receipt')}</Text>
                       </TouchableOpacity>
                       
                       {isPayroll && (
@@ -440,7 +459,7 @@ export default function TransactionHistory() {
                           onPress={() => (navigation as any).navigate('ReportProblem', { transactionId: item.id })}
                         >
                           <Ionicons name="shield-checkmark" size={16} color="#FF3B30" />
-                          <Text style={styles.fraudButtonText}>Report</Text>
+                          <Text style={styles.fraudButtonText}>{t('txHistory.report')}</Text>
                         </TouchableOpacity>
                       )}
                       
@@ -450,7 +469,7 @@ export default function TransactionHistory() {
                           onPress={() => (navigation as any).navigate('DisputeTransaction', { transactionId: item.id, transaction: item })}
                         >
                           <Ionicons name="alert-circle" size={16} color="#FF9500" />
-                          <Text style={styles.disputeButtonText}>Dispute</Text>
+                          <Text style={styles.disputeButtonText}>{t('txHistory.dispute')}</Text>
                         </TouchableOpacity>
                       )}
                     </View>

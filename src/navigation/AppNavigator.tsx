@@ -31,6 +31,7 @@ import PayRequestScreen from '../screens/PayRequestScreen';
 import QRScannerScreen from '../screens/QRScannerScreen';
 import { ToastProvider } from '../utils/toast';
 import { LinkingOptions } from '@react-navigation/native';
+import { useLanguage } from '../i18n/LanguageContext';
 
 const linking: LinkingOptions<any> = {
   prefixes: ['egwallet://'],
@@ -45,6 +46,7 @@ const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
 function Tabs() {
+  const { t } = useLanguage();
   return (
     <Tab.Navigator 
       screenOptions={({ route }) => ({
@@ -100,17 +102,18 @@ function Tabs() {
         },
       })}
     >
-      <Tab.Screen name="Wallet" component={WalletScreen} />
-      <Tab.Screen name="Pay" component={PayScreen} options={{ title: 'Pay & Receive' }} />
-      <Tab.Screen name="Card" component={CardScreen} />
-      <Tab.Screen name="Budget" component={BudgetScreen} />
-      <Tab.Screen name="Settings" component={SettingsScreen} />
+      <Tab.Screen name="Wallet" component={WalletScreen} options={{ tabBarLabel: t('nav.wallet'), title: t('nav.wallet') }} />
+      <Tab.Screen name="Pay" component={PayScreen} options={{ tabBarLabel: t('nav.pay'), title: t('nav.pay') }} />
+      <Tab.Screen name="Card" component={CardScreen} options={{ tabBarLabel: t('nav.card'), title: t('nav.card') }} />
+      <Tab.Screen name="Budget" component={BudgetScreen} options={{ tabBarLabel: t('nav.budget'), title: t('nav.budget') }} />
+      <Tab.Screen name="Settings" component={SettingsScreen} options={{ tabBarLabel: t('nav.settings'), title: t('nav.settings') }} />
     </Tab.Navigator>
   );
 }
 
 export default function AppNavigator() {
   const auth = useAuth();
+  const { t } = useLanguage();
 
   // Show spinner while restoring token from SecureStore
   if (auth.loading) {
@@ -140,21 +143,21 @@ export default function AppNavigator() {
             // ── Authenticated ── show full app
             <>
               <Stack.Screen name="Main" component={Tabs} options={{ headerShown: false }} />
-              <Stack.Screen name="Transactions" component={TransactionHistory} options={{ title: 'Transactions' }} />
-              <Stack.Screen name="About" component={AboutScreen} options={{ title: 'About EGWallet' }} />
-              <Stack.Screen name="HelpCenter" component={HelpCenterScreen} options={{ title: 'Help Center' }} />
-              <Stack.Screen name="ReportProblem" component={ReportProblemScreen} options={{ title: 'Report Problem' }} />
-              <Stack.Screen name="TrustedDevices" component={TrustedDevicesScreen} options={{ title: 'Trusted Devices' }} />
-              <Stack.Screen name="KYCVerification" component={KYCVerificationScreen} options={{ title: 'Identity Verification' }} />
-              <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: 'AI Assistant' }} />
+              <Stack.Screen name="Transactions" component={TransactionHistory} options={{ title: t('screen.transactions') }} />
+              <Stack.Screen name="About" component={AboutScreen} options={{ title: t('screen.about') }} />
+              <Stack.Screen name="HelpCenter" component={HelpCenterScreen} options={{ title: t('screen.helpCenter') }} />
+              <Stack.Screen name="ReportProblem" component={ReportProblemScreen} options={{ title: t('screen.reportProblem') }} />
+              <Stack.Screen name="TrustedDevices" component={TrustedDevicesScreen} options={{ title: t('screen.trustedDevices') }} />
+              <Stack.Screen name="KYCVerification" component={KYCVerificationScreen} options={{ title: t('screen.kyc') }} />
+              <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: t('screen.aiAssistant') }} />
               <Stack.Screen name="DisputeTransaction" component={DisputeTransactionScreen} options={{ title: 'Dispute Transaction' }} />
               <Stack.Screen name="QRPayment" component={QRPaymentScreen} options={{ title: 'QR Payment' }} />
-              <Stack.Screen name="EmployerDashboard" component={EmployerDashboardScreen} options={{ title: 'Employer Dashboard' }} />
-              <Stack.Screen name="Send" component={SendScreen} options={{ title: 'Send Money' }} />
-              <Stack.Screen name="Request" component={RequestScreen} options={{ title: 'Request Money' }} />
-              <Stack.Screen name="Deposit" component={DepositScreen} options={{ title: 'Add Money' }} />
+              <Stack.Screen name="EmployerDashboard" component={EmployerDashboardScreen} options={{ title: t('screen.employerDashboard') }} />
+              <Stack.Screen name="Send" component={SendScreen} options={{ title: t('screen.sendMoney') }} />
+              <Stack.Screen name="Request" component={RequestScreen} options={{ title: t('screen.requestMoney') }} />
+              <Stack.Screen name="Deposit" component={DepositScreen} options={{ title: t('screen.addMoney') }} />
               <Stack.Screen name="Receipt" component={ReceiptScreen} options={{ headerShown: false }} />
-              <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifications' }} />
+              <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: t('screen.notifications') }} />
               <Stack.Screen name="PayRequest" component={PayRequestScreen} options={{ title: 'Pay Request' }} />
               <Stack.Screen name="QRScanner" component={QRScannerScreen} options={{ headerShown: false }} />
             </>

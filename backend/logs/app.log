@@ -411,3 +411,7 @@
 {"duration":3,"ip":"192.168.1.232","level":"info","message":"HTTP Request","method":"GET","path":"/wallets/ea27cb93-9e1a-4383-b772-48e8ab4c2b4d/transactions","service":"egwallet-backend","status":304,"timestamp":"2026-03-28 02:36:46","userAgent":"okhttp/4.12.0"}
 {"duration":7,"ip":"192.168.1.232","level":"info","message":"HTTP Request","method":"GET","path":"/wallets","service":"egwallet-backend","status":304,"timestamp":"2026-03-28 02:38:13","userAgent":"okhttp/4.12.0"}
 {"duration":4,"ip":"192.168.1.232","level":"info","message":"HTTP Request","method":"GET","path":"/notifications","service":"egwallet-backend","status":304,"timestamp":"2026-03-28 02:38:13","userAgent":"okhttp/4.12.0"}
+{"environment":"development","freshdeskConfigured":false,"jwtConfigured":true,"level":"info","message":"EGWallet backend started","port":4000,"service":"egwallet-backend","timestamp":"2026-04-30 01:07:44"}
+{"level":"info","message":"[FX] Live rates refreshed — 166 currencies","service":"egwallet-backend","timestamp":"2026-04-30 01:07:45"}
+{"environment":"development","freshdeskConfigured":false,"jwtConfigured":true,"level":"info","message":"EGWallet backend started","port":4000,"service":"egwallet-backend","timestamp":"2026-04-30 01:08:38"}
+{"level":"info","message":"[FX] Live rates refreshed — 166 currencies","service":"egwallet-backend","timestamp":"2026-04-30 01:08:38"}

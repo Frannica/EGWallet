@@ -1,0 +1,285 @@
+Starting a Gradle Daemon, 2 stopped Daemons could not be reused, use --status for details
+> Task :gradle-plugin:settings-plugin:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :expo-gradle-plugin:expo-autolinking-plugin-shared:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :gradle-plugin:shared:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :expo-gradle-plugin:expo-autolinking-settings-plugin:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :expo-gradle-plugin:expo-autolinking-settings-plugin:pluginDescriptors UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-settings-plugin:processResources UP-TO-DATE
+> Task :gradle-plugin:settings-plugin:pluginDescriptors UP-TO-DATE
+> Task :gradle-plugin:settings-plugin:processResources UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-plugin-shared:compileKotlin UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-plugin-shared:compileJava NO-SOURCE
+> Task :expo-gradle-plugin:expo-autolinking-plugin-shared:processResources NO-SOURCE
+> Task :expo-gradle-plugin:expo-autolinking-plugin-shared:classes UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-plugin-shared:jar UP-TO-DATE
+> Task :gradle-plugin:shared:compileKotlin UP-TO-DATE
+> Task :gradle-plugin:shared:compileJava NO-SOURCE
+> Task :gradle-plugin:shared:processResources NO-SOURCE
+> Task :gradle-plugin:shared:classes UP-TO-DATE
+> Task :gradle-plugin:shared:jar UP-TO-DATE
+> Task :gradle-plugin:settings-plugin:compileKotlin UP-TO-DATE
+> Task :gradle-plugin:settings-plugin:compileJava NO-SOURCE
+> Task :gradle-plugin:settings-plugin:classes UP-TO-DATE
+> Task :gradle-plugin:settings-plugin:jar UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-settings-plugin:compileKotlin UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-settings-plugin:compileJava NO-SOURCE
+> Task :expo-gradle-plugin:expo-autolinking-settings-plugin:classes UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-settings-plugin:jar UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-plugin:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :expo-module-gradle-plugin:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :expo-module-gradle-plugin:pluginDescriptors UP-TO-DATE
+> Task :expo-module-gradle-plugin:processResources UP-TO-DATE
+> Task :gradle-plugin:react-native-gradle-plugin:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :expo-gradle-plugin:expo-autolinking-plugin:compileKotlin UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-plugin:compileJava NO-SOURCE
+> Task :expo-gradle-plugin:expo-autolinking-plugin:pluginDescriptors UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-plugin:processResources UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-plugin:classes UP-TO-DATE
+> Task :expo-gradle-plugin:expo-autolinking-plugin:jar UP-TO-DATE
+> Task :gradle-plugin:react-native-gradle-plugin:compileKotlin UP-TO-DATE
+> Task :gradle-plugin:react-native-gradle-plugin:compileJava NO-SOURCE
+> Task :gradle-plugin:react-native-gradle-plugin:pluginDescriptors UP-TO-DATE
+> Task :gradle-plugin:react-native-gradle-plugin:processResources UP-TO-DATE
+> Task :gradle-plugin:react-native-gradle-plugin:classes UP-TO-DATE
+> Task :gradle-plugin:react-native-gradle-plugin:jar UP-TO-DATE
+> Task :expo-module-gradle-plugin:compileKotlin UP-TO-DATE
+> Task :expo-module-gradle-plugin:compileJava NO-SOURCE
+> Task :expo-module-gradle-plugin:classes UP-TO-DATE
+> Task :expo-module-gradle-plugin:jar UP-TO-DATE
+
+> Configure project :
+[32m[ExpoRootProject][0m Using the following versions:
+  - buildTools:  [32m36.0.0[0m
+  - minSdk:      [32m24[0m
+  - compileSdk:  [32m36[0m
+  - targetSdk:   [32m36[0m
+  - ndk:         [32m27.1.12297006[0m
+  - kotlin:      [32m2.1.20[0m
+  - ksp:         [32m2.1.20-2.0.1[0m
+
+> Configure project :expo
+
+Using expo modules
+  - [32mexpo-constants[0m (18.0.13)
+  - [32mexpo-modules-core[0m (3.0.29)
+  - [33m[?][0m [32mexpo-application[0m (7.0.8)
+  - [33m[?][0m [32mexpo-asset[0m (12.0.12)
+  - [33m[?][0m [32mexpo-camera[0m (17.0.10)
+  - [33m[?][0m [32mexpo-device[0m (8.0.10)
+  - [33m[?][0m [32mexpo-file-system[0m (19.0.21)
+  - [33m[?][0m [32mexpo-font[0m (14.0.11)
+  - [33m[?][0m [32mexpo-image-loader[0m (6.0.0)
+  - [33m[?][0m [32mexpo-image-picker[0m (17.0.10)
+  - [33m[?][0m [32mexpo-keep-awake[0m (15.0.8)
+  - [33m[?][0m [32mexpo-linear-gradient[0m (15.0.8)
+  - [33m[?][0m [32mexpo-local-authentication[0m (17.0.8)
+  - [33m[?][0m [32mexpo-localization[0m (17.0.8)
+  - [33m[?][0m [32mexpo-network[0m (8.0.8)
+  - [33m[?][0m [32mexpo-notifications[0m (0.32.16)
+  - [33m[?][0m [32mexpo-print[0m (15.0.8)
+  - [33m[?][0m [32mexpo-secure-store[0m (15.0.8)
+  - [33m[?][0m [32mexpo-sharing[0m (14.0.8)
+
+
+> Task :app:generateAutolinkingNewArchitectureFiles
+> Task :app:generateAutolinkingPackageList
+> Task :app:generateCodegenSchemaFromJavaScript SKIPPED
+> Task :app:generateCodegenArtifactsFromSchema SKIPPED
+> Task :app:generateReactNativeEntryPoint
+
+> Task :expo-constants:createExpoConfig
+The NODE_ENV environment variable is required but was not specified. Ensure the project is bundled with Expo CLI or NODE_ENV is set. Using only .env.local and .env
+env: load .env
+env: export EXPO_PUBLIC_API_URL
+
+> Task :expo-constants:preBuild
+> Task :expo-modules-core:preBuild UP-TO-DATE
+> Task :expo:generatePackagesList
+> Task :react-native-async-storage_async-storage:generateCodegenSchemaFromJavaScript
+> Task :react-native-async-storage_async-storage:generateCodegenArtifactsFromSchema
+> Task :react-native-async-storage_async-storage:preBuild
+> Task :react-native-community_netinfo:preBuild UP-TO-DATE
+> Task :react-native-gesture-handler:generateCodegenSchemaFromJavaScript
+> Task :react-native-gesture-handler:generateCodegenArtifactsFromSchema
+> Task :react-native-gesture-handler:preBuild
+> Task :react-native-safe-area-context:generateCodegenSchemaFromJavaScript
+> Task :react-native-safe-area-context:generateCodegenArtifactsFromSchema
+> Task :react-native-safe-area-context:preBuild
+> Task :react-native-screens:generateCodegenSchemaFromJavaScript
+> Task :react-native-screens:generateCodegenArtifactsFromSchema
+> Task :react-native-screens:preBuild
+> Task :expo:preBuild
+> Task :sentry_react-native:generateCodegenSchemaFromJavaScript
+> Task :react-native-svg:generateCodegenSchemaFromJavaScript
+> Task :sentry_react-native:generateCodegenArtifactsFromSchema
+> Task :sentry_react-native:preBuild
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :expo:preDebugBuild
+> Task :react-native-svg:generateCodegenArtifactsFromSchema
+> Task :react-native-svg:preBuild
+> Task :app:preBuild
+> Task :app:preDebugBuild
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:generateDebugBuildConfig
+> Task :expo-constants:preDebugBuild
+> Task :expo:writeDebugAarMetadata
+> Task :expo-modules-core:preDebugBuild UP-TO-DATE
+> Task :expo-modules-core:writeDebugAarMetadata
+> Task :react-native-async-storage_async-storage:preDebugBuild
+> Task :expo-constants:writeDebugAarMetadata
+> Task :react-native-community_netinfo:preDebugBuild UP-TO-DATE
+> Task :react-native-async-storage_async-storage:writeDebugAarMetadata
+> Task :react-native-community_netinfo:writeDebugAarMetadata
+> Task :react-native-gesture-handler:preDebugBuild
+> Task :react-native-safe-area-context:preDebugBuild
+> Task :react-native-safe-area-context:writeDebugAarMetadata
+> Task :react-native-gesture-handler:writeDebugAarMetadata
+> Task :react-native-screens:preDebugBuild
+> Task :react-native-svg:preDebugBuild
+> Task :react-native-screens:writeDebugAarMetadata
+> Task :sentry_react-native:preDebugBuild
+> Task :react-native-svg:writeDebugAarMetadata
+> Task :sentry_react-native:writeDebugAarMetadata
+> Task :expo:generateDebugResValues
+> Task :expo:generateDebugResources
+> Task :app:generateDebugResValues
+> Task :expo:packageDebugResources
+> Task :expo-constants:generateDebugResValues
+> Task :expo-constants:generateDebugResources
+> Task :expo-constants:packageDebugResources
+> Task :expo-modules-core:generateDebugResValues
+> Task :expo-modules-core:generateDebugResources
+> Task :expo-modules-core:packageDebugResources
+> Task :react-native-async-storage_async-storage:generateDebugResValues
+> Task :react-native-async-storage_async-storage:generateDebugResources
+> Task :react-native-async-storage_async-storage:packageDebugResources
+> Task :react-native-community_netinfo:generateDebugResValues
+> Task :react-native-community_netinfo:generateDebugResources
+> Task :react-native-community_netinfo:packageDebugResources
+> Task :react-native-gesture-handler:generateDebugResValues
+> Task :react-native-gesture-handler:generateDebugResources
+> Task :react-native-gesture-handler:packageDebugResources
+> Task :react-native-safe-area-context:generateDebugResValues
+> Task :react-native-safe-area-context:generateDebugResources
+> Task :react-native-safe-area-context:packageDebugResources
+> Task :react-native-screens:generateDebugResValues
+> Task :react-native-screens:generateDebugResources
+> Task :react-native-screens:packageDebugResources
+> Task :react-native-svg:generateDebugResValues
+> Task :react-native-svg:generateDebugResources
+> Task :react-native-svg:packageDebugResources
+> Task :sentry_react-native:generateDebugResValues
+> Task :sentry_react-native:generateDebugResources
+> Task :sentry_react-native:packageDebugResources
+> Task :expo:extractDeepLinksDebug
+> Task :app:checkDebugAarMetadata
+> Task :expo:processDebugManifest
+> Task :expo-constants:extractDeepLinksDebug
+> Task :expo-constants:processDebugManifest
+> Task :expo-modules-core:extractDeepLinksDebug
+
+> Task :expo-modules-core:processDebugManifest
+C:\EGWallet\node_modules\expo-modules-core\android\src\main\AndroidManifest.xml:8:9-11:45 Warning:
+	meta-data#com.facebook.soloader.enabled@android:value was tagged at AndroidManifest.xml:8 to replace other declarations but no other declaration present
+
+> Task :react-native-async-storage_async-storage:extractDeepLinksDebug
+
+> Task :react-native-async-storage_async-storage:processDebugManifest
+package="com.reactnativecommunity.asyncstorage" found in source AndroidManifest.xml: C:\EGWallet\node_modules\@react-native-async-storage\async-storage\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="com.reactnativecommunity.asyncstorage" from the source AndroidManifest.xml: C:\EGWallet\node_modules\@react-native-async-storage\async-storage\android\src\main\AndroidManifest.xml.
+
+> Task :react-native-community_netinfo:extractDeepLinksDebug
+
+> Task :react-native-community_netinfo:processDebugManifest
+package="com.reactnativecommunity.netinfo" found in source AndroidManifest.xml: C:\EGWallet\node_modules\@react-native-community\netinfo\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="com.reactnativecommunity.netinfo" from the source AndroidManifest.xml: C:\EGWallet\node_modules\@react-native-community\netinfo\android\src\main\AndroidManifest.xml.
+
+> Task :react-native-gesture-handler:extractDeepLinksDebug
+> Task :react-native-gesture-handler:processDebugManifest
+> Task :react-native-safe-area-context:extractDeepLinksDebug
+
+> Task :react-native-safe-area-context:processDebugManifest
+package="com.th3rdwave.safeareacontext" found in source AndroidManifest.xml: C:\EGWallet\node_modules\react-native-safe-area-context\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="com.th3rdwave.safeareacontext" from the source AndroidManifest.xml: C:\EGWallet\node_modules\react-native-safe-area-context\android\src\main\AndroidManifest.xml.
+
+> Task :react-native-screens:extractDeepLinksDebug
+> Task :react-native-screens:processDebugManifest
+> Task :react-native-svg:extractDeepLinksDebug
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugResources
+> Task :react-native-svg:processDebugManifest
+> Task :sentry_react-native:extractDeepLinksDebug
+
+> Task :sentry_react-native:processDebugManifest
+package="io.sentry.react" found in source AndroidManifest.xml: C:\EGWallet\node_modules\@sentry\react-native\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="io.sentry.react" from the source AndroidManifest.xml: C:\EGWallet\node_modules\@sentry\react-native\android\src\main\AndroidManifest.xml.
+
+> Task :expo:parseDebugLocalResources
+> Task :expo:generateDebugRFile
+> Task :expo-constants:parseDebugLocalResources
+> Task :expo-constants:generateDebugRFile
+> Task :expo-modules-core:parseDebugLocalResources
+> Task :expo-modules-core:generateDebugRFile
+> Task :react-native-async-storage_async-storage:parseDebugLocalResources
+> Task :react-native-async-storage_async-storage:generateDebugRFile
+> Task :react-native-community_netinfo:parseDebugLocalResources
+> Task :react-native-community_netinfo:generateDebugRFile
+> Task :react-native-gesture-handler:parseDebugLocalResources
+> Task :react-native-gesture-handler:generateDebugRFile
+> Task :react-native-safe-area-context:parseDebugLocalResources
+> Task :react-native-safe-area-context:generateDebugRFile
+> Task :react-native-screens:parseDebugLocalResources
+> Task :react-native-screens:generateDebugRFile
+> Task :react-native-svg:parseDebugLocalResources
+> Task :app:mergeDebugResources
+> Task :react-native-svg:generateDebugRFile
+> Task :sentry_react-native:parseDebugLocalResources
+> Task :sentry_react-native:generateDebugRFile
+> Task :expo:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :expo:generateDebugBuildConfig
+> Task :expo-constants:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :expo-constants:generateDebugBuildConfig
+> Task :expo-modules-core:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :expo-modules-core:generateDebugBuildConfig
+> Task :expo-modules-core:compileDebugKotlin
+> Task :app:packageDebugResources
+> Task :app:parseDebugLocalResources
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :app:processDebugMainManifest
+C:\EGWallet\android\app\src\debug\AndroidManifest.xml:6:5-162 Warning:
+	application@android:usesCleartextTraffic was tagged at AndroidManifest.xml:6 to replace other declarations but no other declaration present
+C:\EGWallet\android\app\src\debug\AndroidManifest.xml Warning:
+	provider#expo.modules.filesystem.FileSystemFileProvider@android:authorities was tagged at AndroidManifest.xml:0 to replace other declarations but no other declaration present
+C:\EGWallet\android\app\src\debug\AndroidManifest.xml Warning:
+	activity#expo.modules.imagepicker.ExpoCropImageActivity@android:exported was tagged at AndroidManifest.xml:0 to replace other declarations but no other declaration present
+
+> Task :app:processDebugManifest
+> Task :app:processDebugManifestForPackage
+> Task :expo:compileDebugLibraryResources
+> Task :expo-constants:compileDebugLibraryResources
+> Task :react-native-async-storage_async-storage:compileDebugLibraryResources
+> Task :react-native-community_netinfo:compileDebugLibraryResources
+> Task :react-native-gesture-handler:compileDebugLibraryResources
+> Task :react-native-safe-area-context:compileDebugLibraryResources
+> Task :react-native-screens:compileDebugLibraryResources
+> Task :react-native-svg:compileDebugLibraryResources
+> Task :sentry_react-native:compileDebugLibraryResources
+> Task :expo-constants:javaPreCompileDebug
+> Task :expo:javaPreCompileDebug
+> Task :react-native-async-storage_async-storage:generateDebugBuildConfig
+> Task :react-native-async-storage_async-storage:javaPreCompileDebug
+
+> Task :react-native-async-storage_async-storage:compileDebugJavaWithJavac
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+Note: C:\EGWallet\node_modules\@react-native-async-storage\async-storage\android\src\javaPackage\java\com\reactnativecommunity\asyncstorage\AsyncStoragePackage.java uses unchecked or unsafe operations.
+Note: Recompile with -Xlint:unchecked for details.
+
+> Task :expo-modules-core:compileDebugLibraryResources
+> Task :app:processDebugResources
+Terminate batch job (Y/N)? ^C

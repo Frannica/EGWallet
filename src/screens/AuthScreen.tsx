@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, Alert, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
 import { detectCountryCode } from '../config/regional';
+import { useLanguage } from '../i18n/LanguageContext';
 
 export default function AuthScreen() {
   const [email, setEmail] = useState('');
@@ -10,25 +11,26 @@ export default function AuthScreen() {
   const [secureText, setSecureText] = useState(true);
   const [loading, setLoading] = useState(false);
   const auth = useAuth();
+  const { t } = useLanguage();
 
   async function onSubmit() {
-    if (!email.trim()) return Alert.alert('Error', 'Please enter your email');
-    if (!password.trim()) return Alert.alert('Error', 'Please enter your password');
-    if (password.length < 8) return Alert.alert('Error', 'Password must be at least 8 characters');
+    if (!email.trim()) return Alert.alert(t('common.error'), t('auth.enterEmail'));
+    if (!password.trim()) return Alert.alert(t('common.error'), t('auth.enterPassword'));
+    if (password.length < 8) return Alert.alert(t('common.error'), t('auth.passwordTooShort'));
 
     setLoading(true);
     try {
       if (isSignUp) {
         const countryCode = detectCountryCode();
         await auth.signUp(email.trim(), password, countryCode ?? undefined);
-        Alert.alert('Success', 'Account created successfully!');
+        Alert.alert(t('common.success'), t('auth.accountCreated'));
       } else {
         await auth.signIn(email.trim(), password);
       }
     } catch (e: any) {
       Alert.alert(
-        isSignUp ? 'Sign Up Error' : 'Sign In Error',
-        e.message || 'Please check your credentials and try again'
+        isSignUp ? t('auth.signUpError') : t('auth.signInError'),
+        e.message || t('auth.checkCredentials')
       );
     } finally {
       setLoading(false);
@@ -47,17 +49,17 @@ export default function AuthScreen() {
           </View>
           <Text style={styles.title}>EGWallet</Text>
           <Text style={styles.subtitle}>
-            {isSignUp ? 'Create your account' : 'Welcome back'}
+            {isSignUp ? t('auth.createYourAccount') : t('auth.welcomeBack')}
           </Text>
         </View>
 
         <View style={styles.form}>
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Email Address</Text>
+            <Text style={styles.label}>{t('auth.email')}</Text>
             <TextInput 
               value={email} 
               onChangeText={setEmail} 
-              placeholder="your.email@example.com" 
+              placeholder={t('auth.emailPlaceholder')} 
               placeholderTextColor="#AAB8C2"
               keyboardType="email-address" 
               autoCapitalize="none"
@@ -68,12 +70,12 @@ export default function AuthScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password</Text>
+            <Text style={styles.label}>{t('auth.password')}</Text>
             <View style={styles.passwordContainer}>
               <TextInput 
                 value={password} 
                 onChangeText={setPassword} 
-                placeholder="Enter your password" 
+                placeholder={t('auth.passwordPlaceholder')} 
                 placeholderTextColor="#AAB8C2"
                 secureTextEntry={secureText}
                 autoCapitalize="none"
@@ -85,7 +87,7 @@ export default function AuthScreen() {
               </TouchableOpacity>
             </View>
             {isSignUp && (
-              <Text style={styles.hint}>Must be at least 8 characters</Text>
+              <Text style={styles.hint}>{t('auth.passwordHint')}</Text>
             )}
           </View>
 
@@ -98,18 +100,18 @@ export default function AuthScreen() {
               <ActivityIndicator color="#FFFFFF" />
             ) : (
               <Text style={styles.submitButtonText}>
-                {isSignUp ? 'Create Account' : 'Sign In'}
+                {isSignUp ? t('auth.createAccount') : t('auth.signIn')}
               </Text>
             )}
           </TouchableOpacity>
 
           <View style={styles.switchContainer}>
             <Text style={styles.switchText}>
-              {isSignUp ? 'Already have an account?' : "Don't have an account?"}
+              {isSignUp ? t('auth.alreadyHaveAccount') : t('auth.noAccount')}
             </Text>
             <TouchableOpacity onPress={() => setIsSignUp(!isSignUp)} disabled={loading}>
               <Text style={styles.switchLink}>
-                {isSignUp ? 'Sign In' : 'Sign Up'}
+                {isSignUp ? t('auth.signIn') : t('auth.signUp')}
               </Text>
             </TouchableOpacity>
           </View>
@@ -117,7 +119,7 @@ export default function AuthScreen() {
 
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            By continuing, you agree to our Terms of Service and Privacy Policy
+            {t('auth.termsAgreement')}
           </Text>
         </View>
       </ScrollView>

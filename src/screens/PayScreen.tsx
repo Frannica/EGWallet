@@ -5,13 +5,14 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { useLanguage } from '../i18n/LanguageContext';
 
-const ACTIONS = [
+const ACTION_DEFS = [
   {
     key: 'send',
     icon: 'send' as const,
-    label: 'Send Money',
-    subtitle: 'Transfer to any wallet or contact',
+    labelKey: 'pay.sendLabel',
+    subtitleKey: 'pay.sendSubtitle',
     gradientColors: ['#1565C0', '#0A3D7C'] as [string, string],
     iconBg: 'rgba(255,255,255,0.18)',
     route: 'Send',
@@ -19,8 +20,8 @@ const ACTIONS = [
   {
     key: 'request',
     icon: 'download' as const,
-    label: 'Request Money',
-    subtitle: 'From contacts, employers or via QR',
+    labelKey: 'pay.requestLabel',
+    subtitleKey: 'pay.requestSubtitle',
     gradientColors: ['#0A7C55', '#0D5C40'] as [string, string],
     iconBg: 'rgba(255,255,255,0.18)',
     route: 'Request',
@@ -28,8 +29,8 @@ const ACTIONS = [
   {
     key: 'qr',
     icon: 'qr-code' as const,
-    label: 'Scan QR to Pay',
-    subtitle: 'Scan someone\'s QR and pay instantly',
+    labelKey: 'pay.qrLabel',
+    subtitleKey: 'pay.qrSubtitle',
     gradientColors: ['#7B3FA0', '#5A2D7A'] as [string, string],
     iconBg: 'rgba(255,255,255,0.18)',
     route: 'QRScanner',
@@ -38,14 +39,13 @@ const ACTIONS = [
 
 export default function PayScreen() {
   const navigation = useNavigation<any>();
+  const { t } = useLanguage();
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  // Store all slide animations in a single ref — keeps them stable across renders
-  // and avoids the Rules-of-Hooks violation of calling useRef inside .map().
-  const slideAnims = useRef(ACTIONS.map(() => new Animated.Value(24))).current;
+  const slideAnims = useRef(ACTION_DEFS.map(() => new Animated.Value(24))).current;
 
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-    ACTIONS.forEach((_, i) => {
+    ACTION_DEFS.forEach((_, i) => {
       Animated.timing(slideAnims[i], {
         toValue: 0,
         duration: 380,
@@ -75,12 +75,12 @@ export default function PayScreen() {
           >
             <Ionicons name="swap-horizontal" size={30} color="#fff" />
           </LinearGradient>
-          <Text style={styles.heroTitle}>Pay & Receive</Text>
-          <Text style={styles.heroSub}>Choose how you want to move money</Text>
+          <Text style={styles.heroTitle}>{t('pay.heroTitle')}</Text>
+          <Text style={styles.heroSub}>{t('pay.subtitle')}</Text>
         </View>
 
         {/* Action Cards */}
-        {ACTIONS.map((action, i) => (
+        {ACTION_DEFS.map((action, i) => (
           <Animated.View
             key={action.key}
             style={{ transform: [{ translateY: slideAnims[i] }], opacity: fadeAnim }}
@@ -103,8 +103,8 @@ export default function PayScreen() {
                   <Ionicons name={action.icon} size={26} color="#fff" />
                 </View>
                 <View style={styles.cardText}>
-                  <Text style={styles.cardLabel}>{action.label}</Text>
-                  <Text style={styles.cardSub}>{action.subtitle}</Text>
+                  <Text style={styles.cardLabel}>{t(action.labelKey as any)}</Text>
+                  <Text style={styles.cardSub}>{t(action.subtitleKey as any)}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.6)" />
               </LinearGradient>
@@ -115,7 +115,7 @@ export default function PayScreen() {
         {/* Info row */}
         <View style={styles.infoRow}>
           <Ionicons name="shield-checkmark-outline" size={16} color="#1565C0" />
-          <Text style={styles.infoText}>All transactions are encrypted and secure</Text>
+          <Text style={styles.infoText}>{t('pay.securityNote')}</Text>
         </View>
       </Animated.ScrollView>
     </LinearGradient>

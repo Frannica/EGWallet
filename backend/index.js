@@ -702,12 +702,12 @@ const translations = {
     qa_card: "Virtual Cards", qa_card_q: "How do I create a virtual card?",
     qa_verify: "Verify Identity", qa_verify_q: "Help me verify my identity",
     limit_daily_exceeded: "This transaction exceeds your remaining daily limit. You can send up to {remaining} more today.",
-    limit_daily_reached: "You have reached your daily limit of {limit}.",
+    limit_daily_reached: "You've reached your daily limit of {limit}. Complete verification to increase your limits.",
     limit_weekly_exceeded: "This transaction exceeds your remaining weekly limit. You can send up to {remaining} more this week.",
-    limit_weekly_reached: "You have reached your weekly limit of {limit}.",
+    limit_weekly_reached: "You've reached your weekly limit of {limit}. Complete verification to increase your limits.",
     limit_monthly_exceeded: "This transaction exceeds your remaining monthly limit. You can send up to {remaining} more this month.",
-    limit_monthly_reached: "You have reached your monthly limit of {limit}.",
-    limit_upgrade: "Upgrade to {tierName} to unlock higher limits."
+    limit_monthly_reached: "You've reached your monthly limit of {limit}. Complete verification to increase your limits.",
+    limit_upgrade: ""
   },
   es: {
     greeting: "¡Hola! 👋 Me llamo Felisa, tu asistente de EGWallet. Puedo ayudarte con:\n\n• Preguntas sobre transacciones\n• Información de cuenta\n• Guías de funciones\n• Tickets de soporte\n\n¿En qué puedo ayudarte hoy?",
@@ -789,13 +789,13 @@ const translations = {
     qa_issue: "Reportar Problema", qa_issue_q: "Quiero reportar un problema",
     qa_card: "Tarjetas Virtuales", qa_card_q: "¿Cómo creo una tarjeta virtual?",
     qa_verify: "Verificar Identidad", qa_verify_q: "Ayúdame a verificar mi identidad",
-    limit_daily_exceeded: "Esta transacción supera tu límite diario restante. Puedes enviar hasta {remaining} más hoy.",
-    limit_daily_reached: "Has alcanzado tu límite diario de {limit}.",
-    limit_weekly_exceeded: "Esta transacción supera tu límite semanal restante. Puedes enviar hasta {remaining} más esta semana.",
-    limit_weekly_reached: "Has alcanzado tu límite semanal de {limit}.",
-    limit_monthly_exceeded: "Esta transacción supera tu límite mensual restante. Puedes enviar hasta {remaining} más este mes.",
-    limit_monthly_reached: "Has alcanzado tu límite mensual de {limit}.",
-    limit_upgrade: "Actualiza a {tierName} para desbloquear límites más altos."
+    limit_daily_exceeded: "Esta transacción supera tu límite diario. Hoy puedes enviar hasta {remaining} más.",
+    limit_daily_reached: "Has alcanzado tu límite diario de {limit}. Completa tu verificación para aumentar tus límites.",
+    limit_weekly_exceeded: "Esta transacción supera tu límite semanal. Esta semana puedes enviar hasta {remaining} más.",
+    limit_weekly_reached: "Has alcanzado tu límite semanal de {limit}. Completa tu verificación para aumentar tus límites.",
+    limit_monthly_exceeded: "Esta transacción supera tu límite mensual. Este mes puedes enviar hasta {remaining} más.",
+    limit_monthly_reached: "Has alcanzado tu límite mensual de {limit}. Completa tu verificación para aumentar tus límites.",
+    limit_upgrade: ""
   },
   fr: {
     greeting: "Bonjour ! 👋 Je m'appelle Felisa, votre assistante EGWallet. Je peux vous aider avec :\n\n• Questions sur les transactions\n• Informations sur le compte\n• Guides des fonctionnalités\n• Tickets de support\n\nComment puis-je vous aider aujourd'hui ?",
@@ -877,13 +877,13 @@ const translations = {
     qa_issue: "Signaler Problème", qa_issue_q: "Je veux signaler un problème",
     qa_card: "Cartes Virtuelles", qa_card_q: "Comment créer une carte virtuelle ?",
     qa_verify: "Vérifier Identité", qa_verify_q: "Aidez-moi à vérifier mon identité",
-    limit_daily_exceeded: "Cette transaction dépasse votre limite journalière restante. Vous pouvez envoyer jusqu'à {remaining} de plus aujourd'hui.",
-    limit_daily_reached: "Vous avez atteint votre limite journalière de {limit}.",
-    limit_weekly_exceeded: "Cette transaction dépasse votre limite hebdomadaire restante. Vous pouvez envoyer jusqu'à {remaining} de plus cette semaine.",
-    limit_weekly_reached: "Vous avez atteint votre limite hebdomadaire de {limit}.",
-    limit_monthly_exceeded: "Cette transaction dépasse votre limite mensuelle restante. Vous pouvez envoyer jusqu'à {remaining} de plus ce mois-ci.",
-    limit_monthly_reached: "Vous avez atteint votre limite mensuelle de {limit}.",
-    limit_upgrade: "Passez à {tierName} pour débloquer des limites plus élevées."
+    limit_daily_exceeded: "Ce virement dépasse votre plafond journalier. Vous pouvez encore envoyer jusqu'à {remaining} aujourd'hui.",
+    limit_daily_reached: "Vous avez atteint votre plafond journalier de {limit}. Finalisez votre vérification pour augmenter vos limites.",
+    limit_weekly_exceeded: "Ce virement dépasse votre plafond hebdomadaire. Vous pouvez encore envoyer jusqu'à {remaining} cette semaine.",
+    limit_weekly_reached: "Vous avez atteint votre plafond hebdomadaire de {limit}. Finalisez votre vérification pour augmenter vos limites.",
+    limit_monthly_exceeded: "Ce virement dépasse votre plafond mensuel. Vous pouvez encore envoyer jusqu'à {remaining} ce mois-ci.",
+    limit_monthly_reached: "Vous avez atteint votre plafond mensuel de {limit}. Finalisez votre vérification pour augmenter vos limites.",
+    limit_upgrade: ""
   },
   pt: {
     greeting: "Olá! 👋 Meu nome é Felisa, sua assistente da EGWallet. Posso ajudá-lo com:\n\n• Perguntas sobre transações\n• Informações da conta\n• Guias de recursos\n• Tickets de suporte\n\nComo posso ajudá-lo hoje?",
@@ -965,13 +965,13 @@ const translations = {
     qa_issue: "Reportar Problema", qa_issue_q: "Quero reportar um problema",
     qa_card: "Cartões Virtuais", qa_card_q: "Como crio um cartão virtual?",
     qa_verify: "Verificar Identidade", qa_verify_q: "Me ajude a verificar minha identidade",
-    limit_daily_exceeded: "Esta transação excede seu limite diário restante. Você pode enviar até {remaining} mais hoje.",
-    limit_daily_reached: "Você atingiu seu limite diário de {limit}.",
-    limit_weekly_exceeded: "Esta transação excede seu limite semanal restante. Você pode enviar até {remaining} mais esta semana.",
-    limit_weekly_reached: "Você atingiu seu limite semanal de {limit}.",
-    limit_monthly_exceeded: "Esta transação excede seu limite mensal restante. Você pode enviar até {remaining} mais este mês.",
-    limit_monthly_reached: "Você atingiu seu limite mensal de {limit}.",
-    limit_upgrade: "Atualize para {tierName} para desbloquear limites mais altos."
+    limit_daily_exceeded: "Esta transferência excede o seu limite diário. Você ainda pode enviar até {remaining} hoje.",
+    limit_daily_reached: "Você atingiu o seu limite diário de {limit}. Conclua a verificação para aumentar os seus limites.",
+    limit_weekly_exceeded: "Esta transferência excede o seu limite semanal. Você ainda pode enviar até {remaining} esta semana.",
+    limit_weekly_reached: "Você atingiu o seu limite semanal de {limit}. Conclua a verificação para aumentar os seus limites.",
+    limit_monthly_exceeded: "Esta transferência excede o seu limite mensal. Você ainda pode enviar até {remaining} este mês.",
+    limit_monthly_reached: "Você atingiu o seu limite mensal de {limit}. Conclua a verificação para aumentar os seus limites.",
+    limit_upgrade: ""
   },
   zh: {
     greeting: "您好！👋 我叫 Felisa，是您的 EGWallet 助手。我可以帮助您：\n\n• 交易问题\n• 账户信息\n• 功能指南\n• 支持工单\n\n今天我能帮您什么？",
@@ -1053,13 +1053,13 @@ const translations = {
     qa_issue: "报告问题", qa_issue_q: "我想报告一个问题",
     qa_card: "虚拟卡", qa_card_q: "如何创建虚拟卡？",
     qa_verify: "验证身份", qa_verify_q: "帮我验证我的身份",
-    limit_daily_exceeded: "此交易超过您的每日剩余限额。今天您最多还可发送 {remaining}。",
-    limit_daily_reached: "您已达到每日限额 {limit}。",
-    limit_weekly_exceeded: "此交易超过您的每周剩余限额。本周您最多还可发送 {remaining}。",
-    limit_weekly_reached: "您已达到每周限额 {limit}。",
-    limit_monthly_exceeded: "此交易超过您的每月剩余限额。本月您最多还可发送 {remaining}。",
-    limit_monthly_reached: "您已达到每月限额 {limit}。",
-    limit_upgrade: "升级至 {tierName} 以解锁更高限额。"
+    limit_daily_exceeded: "本次转账超出您的每日限额，今日最多还可转账 {remaining}。",
+    limit_daily_reached: "您已达到每日限额 {limit}，请完成身份认证以提升限额。",
+    limit_weekly_exceeded: "本次转账超出您的每周限额，本周最多还可转账 {remaining}。",
+    limit_weekly_reached: "您已达到每周限额 {limit}，请完成身份认证以提升限额。",
+    limit_monthly_exceeded: "本次转账超出您的每月限额，本月最多还可转账 {remaining}。",
+    limit_monthly_reached: "您已达到每月限额 {limit}，请完成身份认证以提升限额。",
+    limit_upgrade: ""
   },
   ja: {
     greeting: "こんにちは！👋 私はFelisaです、EGWalletのアシスタントです。以下についてサポートできます：\n\n• 取引に関する質問\n• アカウント情報\n• 機能ガイド\n• サポートチケット\n\n本日はどのようにお手伝いできますか？",
@@ -1141,13 +1141,13 @@ const translations = {
     qa_issue: "問題を報告", qa_issue_q: "問題を報告したい",
     qa_card: "仮想カード", qa_card_q: "仮想カードを作成するにはどうすればいいですか？",
     qa_verify: "身元確認", qa_verify_q: "身元確認を手伝ってください",
-    limit_daily_exceeded: "この取引は残りの1日の上限を超えています。本日はあと最大 {remaining} 送金できます。",
-    limit_daily_reached: "1日の上限 {limit} に達しました。",
-    limit_weekly_exceeded: "この取引は残りの週間の上限を超えています。今週はあと最大 {remaining} 送金できます。",
-    limit_weekly_reached: "週間の上限 {limit} に達しました。",
-    limit_monthly_exceeded: "この取引は残りの月間の上限を超えています。今月はあと最大 {remaining} 送金できます。",
-    limit_monthly_reached: "月間の上限 {limit} に達しました。",
-    limit_upgrade: "{tierName} にアップグレードして上限を引き上げましょう。"
+    limit_daily_exceeded: "この送金は1日の送金上限を超えています。本日はあと {remaining} まで送金できます。",
+    limit_daily_reached: "1日の送金上限 {limit} に達しました。上限を引き上げるには本人確認を完了してください。",
+    limit_weekly_exceeded: "この送金は週間の送金上限を超えています。今週はあと {remaining} まで送金できます。",
+    limit_weekly_reached: "週間の送金上限 {limit} に達しました。上限を引き上げるには本人確認を完了してください。",
+    limit_monthly_exceeded: "この送金は月間の送金上限を超えています。今月はあと {remaining} まで送金できます。",
+    limit_monthly_reached: "月間の送金上限 {limit} に達しました。上限を引き上げるには本人確認を完了してください。",
+    limit_upgrade: ""
   },
   ru: {
     greeting: "Здравствуйте! 👋 Меня зовут Фелиса, ваш помощник EGWallet. Я могу помочь вам с:\n\n• Вопросами о транзакциях\n• Информацией об учетной записи\n• Руководствами по функциям\n• Заявками в поддержку\n\nКак я могу помочь вам сегодня?",
@@ -1229,13 +1229,13 @@ const translations = {
     qa_issue: "Сообщить о проблеме", qa_issue_q: "Я хочу сообщить о проблеме",
     qa_card: "Виртуальные карты", qa_card_q: "Как создать виртуальную карту?",
     qa_verify: "Подтвердить личность", qa_verify_q: "Помогите мне подтвердить личность",
-    limit_daily_exceeded: "Эта транзакция превышает остаток дневного лимита. Сегодня можно отправить ещё до {remaining}.",
-    limit_daily_reached: "Вы достигли дневного лимита {limit}.",
-    limit_weekly_exceeded: "Эта транзакция превышает остаток недельного лимита. На этой неделе можно отправить ещё до {remaining}.",
-    limit_weekly_reached: "Вы достигли недельного лимита {limit}.",
-    limit_monthly_exceeded: "Эта транзакция превышает остаток месячного лимита. В этом месяце можно отправить ещё до {remaining}.",
-    limit_monthly_reached: "Вы достигли месячного лимита {limit}.",
-    limit_upgrade: "Перейдите на {tierName}, чтобы разблокировать более высокие лимиты."
+    limit_daily_exceeded: "Перевод превышает ваш дневной лимит. Сегодня вы можете отправить ещё до {remaining}.",
+    limit_daily_reached: "Вы исчерпали дневной лимит {limit}. Пройдите верификацию, чтобы увеличить лимиты.",
+    limit_weekly_exceeded: "Перевод превышает ваш недельный лимит. На этой неделе вы можете отправить ещё до {remaining}.",
+    limit_weekly_reached: "Вы исчерпали недельный лимит {limit}. Пройдите верификацию, чтобы увеличить лимиты.",
+    limit_monthly_exceeded: "Перевод превышает ваш месячный лимит. В этом месяце вы можете отправить ещё до {remaining}.",
+    limit_monthly_reached: "Вы исчерпали месячный лимит {limit}. Пройдите верификацию, чтобы увеличить лимиты.",
+    limit_upgrade: ""
   },
   de: {
     greeting: "Hallo! 👋 Mein Name ist Felisa, Ihre EGWallet-Assistentin. Ich kann Ihnen helfen mit:\n\n• Transaktionsfragen\n• Kontoinformationen\n• Funktionsanleitungen\n• Support-Tickets\n\nWie kann ich Ihnen heute helfen?",
@@ -1317,13 +1317,13 @@ const translations = {
     qa_issue: "Problem melden", qa_issue_q: "Ich möchte ein Problem melden",
     qa_card: "Virtuelle Karten", qa_card_q: "Wie erstelle ich eine virtuelle Karte?",
     qa_verify: "Identität verifizieren", qa_verify_q: "Helfen Sie mir, meine Identität zu verifizieren",
-    limit_daily_exceeded: "Diese Transaktion übersteigt Ihr verbleibendes Tageslimit. Sie können heute noch bis zu {remaining} senden.",
-    limit_daily_reached: "Sie haben Ihr Tageslimit von {limit} erreicht.",
-    limit_weekly_exceeded: "Diese Transaktion übersteigt Ihr verbleibendes Wochenlimit. Sie können diese Woche noch bis zu {remaining} senden.",
-    limit_weekly_reached: "Sie haben Ihr Wochenlimit von {limit} erreicht.",
-    limit_monthly_exceeded: "Diese Transaktion übersteigt Ihr verbleibendes Monatslimit. Sie können diesen Monat noch bis zu {remaining} senden.",
-    limit_monthly_reached: "Sie haben Ihr Monatslimit von {limit} erreicht.",
-    limit_upgrade: "Upgraden Sie auf {tierName}, um höhere Limits freizuschalten."
+    limit_daily_exceeded: "Diese Überweisung übersteigt Ihr verfügbares Tageslimit. Heute können Sie noch bis zu {remaining} senden.",
+    limit_daily_reached: "Sie haben Ihr Tageslimit von {limit} erreicht. Schließen Sie die Verifizierung ab, um Ihre Limits zu erhöhen.",
+    limit_weekly_exceeded: "Diese Überweisung übersteigt Ihr verfügbares Wochenlimit. Diese Woche können Sie noch bis zu {remaining} senden.",
+    limit_weekly_reached: "Sie haben Ihr Wochenlimit von {limit} erreicht. Schließen Sie die Verifizierung ab, um Ihre Limits zu erhöhen.",
+    limit_monthly_exceeded: "Diese Überweisung übersteigt Ihr verfügbares Monatslimit. Diesen Monat können Sie noch bis zu {remaining} senden.",
+    limit_monthly_reached: "Sie haben Ihr Monatslimit von {limit} erreicht. Schließen Sie die Verifizierung ab, um Ihre Limits zu erhöhen.",
+    limit_upgrade: ""
   }
 };
 
@@ -2266,7 +2266,8 @@ app.post('/transactions', authMiddleware, (req, res) => {
 
   const limitCheck = checkKYCLimits(senderUser, toAmountInUSD, db);
   if (!limitCheck.allowed) {
-    const lang = senderUser.language || 'en';
+    console.log("LANG HEADER:", req.headers['accept-language']);
+    const lang = req.headers['accept-language'] || senderUser.language || 'en';
     const upgradeMsg = limitCheck.nextTier
       ? ' ' + t('limit_upgrade', lang, { tierName: limitCheck.nextTier.name })
       : '';

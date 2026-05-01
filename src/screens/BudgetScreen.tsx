@@ -7,6 +7,7 @@ import { createBudget, getBudgets, getBudgetAnalytics, deleteBudget } from '../a
 import { listWallets } from '../api/auth';
 import { getCurrencySymbol } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
+import { useLanguage } from '../i18n/LanguageContext';
 import { BudgetCardSkeleton } from '../components/SkeletonLoader';
 import { useToast } from '../utils/toast';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -33,6 +34,7 @@ export default function BudgetScreen() {
   const auth = useAuth();
   const { isOnline } = useNetworkStatus();
   const toast = useToast();
+  const { t } = useLanguage();
   const [loading, setLoading] = useState(false);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [selectedBudget, setSelectedBudget] = useState<Budget | null>(null);
@@ -119,7 +121,7 @@ export default function BudgetScreen() {
   const handleCreate = async () => {
     if (__DEV__) console.log('[Budget] Create Budget button pressed');
     if (!amount || parseFloat(amount.replace(/,/g, '')) <= 0) {
-      Alert.alert('Error', 'Please enter a valid amount');
+      Alert.alert(t('common.error'), t('budget.enterValidAmount'));
       return;
     }
 
@@ -129,12 +131,12 @@ export default function BudgetScreen() {
     const amountMinor = Math.round(amountValue * 100);
 
     Alert.alert(
-      'Create Budget',
+      t('budget.createBudgetTitle'),
       `Set monthly budget limit to ${getCurrencySymbol(currency)}${amountValue.toFixed(2)} ${currency}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Create',
+          text: t('budget.createAction'),
           onPress: async () => {
             try {
               setIsCreating(true);
@@ -143,7 +145,7 @@ export default function BudgetScreen() {
 
               await createBudget(auth.token!, walletId, currency, amountMinor);
               if (__DEV__) console.log('[Budget] Created via API');
-              toast.show('Budget created ✅');
+              toast.show(t('budget.budgetCreated'));
               setAmount('');
               setShowCreateForm(false);
               loadBudgets();
@@ -159,7 +161,7 @@ export default function BudgetScreen() {
               setBudgets(updated);
               try { await AsyncStorage.setItem(BUDGETS_STORAGE_KEY, JSON.stringify(updated)); } catch {}
               if (__DEV__) console.log('[Budget] Created demo budget');
-              toast.show('Budget saved ✅');
+              toast.show(t('budget.budgetSaved'));
               setAmount('');
               setShowCreateForm(false);
             } finally {
@@ -173,7 +175,7 @@ export default function BudgetScreen() {
   };
 
   const handleDelete = async (budgetId: string) => {
-    Alert.alert('Delete Budget', 'Are you sure?', [
+    Alert.alert(t('budget.deleteBudget'), t('common.areYouSure'), [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive', onPress: async () => {
@@ -202,17 +204,17 @@ export default function BudgetScreen() {
         <>
           <TouchableOpacity style={styles.backButton} onPress={() => setShowCreateForm(false)}>
             <Ionicons name="arrow-back" size={22} color="#1565C0" />
-            <Text style={styles.backText}>Back</Text>
+            <Text style={styles.backText}>{t('budget.back')}</Text>
           </TouchableOpacity>
           <View style={styles.heroHeader}>
             <LinearGradient colors={['#1565C0', '#0A3D7C']} style={styles.heroIconCircle} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
               <Ionicons name="pie-chart" size={26} color="#fff" />
             </LinearGradient>
-            <Text style={styles.heroTitle}>Create Budget</Text>
-            <Text style={styles.heroSub}>Set your monthly spending limit</Text>
+            <Text style={styles.heroTitle}>{t('budget.createBudget')}</Text>
+            <Text style={styles.heroSub}>{t('budget.createSubtitle')}</Text>
           </View>
           <View style={styles.form}>
-            <Text style={styles.label}>Monthly Limit</Text>
+            <Text style={styles.label}>{t('budget.monthlyLimit')}</Text>
             <TextInput
               style={styles.input}
               value={amount}
@@ -221,7 +223,7 @@ export default function BudgetScreen() {
               placeholder="0.00"
               placeholderTextColor="#b0c4de"
             />
-            <Text style={styles.label}>Currency</Text>
+            <Text style={styles.label}>{t('common.currency')}</Text>
             <TouchableOpacity style={styles.currencyPicker} onPress={() => setShowCurrencyModal(true)} activeOpacity={0.75}>
               <Text style={styles.currencyText}>{currency} {getCurrencySymbol(currency)}</Text>
               <Ionicons name="chevron-down" size={18} color="#1565C0" />
@@ -231,7 +233,7 @@ export default function BudgetScreen() {
             <Modal visible={showCurrencyModal} transparent animationType="slide" onRequestClose={() => setShowCurrencyModal(false)}>
               <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }} activeOpacity={1} onPress={() => setShowCurrencyModal(false)}>
                 <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: 360, paddingBottom: 30 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#0A3D7C', textAlign: 'center', paddingVertical: 16 }}>Select Currency</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#0A3D7C', textAlign: 'center', paddingVertical: 16 }}>{t('budget.selectCurrency')}</Text>
                   <FlatList
                     data={BUDGET_CURRENCIES}
                     keyExtractor={c => c}
@@ -255,7 +257,7 @@ export default function BudgetScreen() {
               ) : (
                 <>
                   <Ionicons name="add-circle" size={20} color="#FFFFFF" />
-                  <Text style={styles.createButtonText}>Create Budget</Text>
+                  <Text style={styles.createButtonText}>{t('budget.createButton')}</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -270,13 +272,13 @@ export default function BudgetScreen() {
         <>
           <TouchableOpacity style={styles.backButton} onPress={() => setSelectedBudget(null)}>
             <Ionicons name="arrow-back" size={22} color="#1565C0" />
-            <Text style={styles.backText}>Back</Text>
+            <Text style={styles.backText}>{t('budget.back')}</Text>
           </TouchableOpacity>
-          <Text style={styles.title}>Budget Details</Text>
+          <Text style={styles.title}>{t('budget.details')}</Text>
           <Text style={styles.month}>{analytics.month}</Text>
           <View style={styles.progressCard}>
             <View style={styles.progressHeader}>
-              <Text style={styles.progressLabel}>Monthly Spending</Text>
+              <Text style={styles.progressLabel}>{t('budget.monthlySpending')}</Text>
               <Text style={[styles.progressPercent, { color: percentColor }]}>
                 {analytics.percentUsed.toFixed(0)}%
               </Text>
@@ -286,19 +288,19 @@ export default function BudgetScreen() {
             </View>
             <View style={styles.amountsRow}>
               <View>
-                <Text style={styles.amountLabel}>Spent</Text>
+                <Text style={styles.amountLabel}>{t('budget.spent')}</Text>
                 <Text style={styles.amountValue}>
                   {getCurrencySymbol(selectedBudget.currency)}{(analytics.totalSpent / 100).toFixed(2)}
                 </Text>
               </View>
               <View>
-                <Text style={styles.amountLabel}>Remaining</Text>
+                <Text style={styles.amountLabel}>{t('budget.remaining')}</Text>
                 <Text style={[styles.amountValue, { color: percentColor }]}>
                   {getCurrencySymbol(selectedBudget.currency)}{(analytics.remaining / 100).toFixed(2)}
                 </Text>
               </View>
               <View>
-                <Text style={styles.amountLabel}>Limit</Text>
+                <Text style={styles.amountLabel}>{t('budget.limit')}</Text>
                 <Text style={styles.amountValue}>
                   {getCurrencySymbol(selectedBudget.currency)}{(analytics.monthlyLimit / 100).toFixed(2)}
                 </Text>
@@ -308,23 +310,23 @@ export default function BudgetScreen() {
           <View style={styles.statsCard}>
             <View style={styles.statRow}>
               <Ionicons name="swap-horizontal" size={22} color="#1565C0" />
-              <Text style={styles.statLabel}>Transactions</Text>
+              <Text style={styles.statLabel}>{t('budget.transactions')}</Text>
               <Text style={styles.statValue}>{analytics.transactionCount}</Text>
             </View>
             <View style={styles.statRow}>
               <Ionicons name="calendar" size={22} color="#1565C0" />
-              <Text style={styles.statLabel}>Budget Period</Text>
-              <Text style={styles.statValue}>Monthly</Text>
+              <Text style={styles.statLabel}>{t('budget.budgetPeriod')}</Text>
+              <Text style={styles.statValue}>{t('budget.monthly')}</Text>
             </View>
             <View style={styles.statRow}>
               <Ionicons name="cash" size={22} color="#1565C0" />
-              <Text style={styles.statLabel}>Currency</Text>
+              <Text style={styles.statLabel}>{t('budget.currencyLabel')}</Text>
               <Text style={styles.statValue}>{selectedBudget.currency}</Text>
             </View>
           </View>
           <TouchableOpacity style={styles.deleteButton} onPress={() => handleDelete(selectedBudget.id)} disabled={loading}>
             <Ionicons name="trash" size={20} color="#d32f2f" />
-            <Text style={styles.deleteButtonText}>Delete Budget</Text>
+            <Text style={styles.deleteButtonText}>{t('budget.deleteBudget')}</Text>
           </TouchableOpacity>
         </>
       );
@@ -337,11 +339,11 @@ export default function BudgetScreen() {
           <LinearGradient colors={['#1565C0', '#0A3D7C']} style={styles.heroIconCircle} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
             <Ionicons name="pie-chart" size={26} color="#fff" />
           </LinearGradient>
-          <Text style={styles.heroTitle}>Budgets</Text>
-          <Text style={styles.heroSub}>Track your monthly spending limits</Text>
+          <Text style={styles.heroTitle}>{t('budget.title')}</Text>
+          <Text style={styles.heroSub}>{t('budget.subtitle')}</Text>
         </View>
         <View style={styles.header}>
-          <Text style={styles.sectionLabel}>YOUR BUDGETS</Text>
+          <Text style={styles.sectionLabel}>{t('budget.yourBudgets').toUpperCase()}</Text>
           <TouchableOpacity style={styles.addButton} onPress={() => setShowCreateForm(true)}>
             <Ionicons name="add" size={22} color="#1565C0" />
           </TouchableOpacity>
@@ -355,10 +357,10 @@ export default function BudgetScreen() {
         ) : budgets.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons name="pie-chart-outline" size={60} color="#90B8DC" />
-            <Text style={styles.emptyTitle}>No Budgets Yet</Text>
-            <Text style={styles.emptyText}>Tap + to create a monthly spending limit</Text>
+            <Text style={styles.emptyTitle}>{t('budget.noBudgets')}</Text>
+            <Text style={styles.emptyText}>{t('budget.noBudgetsDesc')}</Text>
             <TouchableOpacity style={styles.createFirstBtn} onPress={() => setShowCreateForm(true)}>
-              <Text style={styles.createFirstBtnText}>Create Budget</Text>
+              <Text style={styles.createFirstBtnText}>{t('budget.createBudgetTitle')}</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -371,7 +373,7 @@ export default function BudgetScreen() {
                 <View style={styles.budgetInfo}>
                   <Text style={styles.budgetCurrency}>{budget.currency}</Text>
                   <Text style={styles.budgetLimit}>
-                    {getCurrencySymbol(budget.currency)}{(budget.monthlyLimit / 100).toFixed(2)}/month
+                    {getCurrencySymbol(budget.currency)}{(budget.monthlyLimit / 100).toFixed(2)}{t('budget.perMonth')}
                   </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={20} color="#90B8DC" />

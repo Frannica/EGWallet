@@ -3,32 +3,34 @@ import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Alert,
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
+import { useLanguage } from '../i18n/LanguageContext';
 
 type ProblemCategory = 'bug' | 'payment' | 'account' | 'feature' | 'other';
 
 export default function ReportProblemScreen() {
   const auth = useAuth();
+  const { t } = useLanguage();
   const [category, setCategory] = useState<ProblemCategory>('bug');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const categories: { value: ProblemCategory; label: string; icon: string }[] = [
-    { value: 'bug', label: 'Bug Report', icon: 'bug' },
-    { value: 'payment', label: 'Payment Issue', icon: 'cash' },
-    { value: 'account', label: 'Account Problem', icon: 'person-circle' },
-    { value: 'feature', label: 'Feature Request', icon: 'bulb' },
-    { value: 'other', label: 'Other', icon: 'ellipsis-horizontal' },
+    { value: 'bug', label: t('report.bugReport'), icon: 'bug' },
+    { value: 'payment', label: t('report.paymentIssue'), icon: 'cash' },
+    { value: 'account', label: t('report.accountProblem'), icon: 'person-circle' },
+    { value: 'feature', label: t('report.featureRequest'), icon: 'bulb' },
+    { value: 'other', label: t('report.other'), icon: 'ellipsis-horizontal' },
   ];
 
   const handleSubmit = async () => {
     if (!title.trim()) {
-      Alert.alert('Error', 'Please enter a title');
+      Alert.alert(t('common.error'), t('report.enterTitle'));
       return;
     }
 
     if (!description.trim()) {
-      Alert.alert('Error', 'Please describe the problem');
+      Alert.alert(t('common.error'), t('report.describeTheProblem'));
       return;
     }
 
@@ -57,15 +59,15 @@ export default function ReportProblemScreen() {
       }
 
       Alert.alert(
-        'Report Submitted ✅',
+        t('report.submittedTitle'),
         ticketId
-          ? `Thank you! Ticket ${ticketId} created. Our team will respond within 24-48 hours.`
-          : 'Thank you for your feedback! Our team will review your report within 24-48 hours.',
+          ? t('report.submittedWithTicket')
+          : t('report.submittedNoTicket'),
         [{ text: 'OK', onPress: () => { setTitle(''); setDescription(''); setCategory('bug'); } }]
       );
 
     } catch (error: any) {
-      Alert.alert('Error', 'Failed to submit report. Please try again or email support@egwallet.com directly.');
+      Alert.alert(t('common.error'), t('report.submitFailed'));
     } finally {
       setIsSubmitting(false);
     }
@@ -75,16 +77,14 @@ export default function ReportProblemScreen() {
     <ScrollView style={styles.container}>
       <View style={styles.header}>
         <Ionicons name="alert-circle" size={48} color="#007AFF" />
-        <Text style={styles.title}>Report a Problem</Text>
-        <Text style={styles.subtitle}>
-          Help us improve by reporting bugs or suggesting features
-        </Text>
+        <Text style={styles.title}>{t('report.title')}</Text>
+        <Text style={styles.subtitle}>{t('report.subtitle')}</Text>
       </View>
 
       <View style={styles.form}>
         {/* Category Selection */}
         <View style={styles.section}>
-          <Text style={styles.label}>Category</Text>
+          <Text style={styles.label}>{t('report.category')}</Text>
           <View style={styles.categoryGrid}>
             {categories.map((cat) => (
               <TouchableOpacity
@@ -113,12 +113,12 @@ export default function ReportProblemScreen() {
 
         {/* Title Input */}
         <View style={styles.section}>
-          <Text style={styles.label}>Title</Text>
+          <Text style={styles.label}>{t('report.titleLabel')}</Text>
           <TextInput
             style={styles.input}
             value={title}
             onChangeText={setTitle}
-            placeholder="Brief summary of the problem"
+            placeholder={t('report.titlePlaceholder')}
             placeholderTextColor="#AAB8C2"
             maxLength={100}
           />
@@ -127,15 +127,13 @@ export default function ReportProblemScreen() {
 
         {/* Description Input */}
         <View style={styles.section}>
-          <Text style={styles.label}>Description</Text>
-          <Text style={styles.hint}>
-            Please include steps to reproduce the issue or details about your request
-          </Text>
+          <Text style={styles.label}>{t('report.description')}</Text>
+          <Text style={styles.hint}>{t('report.hint')}</Text>
           <TextInput
             style={[styles.input, styles.textArea]}
             value={description}
             onChangeText={setDescription}
-            placeholder="Describe the problem in detail..."
+            placeholder={t('report.descPlaceholder')}
             placeholderTextColor="#AAB8C2"
             multiline
             numberOfLines={8}
@@ -150,7 +148,7 @@ export default function ReportProblemScreen() {
           <Ionicons name="information-circle" size={20} color="#007AFF" />
           <View style={styles.infoContent}>
             <Text style={styles.infoText}>
-              Your report will be sent from: <Text style={styles.infoEmail}>{auth.user?.email}</Text>
+                {t('report.sentFrom')}<Text style={styles.infoEmail}>{auth.user?.email}</Text>
             </Text>
           </View>
         </View>
@@ -166,17 +164,14 @@ export default function ReportProblemScreen() {
           ) : (
             <>
               <Ionicons name="send" size={20} color="#FFFFFF" />
-              <Text style={styles.submitButtonText}>Submit Report</Text>
+              <Text style={styles.submitButtonText}>{t('report.submitButton')}</Text>
             </>
           )}
         </TouchableOpacity>
 
         {/* Alternative Contact */}
         <View style={styles.alternative}>
-          <Text style={styles.alternativeText}>
-            Or email us directly at{' '}
-            <Text style={styles.alternativeEmail}>support@egwallet.com</Text>
-          </Text>
+          <Text style={styles.alternativeText}>{t('report.emailDirect')}</Text>
         </View>
       </View>
     </ScrollView>

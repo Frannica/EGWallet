@@ -10,6 +10,7 @@ import { useAuth } from '../auth/AuthContext';
 import { sendTransaction } from '../api/transactions';
 import { listWallets } from '../api/auth';
 import { majorToMinor, formatCurrency } from '../utils/currency';
+import { useLanguage } from '../i18n/LanguageContext';
 
 // ─── QR payload types ────────────────────────────────────────────────────────
 
@@ -43,6 +44,7 @@ function formatAmountInput(text: string): string {
 export default function QRScannerScreen() {
   const navigation = useNavigation<any>();
   const auth = useAuth();
+  const { t } = useLanguage();
 
   const [permission, requestPermission] = useCameraPermissions();
   const [flashOn, setFlashOn] = useState(false);
@@ -82,8 +84,8 @@ export default function QRScannerScreen() {
       payload = JSON.parse(data);
     } catch {
       Alert.alert(
-        'Invalid QR Code',
-        'This QR code is not from EGWallet.',
+        t('qrScan.invalidQrTitle'),
+        t('qrScan.invalidQrMessage'),
         [{ text: 'Scan Again', onPress: () => setScanned(false) }],
       );
       return;
@@ -91,8 +93,8 @@ export default function QRScannerScreen() {
 
     if (payload.type !== 'wallet_address' && payload.type !== 'payment_request') {
       Alert.alert(
-        'Unsupported QR',
-        'This QR code type is not supported.',
+        t('qrScan.unsupportedQrTitle'),
+        t('qrScan.unsupportedQrMessage'),
         [{ text: 'Scan Again', onPress: () => setScanned(false) }],
       );
       return;
@@ -102,8 +104,8 @@ export default function QRScannerScreen() {
     if (payload.type === 'payment_request' && payload.expiresAt) {
       if (Date.now() > payload.expiresAt) {
         Alert.alert(
-          'QR Expired',
-          'This payment QR has expired. Ask the recipient to generate a new one.',
+          t('qrScan.qrExpiredTitle'),
+          t('qrScan.qrExpiredMessage'),
           [{ text: 'Scan Again', onPress: () => setScanned(false) }],
         );
         return;
@@ -125,7 +127,7 @@ export default function QRScannerScreen() {
   const handlePay = async () => {
     if (!auth.token) return;
     if (!myWalletId) {
-      Alert.alert('Error', 'Could not load your wallet. Please try again.');
+      Alert.alert(t('common.error'), t('qrScan.walletLoadError'));
       return;
     }
     if (!qrPayload) return;
@@ -138,15 +140,15 @@ export default function QRScannerScreen() {
     if (qrPayload.type === 'payment_request') {
       // Validate embedded values before trusting them
       if (!qrPayload.walletId || typeof qrPayload.walletId !== 'string' || !qrPayload.walletId.trim()) {
-        Alert.alert('Invalid QR', 'This QR code is missing a destination wallet.');
+        Alert.alert(t('common.invalidQr'), t('qrScan.missingWalletId'));
         return;
       }
       if (typeof qrPayload.amount !== 'number' || !isFinite(qrPayload.amount) || qrPayload.amount <= 0) {
-        Alert.alert('Invalid QR', 'This QR code contains an invalid amount.');
+        Alert.alert(t('common.invalidQr'), t('qrScan.invalidQrAmount'));
         return;
       }
       if (!qrPayload.currency || typeof qrPayload.currency !== 'string' || !qrPayload.currency.trim()) {
-        Alert.alert('Invalid QR', 'This QR code is missing a currency.');
+        Alert.alert(t('common.invalidQr'), t('qrScan.missingQrCurrency'));
         return;
       }
       toWalletId = qrPayload.walletId.trim();
@@ -157,11 +159,11 @@ export default function QRScannerScreen() {
       // wallet_address — user entered amount
       const raw = parseFloat(manualAmount.replace(/,/g, ''));
       if (!manualAmount || isNaN(raw) || raw <= 0) {
-        Alert.alert('Invalid Amount', 'Please enter a valid amount greater than 0.');
+        Alert.alert(t('common.invalidAmount'), t('qrScan.invalidAmount'));
         return;
       }
       if (!manualCurrency.trim()) {
-        Alert.alert('Missing Currency', 'Please enter the currency.');
+        Alert.alert(t('common.missingCurrency'), t('qrScan.missingCurrency'));
         return;
       }
       toWalletId = qrPayload.walletId;
@@ -171,7 +173,7 @@ export default function QRScannerScreen() {
     }
 
     if (toWalletId === myWalletId) {
-      Alert.alert('Invalid', "You can't pay yourself.");
+      Alert.alert(t('common.error'), t('qrScan.cantPayYourself'));
       return;
     }
 
@@ -196,10 +198,10 @@ export default function QRScannerScreen() {
         : null;
 
       Alert.alert(
-        '✅ Payment Sent',
+        t('qrScan.paymentSentTitle'),
         receivedDisplay && tx?.wasConverted
           ? `You sent ${sentDisplay}\nRecipient received ${receivedDisplay}`
-          : `You sent ${sentDisplay} successfully.`,
+          : t('qrScan.paymentSentMsg'),
         [
           {
             text: 'Done',
@@ -212,7 +214,7 @@ export default function QRScannerScreen() {
       );
     } catch (err: any) {
       setPaying(false);
-      Alert.alert('Payment Failed', err.message ?? 'Something went wrong. Please try again.');
+      Alert.alert(t('common.error'), err.message ?? t('qrScan.somethingWentWrong'));
     }
   };
 
@@ -239,15 +241,15 @@ export default function QRScannerScreen() {
     return (
       <View style={styles.permissionScreen}>
         <Ionicons name="camera-outline" size={64} color="#1565C0" />
-        <Text style={styles.permissionTitle}>Camera Access Needed</Text>
+        <Text style={styles.permissionTitle}>{t('qrScan.cameraNeeded')}</Text>
         <Text style={styles.permissionDesc}>
-          EGWallet needs your camera to scan QR codes and process payments instantly.
+          {t('qrScan.cameraDesc')}
         </Text>
         <TouchableOpacity style={styles.permissionBtn} onPress={requestPermission}>
-          <Text style={styles.permissionBtnText}>Grant Camera Access</Text>
+          <Text style={styles.permissionBtnText}>{t('qrScan.grantCamera')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.backLink} onPress={() => navigation.goBack()}>
-          <Text style={styles.backLinkText}>Go Back</Text>
+          <Text style={styles.backLinkText}>{t('qrScan.goBack')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -258,7 +260,7 @@ export default function QRScannerScreen() {
   const getExpiryLabel = (expiresAt?: number) => {
     if (!expiresAt) return null;
     const remaining = Math.floor((expiresAt - Date.now()) / 1000 / 60);
-    if (remaining <= 0) return '⚠️ Expired';
+    if (remaining <= 0) return t('qrScan.expired');
     if (remaining < 5) return `⚠️ Expires in ${remaining} min`;
     return `Valid for ~${remaining} min`;
   };
@@ -297,7 +299,7 @@ export default function QRScannerScreen() {
         <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.topTitle}>Scan to Pay</Text>
+        <Text style={styles.topTitle}>{t('qrScan.title')}</Text>
         <TouchableOpacity style={styles.iconBtn} onPress={() => setFlashOn(f => !f)}>
           <Ionicons name={flashOn ? 'flash' : 'flash-off'} size={24} color="#fff" />
         </TouchableOpacity>
@@ -306,7 +308,7 @@ export default function QRScannerScreen() {
       {/* Instruction text */}
       <View style={styles.instructionRow}>
         <Text style={styles.instructionText}>
-          Point at an EGWallet QR code to pay instantly
+          {t('qrScan.subtitle')}
         </Text>
       </View>
 
@@ -314,7 +316,7 @@ export default function QRScannerScreen() {
       {scanned && !showConfirm && (
         <View style={styles.scanAgainRow}>
           <TouchableOpacity style={styles.scanAgainBtn} onPress={() => setScanned(false)}>
-            <Text style={styles.scanAgainText}>Scan Again</Text>
+            <Text style={styles.scanAgainText}>{t('qrScan.scanAgain')}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -340,7 +342,7 @@ export default function QRScannerScreen() {
                   <Ionicons name="qr-code" size={26} color="#1565C0" />
                 </View>
                 <Text style={styles.sheetTitle}>
-                  {qrPayload?.type === 'payment_request' ? 'Confirm Payment' : 'Pay via QR'}
+                  {qrPayload?.type === 'payment_request' ? 'Confirm Payment' : t('qrScan.payViaQr')}
                 </Text>
               </View>
 
@@ -348,7 +350,7 @@ export default function QRScannerScreen() {
                 <>
                   {/* Amount row */}
                   <View style={styles.amountCard}>
-                    <Text style={styles.amountCardLabel}>Amount to pay</Text>
+                    <Text style={styles.amountCardLabel}>{t('qrScan.amountToPay')}</Text>
                     <Text style={styles.amountCardValue}>
                       {formatCurrency(qrPayload.amount, qrPayload.currency)}
                     </Text>
@@ -358,14 +360,14 @@ export default function QRScannerScreen() {
                   {qrPayload.memo ? (
                     <View style={styles.detailRow}>
                       <Ionicons name="receipt-outline" size={16} color="#666" />
-                      <Text style={styles.detailLabel}>For</Text>
+                      <Text style={styles.detailLabel}>{t('qrScan.for')}</Text>
                       <Text style={styles.detailValue}>{qrPayload.memo}</Text>
                     </View>
                   ) : null}
 
                   <View style={styles.detailRow}>
                     <Ionicons name="wallet-outline" size={16} color="#666" />
-                    <Text style={styles.detailLabel}>To wallet</Text>
+                    <Text style={styles.detailLabel}>{t('qrScan.toWallet')}</Text>
                     <Text style={styles.detailValue} numberOfLines={1}>
                       {qrPayload.walletId.length > 20
                         ? `${qrPayload.walletId.slice(0, 10)}...${qrPayload.walletId.slice(-6)}`
@@ -376,7 +378,7 @@ export default function QRScannerScreen() {
                   {qrPayload.expiresAt ? (
                     <View style={styles.detailRow}>
                       <Ionicons name="time-outline" size={16} color="#666" />
-                      <Text style={styles.detailLabel}>Valid</Text>
+                      <Text style={styles.detailLabel}>{t('qrScan.valid')}</Text>
                       <Text style={[
                         styles.detailValue,
                         (Date.now() > (qrPayload.expiresAt - 5 * 60 * 1000)) && { color: '#D32F2F' },
@@ -388,8 +390,8 @@ export default function QRScannerScreen() {
 
                   <Text style={styles.feeNote}>
                     {qrPayload.currency === (auth.user?.preferredCurrency ?? qrPayload.currency)
-                      ? 'Same currency · No conversion fee'
-                      : '1.15% FX fee applies for cross-currency payment'}
+                      ? t('qrScan.noConversionFee')
+                      : t('qrScan.fxFee')}
                   </Text>
                 </>
               )}
@@ -398,7 +400,7 @@ export default function QRScannerScreen() {
                 <>
                   <View style={styles.detailRow}>
                     <Ionicons name="wallet-outline" size={16} color="#666" />
-                    <Text style={styles.detailLabel}>To wallet</Text>
+                    <Text style={styles.detailLabel}>{t('qrScan.toWallet')}</Text>
                     <Text style={styles.detailValue} numberOfLines={1}>
                       {qrPayload.walletId.length > 20
                         ? `${qrPayload.walletId.slice(0, 10)}...${qrPayload.walletId.slice(-6)}`
@@ -406,7 +408,7 @@ export default function QRScannerScreen() {
                     </Text>
                   </View>
 
-                  <Text style={styles.inputLabel}>Amount</Text>
+                  <Text style={styles.inputLabel}>{t('qrScan.amount')}</Text>
                   <TextInput
                     style={styles.input}
                     value={manualAmount}
@@ -417,7 +419,7 @@ export default function QRScannerScreen() {
                     editable={!paying}
                   />
 
-                  <Text style={styles.inputLabel}>Currency</Text>
+                  <Text style={styles.inputLabel}>{t('qrScan.currency')}</Text>
                   <TextInput
                     style={styles.input}
                     value={manualCurrency}
@@ -442,14 +444,14 @@ export default function QRScannerScreen() {
                   : (
                     <View style={styles.payBtnInner}>
                       <Ionicons name="checkmark-circle" size={20} color="#fff" />
-                      <Text style={styles.payBtnText}>Pay Now</Text>
+                      <Text style={styles.payBtnText}>{t('qrScan.payNow')}</Text>
                     </View>
                   )
                 }
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.cancelBtn} onPress={handleCloseConfirm} disabled={paying}>
-                <Text style={styles.cancelBtnText}>Cancel</Text>
+                <Text style={styles.cancelBtnText}>{t('qrScan.cancel')}</Text>
               </TouchableOpacity>
             </ScrollView>
           </View>

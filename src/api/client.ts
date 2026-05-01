@@ -27,3 +27,11 @@ export async function fetchRates(): Promise<Rates> {
   if (!res.ok) throw new Error('Failed to fetch rates');
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Language header helper — set once on app start / language change; read in
+// every fetch call to send Accept-Language to the backend.
+// ---------------------------------------------------------------------------
+let _apiLanguage = 'en';
+export function setApiLanguage(lang: string): void { _apiLanguage = lang; }
+export function getApiLanguage(): string { return _apiLanguage; }

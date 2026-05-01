@@ -36,6 +36,19 @@ LogBox.ignoreLogs([
   'Unable to activate keep awake',
 ]);
 
+// DEV: intercept the "Text strings must be rendered within a <Text>" error
+// to capture the exact component stack. Remove once source is identified.
+if (__DEV__) {
+  const _origError = console.error.bind(console);
+  console.error = function (...args) {
+    if (typeof args[0] === 'string' && args[0].includes('Text strings must be rendered')) {
+      _origError('=== TEXT OUTSIDE TEXT — STACK TRACE ===');
+      console.trace('Text outside Text location');
+    }
+    return _origError(...args);
+  };
+}
+
 // Use require() instead of import to load App AFTER Sentry initializes
 // Wrap in try-catch to capture any import/module errors
 let App;

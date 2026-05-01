@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Localization from 'expo-localization';
+import { setApiLanguage } from '../api/client';
 import {
   SupportedLanguage,
   translations,
@@ -54,15 +55,19 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         if (stored) {
           // User has made a manual choice — honour it, never override automatically
           setLanguageState(stored as SupportedLanguage);
+          setApiLanguage(stored);
           setIsManuallySet(true);
         } else {
           // No manual choice — auto-detect from device locale
           const detected = detectDeviceLanguage();
           setLanguageState(detected);
+          setApiLanguage(detected);
           setIsManuallySet(false);
         }
       } catch {
-        setLanguageState(detectDeviceLanguage());
+        const fallback = detectDeviceLanguage();
+        setLanguageState(fallback);
+        setApiLanguage(fallback);
       } finally {
         setReady(true);
       }
@@ -71,6 +76,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
   const setLanguage = useCallback(async (lang: SupportedLanguage) => {
     setLanguageState(lang);
+    setApiLanguage(lang);
     setIsManuallySet(true);
     await AsyncStorage.setItem(STORAGE_KEY, lang);
   }, []);

@@ -5,6 +5,8 @@ import * as Localization from 'expo-localization';
 import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
 import { useNetworkStatus } from '../utils/OfflineError';
+import { useNavigation } from '@react-navigation/native';
+import { getLocalBalances, getPendingWithdrawals } from '../utils/localBalance';
 
 const SUPPORTED_LANGUAGES = ['en', 'es', 'fr', 'pt', 'zh', 'ja', 'ru', 'de'];
 
@@ -32,6 +34,10 @@ const UI: Record<string, Record<string, string>> = {
     fb_s_balance: 'How do I add money?', fb_s_deposit: 'What are the deposit limits?', fb_s_kyc: 'What are the transaction limits?',
     fb_s_fee: 'How do I send money?', fb_s_currency: 'How do I change my currency?', fb_s_report: 'How do I contact support?',
     fb_s_support: 'How do I send money?', fb_s_default: 'Send money',
+    available24_7: 'Available 24/7', quickActions: 'Quick Actions', skip: 'Skip', submitDetails: 'Submit Details',
+    inputPlaceholder: 'Ask me anything...', fillRequiredFields: 'Please fill in all required fields',
+    fraudAlertTitle: '\uD83D\uDEA8 FRAUD ALERT - URGENT', escalatedTitle: '\u26A1 Escalated Support Ticket', ticketCreatedTitle: '\u2713 Support Ticket Created',
+    expectedResponse: 'Expected response:', priority: 'Priority:', recentTransactions: 'Recent Transactions:',
   },
   es: {
     init_s1: 'Revisar mi transacción', init_s2: 'Reportar un problema', init_s3: 'Límites de cuenta', init_s4: 'Cómo enviar dinero',
@@ -55,6 +61,10 @@ const UI: Record<string, Record<string, string>> = {
     fb_s_balance: '¿Cómo agrego dinero?', fb_s_deposit: '¿Cuáles son los límites de depósito?', fb_s_kyc: '¿Cuáles son los límites de transacción?',
     fb_s_fee: '¿Cómo envío dinero?', fb_s_currency: '¿Cómo cambio mi moneda?', fb_s_report: '¿Cómo contacto soporte?',
     fb_s_support: '¿Cómo envío dinero?', fb_s_default: 'Enviar dinero',
+    available24_7: 'Disponible 24/7', quickActions: 'Acciones rápidas', skip: 'Omitir', submitDetails: 'Enviar detalles',
+    inputPlaceholder: 'Pregúntame lo que quieras...', fillRequiredFields: 'Por favor, completa todos los campos obligatorios',
+    fraudAlertTitle: '🚨 ALERTA DE FRAUDE - URGENTE', escalatedTitle: '⚡ Ticket de soporte escalado', ticketCreatedTitle: '✓ Ticket de soporte creado',
+    expectedResponse: 'Respuesta esperada:', priority: 'Prioridad:', recentTransactions: 'Transacciones recientes:',
   },
   fr: {
     init_s1: 'Vérifier ma transaction', init_s2: 'Signaler un problème', init_s3: 'Limites du compte', init_s4: 'Comment envoyer de l\'argent',
@@ -78,6 +88,10 @@ const UI: Record<string, Record<string, string>> = {
     fb_s_balance: 'Comment ajouter de l\'argent ?', fb_s_deposit: 'Quelles sont les limites de dépôt ?', fb_s_kyc: 'Quelles sont les limites de transaction ?',
     fb_s_fee: 'Comment envoyer de l\'argent ?', fb_s_currency: 'Comment changer ma devise ?', fb_s_report: 'Comment contacter le support ?',
     fb_s_support: 'Comment envoyer de l\'argent ?', fb_s_default: 'Envoyer de l\'argent',
+    available24_7: 'Disponible 24h/24 7j/7', quickActions: 'Actions rapides', skip: 'Passer', submitDetails: 'Soumettre les d\u00E9tails',
+    inputPlaceholder: 'Posez-moi n\'importe quelle question...', fillRequiredFields: 'Veuillez remplir tous les champs obligatoires',
+    fraudAlertTitle: '\uD83D\uDEA8 ALERTE FRAUDE - URGENT', escalatedTitle: '\u26A1 Ticket de support escalad\u00E9', ticketCreatedTitle: '\u2713 Ticket de support cr\u00E9\u00E9',
+    expectedResponse: 'R\u00E9ponse attendue :', priority: 'Priorit\u00E9 :', recentTransactions: 'Transactions r\u00E9centes :',
   },
   pt: {
     init_s1: 'Verificar minha transação', init_s2: 'Reportar um problema', init_s3: 'Limites da conta', init_s4: 'Como enviar dinheiro',
@@ -101,6 +115,10 @@ const UI: Record<string, Record<string, string>> = {
     fb_s_balance: 'Como adiciono dinheiro?', fb_s_deposit: 'Quais são os limites de depósito?', fb_s_kyc: 'Quais são os limites de transação?',
     fb_s_fee: 'Como envio dinheiro?', fb_s_currency: 'Como mudo minha moeda?', fb_s_report: 'Como contato o suporte?',
     fb_s_support: 'Como envio dinheiro?', fb_s_default: 'Enviar dinheiro',
+    available24_7: 'Dispon\u00EDvel 24/7', quickActions: '\u00C7\u00F5es r\u00E1pidas', skip: 'Pular', submitDetails: 'Enviar detalhes',
+    inputPlaceholder: 'Pergunte-me qualquer coisa...', fillRequiredFields: 'Por favor, preencha todos os campos obrigat\u00F3rios',
+    fraudAlertTitle: '\uD83D\uDEA8 ALERTA DE FRAUDE - URGENTE', escalatedTitle: '\u26A1 Ticket de suporte escalado', ticketCreatedTitle: '\u2713 Ticket de suporte criado',
+    expectedResponse: 'Resposta esperada:', priority: 'Prioridade:', recentTransactions: 'Transa\u00E7\u00F5es recentes:',
   },
   zh: {
     init_s1: '查看我的交易', init_s2: '报告问题', init_s3: '账户限额', init_s4: '如何汇款',
@@ -124,6 +142,10 @@ const UI: Record<string, Record<string, string>> = {
     fb_s_balance: '如何充值？', fb_s_deposit: '存款限额是多少？', fb_s_kyc: '交易限额是多少？',
     fb_s_fee: '如何发送资金？', fb_s_currency: '如何更改货币？', fb_s_report: '如何联系支持？',
     fb_s_support: '如何发送资金？', fb_s_default: '发送资金',
+    available24_7: '全天候服务', quickActions: '快速操作', skip: '跳过', submitDetails: '提交详情',
+    inputPlaceholder: '问我任何问题...', fillRequiredFields: '请填写所有必填字段',
+    fraudAlertTitle: '🚨 欺诫警报 - 紧急', escalatedTitle: '⚡ 已升级的支持票', ticketCreatedTitle: '✓ 支持工单已创建',
+    expectedResponse: '预计响应时间：', priority: '优先级：', recentTransactions: '最近交易：',
   },
   ja: {
     init_s1: '取引を確認', init_s2: '問題を報告', init_s3: 'アカウントの限度額', init_s4: '送金方法',
@@ -147,6 +169,10 @@ const UI: Record<string, Record<string, string>> = {
     fb_s_balance: 'お金を追加するには？', fb_s_deposit: '入金限度額は？', fb_s_kyc: '取引限度額は？',
     fb_s_fee: 'お金を送るには？', fb_s_currency: '通貨を変更するには？', fb_s_report: 'サポートに連絡するには？',
     fb_s_support: 'お金を送るには？', fb_s_default: '送金する',
+    available24_7: '24時間対応', quickActions: 'クイックアクション', skip: 'スキップ', submitDetails: '詳細を送信',
+    inputPlaceholder: '何でも肅いてください...', fillRequiredFields: '必須フィールドをすべて入力してください',
+    fraudAlertTitle: '🚨 不正アクセス警告 - 緊急', escalatedTitle: '⚡ エスカレーションされたサポートチケット', ticketCreatedTitle: '✓ サポートチケット作成済み',
+    expectedResponse: '予想応答時間：', priority: '優先度：', recentTransactions: '最近の取引：',
   },
   ru: {
     init_s1: 'Проверить транзакцию', init_s2: 'Сообщить о проблеме', init_s3: 'Лимиты аккаунта', init_s4: 'Как отправить деньги',
@@ -170,6 +196,10 @@ const UI: Record<string, Record<string, string>> = {
     fb_s_balance: 'Как добавить деньги?', fb_s_deposit: 'Каковы лимиты депозита?', fb_s_kyc: 'Каковы лимиты транзакций?',
     fb_s_fee: 'Как отправить деньги?', fb_s_currency: 'Как изменить валюту?', fb_s_report: 'Как связаться с поддержкой?',
     fb_s_support: 'Как отправить деньги?', fb_s_default: 'Отправить деньги',
+    available24_7: 'Доступна 24/7', quickActions: 'Быстрые действия', skip: 'Пропустить', submitDetails: 'Отправить данные',
+    inputPlaceholder: 'Спросите меня о чём угодно...', fillRequiredFields: 'Пожалуйста, заполните все обязательные поля',
+    fraudAlertTitle: '🚨 МОШЕННИЧЕСТВО - СРОЧНО', escalatedTitle: '⚡ Эскалированный тикет поддержки', ticketCreatedTitle: '✓ Тикет поддержки создан',
+    expectedResponse: 'Ожидаемый ответ:', priority: 'Приоритет:', recentTransactions: 'Последние транзакции:',
   },
   de: {
     init_s1: 'Meine Transaktion prüfen', init_s2: 'Problem melden', init_s3: 'Kontolimits', init_s4: 'Wie sende ich Geld',
@@ -193,6 +223,10 @@ const UI: Record<string, Record<string, string>> = {
     fb_s_balance: 'Wie füge ich Geld hinzu?', fb_s_deposit: 'Was sind die Einzahlungslimits?', fb_s_kyc: 'Was sind die Transaktionslimits?',
     fb_s_fee: 'Wie sende ich Geld?', fb_s_currency: 'Wie ändere ich meine Währung?', fb_s_report: 'Wie kontaktiere ich den Support?',
     fb_s_support: 'Wie sende ich Geld?', fb_s_default: 'Geld senden',
+    available24_7: 'Verf\u00FCgbar 24/7', quickActions: 'Schnellaktionen', skip: '\u00DCberspringen', submitDetails: 'Details senden',
+    inputPlaceholder: 'Fragen Sie mich alles...', fillRequiredFields: 'Bitte f\u00FCllen Sie alle Pflichtfelder aus',
+    fraudAlertTitle: '\uD83D\uDEA8 BETRUGSALARM - DRINGEND', escalatedTitle: '\u26A1 Eskaliertes Support-Ticket', ticketCreatedTitle: '\u2713 Support-Ticket erstellt',
+    expectedResponse: 'Erwartete Antwort:', priority: 'Priorit\u00E4t:', recentTransactions: 'Aktuelle Transaktionen:',
   },
 };
 
@@ -222,6 +256,13 @@ const INITIAL_GREETINGS: Record<string, string> = {
   ja: "こんにちは！私はFelisaです。本日はどのようにお手伝いできますか？",
   ru: "Здравствуйте! Меня зовут Фелиса. Как я могу помочь вам сегодня?",
   de: "Hallo! Mein Name ist Felisa. Wie kann ich Ihnen heute helfen?",
+};
+
+type MessageAction = {
+  label: string;
+  type: 'retry' | 'view_transaction' | 'contact_support' | 'navigate' | 'cancel';
+  icon: keyof typeof Ionicons.glyphMap;
+  route?: string;
 };
 
 type Message = {
@@ -261,6 +302,7 @@ type Message = {
     question: string;
     type: 'transaction_select' | 'datetime' | 'yes_no';
   }>;
+  actions?: MessageAction[];
 };
 
 type QuickAction = {
@@ -270,7 +312,7 @@ type QuickAction = {
   query: string;
 };
 
-export default function AIChatScreen() {
+export default function AIChatScreen({ route }: { route?: any }) {
   const auth = useAuth();
   const { isOnline } = useNetworkStatus();
   const initialLang = getDeviceLanguage();
@@ -293,6 +335,14 @@ export default function AIChatScreen() {
   const [formData, setFormData] = useState<Record<string, string>>({});
   const [showLanguageMenu, setShowLanguageMenu] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+
+  // Real user data context for smart responses
+  const navigation = useNavigation<any>();
+  const [userCtx, setUserCtx] = useState<{
+    balances: Record<string, number>;
+    pendingWithdrawals: Record<string, number>;
+  } | null>(null);
+  const autoTriggeredRef = useRef(false);
 
   const languages = [
     { code: 'en', flag: '🇺🇸', name: 'English' },
@@ -321,6 +371,131 @@ export default function AIChatScreen() {
     }
   }, [messages]);
 
+  // Load real user context (balance + pending withdrawals) from local storage
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const [balances, pendingWithdrawals] = await Promise.all([
+          getLocalBalances(),
+          getPendingWithdrawals(),
+        ]);
+        if (mounted) setUserCtx({ balances, pendingWithdrawals });
+      } catch {
+        // non-critical — fallback responses still work without real data
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  // Auto-trigger Felisa when event param is present or pending withdrawal detected
+  useEffect(() => {
+    if (!userCtx || autoTriggeredRef.current) return;
+    const params = route?.params || {};
+    if (params.event) {
+      autoTriggeredRef.current = true;
+      triggerAutoEvent(params.event, params);
+    } else if (Object.values(userCtx.pendingWithdrawals).some(v => v > 0)) {
+      autoTriggeredRef.current = true;
+      triggerAutoEvent('withdrawal_pending', {});
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userCtx]);
+
+  // Auto-trigger Felisa for system events using real backend context
+  async function triggerAutoEvent(event: string, params: Record<string, any>) {
+    try {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 8000);
+      let resp: Response | null = null;
+      try {
+        resp = await fetch(`${API_BASE}/ai-assistant`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${auth.token}` },
+          body: JSON.stringify({ language, event, eventContext: params, userContext: userCtx }),
+          signal: controller.signal,
+        });
+      } finally { clearTimeout(tid); }
+
+      if (resp && resp.ok) {
+        const data = await resp.json();
+        if (data.response) {
+          setMessages(prev => [...prev, {
+            id: `auto-${Date.now()}`,
+            text: data.response,
+            sender: 'ai',
+            timestamp: Date.now(),
+            suggestions: data.suggestions,
+            actions: data.actions,
+          } as Message]);
+          return;
+        }
+      }
+    } catch { /* fall through to local fallback */ }
+
+    // Local fallback when backend is unreachable
+    const L = language;
+    let text = '';
+    let acts: MessageAction[] = [];
+
+    if (event === 'transaction_failed') {
+      const reason = params.failureReason || '';
+      const amtStr = params.amount && params.currency ? `${params.currency} ${(Number(params.amount) / 100).toFixed(2)}` : '';
+      text = L === 'fr'
+        ? `Votre transaction${amtStr ? ` de ${amtStr}` : ''} a échoué${reason ? ` : ${reason}` : ''}. Vérifiez votre solde et réessayez.`
+        : L === 'es'
+        ? `Su transacción${amtStr ? ` de ${amtStr}` : ''} falló${reason ? `: ${reason}` : ''}. Verifique su saldo e intente nuevamente.`
+        : `Your transaction${amtStr ? ` of ${amtStr}` : ''} failed${reason ? `: ${reason}` : ''}. Please check your balance and try again.`;
+      acts = [
+        { label: L === 'fr' ? 'Réessayer' : L === 'es' ? 'Reintentar' : 'Retry transaction', type: 'retry', icon: 'refresh' },
+        { label: L === 'fr' ? 'Voir transactions' : L === 'es' ? 'Ver transacciones' : 'View transactions', type: 'view_transaction', icon: 'list-outline' },
+        { label: L === 'fr' ? 'Contacter support' : L === 'es' ? 'Contactar soporte' : 'Contact support', type: 'contact_support', icon: 'headset' },
+      ];
+    } else if (event === 'withdrawal_pending') {
+      const pending = userCtx?.pendingWithdrawals || {};
+      const pendingStr = Object.entries(pending).filter(([, v]) => v > 0).map(([c, v]) => `${c} ${(v / 100).toFixed(2)}`).join(', ');
+      text = L === 'fr'
+        ? `Votre retrait${pendingStr ? ` de ${pendingStr}` : ''} est en cours. Les retraits prennent 3 à 5 jours ouvrés.`
+        : L === 'es'
+        ? `Su retiro${pendingStr ? ` de ${pendingStr}` : ''} está siendo procesado. Los retiros tardan 3 a 5 días hábiles.`
+        : `Your withdrawal${pendingStr ? ` of ${pendingStr}` : ''} is being processed. Withdrawals typically take 3–5 business days.`;
+      acts = [
+        { label: L === 'fr' ? 'Voir transactions' : L === 'es' ? 'Ver transacciones' : 'View transactions', type: 'view_transaction', icon: 'list-outline' },
+        { label: L === 'fr' ? 'Contacter support' : L === 'es' ? 'Contactar soporte' : 'Contact support', type: 'contact_support', icon: 'headset' },
+      ];
+    } else if (event === 'suspicious_activity') {
+      text = L === 'fr'
+        ? '⚠️ Activité suspecte détectée. Vérifiez vos transactions récentes et changez votre mot de passe si nécessaire.'
+        : L === 'es'
+        ? '⚠️ Se detectó actividad sospechosa. Revise sus transacciones recientes y cambie su contraseña si es necesario.'
+        : '⚠️ Suspicious activity detected on your account. Please review your recent transactions and change your password if needed.';
+      acts = [
+        { label: L === 'fr' ? 'Voir transactions' : L === 'es' ? 'Ver transacciones' : 'View transactions', type: 'view_transaction', icon: 'list-outline' },
+        { label: L === 'fr' ? 'Contacter support' : L === 'es' ? 'Contactar soporte' : 'Contact support', type: 'contact_support', icon: 'headset' },
+      ];
+    } else if (event === 'new_recipient') {
+      const rId = String(params.recipientId || '').substring(0, 30);
+      text = L === 'fr'
+        ? `⚠️ Vous envoyez de l'argent à un nouveau destinataire${rId ? ` (${rId})` : ''}. Vérifiez l'identité du destinataire avant de confirmer.`
+        : L === 'es'
+        ? `⚠️ Está enviando dinero a un nuevo destinatario${rId ? ` (${rId})` : ''}. Verifique la identidad antes de confirmar.`
+        : `⚠️ Security Warning: You are sending money to a new recipient${rId ? ` (${rId})` : ''}. Please verify their identity before confirming.`;
+      acts = [
+        { label: L === 'fr' ? 'Contacter support' : L === 'es' ? 'Contactar soporte' : 'Contact support', type: 'contact_support', icon: 'headset' },
+      ];
+    }
+
+    if (text) {
+      setMessages(prev => [...prev, {
+        id: `auto-${Date.now()}`,
+        text,
+        sender: 'ai',
+        timestamp: Date.now(),
+        actions: acts,
+      } as Message]);
+    }
+  }
+
   async function sendMessage(text: string, structuredData?: Record<string, string>) {
     if (!text.trim()) return;
 
@@ -341,13 +516,15 @@ export default function AIChatScreen() {
       // Skip API when offline — show demo response instantly
       if (!isOnline) throw new Error('Offline — demo mode');
 
-      // Call AI backend with 2-second timeout — demo mode fires instantly on any failure
+      // Call AI backend — try /ai-assistant for context queries, then /ai/chat
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
 
       let response: Response | null = null;
+      let usedAssistant = false;
       try {
-        response = await fetch(`${API_BASE}/ai/chat`, {
+        // First try /ai-assistant with user context for smart responses
+        response = await fetch(`${API_BASE}/ai-assistant`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -355,14 +532,59 @@ export default function AIChatScreen() {
           },
           body: JSON.stringify({
             message: text.trim(),
-            conversationHistory: messages.slice(-5),
-            structuredData: structuredData || null,
             language: language,
+            userContext: userCtx,
           }),
           signal: controller.signal,
         });
-      } finally {
-        clearTimeout(timeoutId);
+        if (response.ok) {
+          const peek = await response.json();
+          if (peek.forwardToChat || !peek.response) {
+            // Not a context-specific query — fall through to /ai/chat
+            response = null;
+          } else {
+            usedAssistant = true;
+            const aiMessage: Message = {
+              id: (Date.now() + 1).toString(),
+              text: peek.response,
+              sender: 'ai',
+              timestamp: Date.now(),
+              suggestions: peek.suggestions,
+              actions: peek.actions,
+            };
+            setMessages(prev => [...prev, aiMessage]);
+            clearTimeout(timeoutId);
+            setIsTyping(false);
+            return;
+          }
+        } else {
+          response = null;
+        }
+      } catch {
+        response = null;
+      }
+
+      if (!usedAssistant) {
+        // Fall back to /ai/chat for general queries
+        try {
+          response = await fetch(`${API_BASE}/ai/chat`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${auth.token}`,
+            },
+            body: JSON.stringify({
+              message: text.trim(),
+              conversationHistory: messages.slice(-5),
+              structuredData: structuredData || null,
+              language: language,
+              userCtx: userCtx,
+            }),
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
       }
 
       if (response && response.ok) {
@@ -378,6 +600,7 @@ export default function AIChatScreen() {
           needsMoreInfo: data.needsMoreInfo,
           recentTransactions: data.recentTransactions,
           fraudQuestions: data.fraudQuestions,
+          actions: data.actions,
         };
 
         setMessages(prev => [...prev, aiMessage]);
@@ -405,7 +628,20 @@ export default function AIChatScreen() {
         fallbackText = uiStr(L, 'fb_card');
         fallbackSuggestions = [uiStr(L, 'fb_s_card'), uiStr(L, 'fb_s_balance')];
       } else if (msg.includes('balance') || msg.includes('wallet') || msg.includes('saldo') || msg.includes('solde') || msg.includes('guthaben') || msg.includes('余额') || msg.includes('残高')) {
-        fallbackText = uiStr(L, 'fb_balance');
+        // Show real balance if available from userCtx
+        const bals = userCtx?.balances || {};
+        const topEntry = Object.entries(bals).find(([, v]) => v > 0);
+        if (topEntry) {
+          const [cur, minorAmt] = topEntry;
+          const readableAmt = (minorAmt / 100).toFixed(2);
+          fallbackText = L === 'fr'
+            ? `Votre solde disponible est de ${cur} ${readableAmt}.\n\n${uiStr(L, 'fb_balance')}`
+            : L === 'es'
+            ? `Su saldo disponible es ${cur} ${readableAmt}.\n\n${uiStr(L, 'fb_balance')}`
+            : `Your available balance is ${cur} ${readableAmt}.\n\n${uiStr(L, 'fb_balance')}`;
+        } else {
+          fallbackText = uiStr(L, 'fb_balance');
+        }
         fallbackSuggestions = [uiStr(L, 'fb_s_balance'), uiStr(L, 'fb_s_send')];
       } else if (msg.includes('deposit') || msg.includes('add money') || msg.includes('top up') || msg.includes('agregar') || msg.includes('ajouter') || msg.includes('充值') || msg.includes('入金')) {
         fallbackText = uiStr(L, 'fb_deposit');
@@ -451,6 +687,36 @@ export default function AIChatScreen() {
     sendMessage(suggestion);
   }
 
+  function handleMessageAction(action: MessageAction) {
+    switch (action.type) {
+      case 'retry':
+        navigation.navigate('Send');
+        break;
+      case 'view_transaction':
+        navigation.navigate('Transactions');
+        break;
+      case 'contact_support':
+        sendMessage(
+          language === 'fr' ? 'Je dois contacter le support'
+          : language === 'es' ? 'Necesito contactar soporte'
+          : 'I need to contact support'
+        );
+        break;
+      case 'navigate': {
+        // Whitelist allowed routes — never navigate to arbitrary backend-supplied strings
+        const ALLOWED_ROUTES: ReadonlyArray<string> = [
+          'Send', 'Transactions', 'Deposit', 'KYCVerification', 'Settings',
+        ];
+        if (action.route && ALLOWED_ROUTES.includes(action.route)) {
+          navigation.navigate(action.route);
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
   function renderMessage({ item }: { item: Message }) {
     const isUser = item.sender === 'user';
 
@@ -481,15 +747,15 @@ export default function AIChatScreen() {
                   color={item.ticketCreated.isFraudAlert || item.ticketCreated.priority === 'urgent' ? "#FF3B30" : "#34C759"} 
                 />
                 <Text style={styles.ticketAlertTitle}>
-                  {item.ticketCreated.isFraudAlert ? "🚨 FRAUD ALERT - URGENT" : item.ticketCreated.escalated ? "⚡ Escalated Support Ticket" : "✓ Support Ticket Created"}
+                  {item.ticketCreated.isFraudAlert ? uiStr(language, 'fraudAlertTitle') : item.ticketCreated.escalated ? uiStr(language, 'escalatedTitle') : uiStr(language, 'ticketCreatedTitle')}
                 </Text>
               </View>
               <Text style={styles.ticketId}>Ticket #{item.ticketCreated.ticketId}</Text>
               <Text style={styles.ticketSLA}>
-                Expected response: {item.ticketCreated.sla}
+                {uiStr(language, 'expectedResponse')} {item.ticketCreated.sla}
               </Text>
               <Text style={styles.ticketPriority}>
-                Priority: {item.ticketCreated.priority.toUpperCase()}
+                {uiStr(language, 'priority')} {item.ticketCreated.priority.toUpperCase()}
               </Text>
             </View>
           )}
@@ -497,7 +763,7 @@ export default function AIChatScreen() {
           {/* Recent transactions for fraud cases */}
           {item.recentTransactions && item.recentTransactions.length > 0 && (
             <View style={styles.transactionsContainer}>
-              <Text style={styles.transactionsTitle}>Recent Transactions:</Text>
+              <Text style={styles.transactionsTitle}>{uiStr(language, 'recentTransactions')}</Text>
               {item.recentTransactions.map((tx, index) => (
                 <TouchableOpacity
                   key={tx.fullId}
@@ -539,6 +805,22 @@ export default function AIChatScreen() {
               ))}
             </View>
           )}
+
+          {/* Action buttons — Retry, View transaction, Contact support */}
+          {item.actions && item.actions.length > 0 && (
+            <View style={styles.actionsContainer}>
+              {item.actions.map((action, idx) => (
+                <TouchableOpacity
+                  key={idx}
+                  style={styles.actionButton}
+                  onPress={() => handleMessageAction(action)}
+                >
+                  <Ionicons name={action.icon} size={15} color="#FFFFFF" />
+                  <Text style={styles.actionButtonText}>{action.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
         </View>
 
         {isUser && (
@@ -565,7 +847,7 @@ export default function AIChatScreen() {
             <Text style={styles.headerTitle}>Felisa</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
               <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: '#22C55E' }} />
-              <Text style={styles.headerSubtitle}>Available 24/7</Text>
+              <Text style={styles.headerSubtitle}>{uiStr(language, 'available24_7')}</Text>
             </View>
           </View>
           <TouchableOpacity
@@ -643,7 +925,7 @@ export default function AIChatScreen() {
       {/* Quick Actions */}
       {messages.length <= 1 && (
         <View style={styles.quickActionsContainer}>
-          <Text style={styles.quickActionsTitle}>Quick Actions</Text>
+          <Text style={styles.quickActionsTitle}>{uiStr(language, 'quickActions')}</Text>
           <View style={styles.quickActionsGrid}>
             {quickActions.map(action => (
               <TouchableOpacity
@@ -710,7 +992,7 @@ export default function AIChatScreen() {
                 sendMessage('Skip data collection and create general ticket');
               }}
             >
-              <Text style={styles.formButtonSecondaryText}>Skip</Text>
+              <Text style={styles.formButtonSecondaryText}>{uiStr(language, 'skip')}</Text>
             </TouchableOpacity>
             
             <TouchableOpacity
@@ -720,14 +1002,14 @@ export default function AIChatScreen() {
                 const allFieldsFilled = requiredFields.every((f: any) => formData[f.name]?.trim());
                 
                 if (!allFieldsFilled) {
-                  alert('Please fill in all required fields');
+                  alert(uiStr(language, 'fillRequiredFields'));
                   return;
                 }
                 
                 sendMessage('Submitting case details', formData);
               }}
             >
-              <Text style={styles.formButtonPrimaryText}>Submit Details</Text>
+              <Text style={styles.formButtonPrimaryText}>{uiStr(language, 'submitDetails')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -738,7 +1020,7 @@ export default function AIChatScreen() {
           style={styles.input}
           value={inputText}
           onChangeText={setInputText}
-          placeholder="Ask me anything..."
+          placeholder={uiStr(language, 'inputPlaceholder')}
           placeholderTextColor="#AAB8C2"
           multiline
           maxLength={500}
@@ -1165,5 +1447,24 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     opacity: 0.5,
+  },
+  actionsContainer: {
+    marginTop: 10,
+    gap: 8,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#007AFF',
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    gap: 6,
+  },
+  actionButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });
