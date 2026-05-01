@@ -707,7 +707,64 @@ const translations = {
     limit_weekly_reached: "You've reached your weekly limit of {limit}. Complete verification to increase your limits.",
     limit_monthly_exceeded: "This transaction exceeds your remaining monthly limit. You can send up to {remaining} more this month.",
     limit_monthly_reached: "You've reached your monthly limit of {limit}. Complete verification to increase your limits.",
-    limit_upgrade: ""
+    limit_upgrade: "",
+    error_user_not_found: "User not found.",
+    error_invalid_credentials: "Invalid email or password.",
+    error_user_exists: "User already exists.",
+    error_username_invalid: "Username must be 3-20 characters (letters, numbers, underscores only).",
+    error_username_taken: "Username already taken.",
+    error_username_required: "Username is required.",
+    error_missing_token: "Missing token.",
+    error_invalid_token: "Invalid token.",
+    error_invalid_refresh_token: "Invalid or expired refresh token.",
+    error_missing_fields: "Missing required fields.",
+    error_cannot_send_to_self: "You cannot send money to yourself.",
+    error_source_wallet_not_found: "Source wallet not found.",
+    error_destination_wallet_not_found: "Destination wallet not found.",
+    error_insufficient_funds: "Insufficient funds.",
+    error_sender_not_found: "Sender account not found.",
+    error_wallet_capacity_exceeded: "Destination wallet would exceed maximum capacity.",
+    error_transaction_persist: "Transaction could not be completed. Please try again.",
+    error_wallet_not_found: "Wallet not found.",
+    error_recipient_not_found: "Recipient not found.",
+    error_qr_not_found: "QR code not found.",
+    error_qr_expired: "QR code has expired.",
+    error_qr_used: "QR code has already been used.",
+    error_qr_fraud: "Invalid signature - possible fraud.",
+    error_invalid_qr_format: "Invalid QR format.",
+    error_request_not_found: "Request not found.",
+    error_request_processed: "Request has already been processed.",
+    error_card_not_found: "Card not found.",
+    error_card_deleted: "This card has been deleted.",
+    error_max_cards: "Maximum 5 cards allowed.",
+    error_budget_not_found: "Budget not found.",
+    error_employer_not_found: "Employer account not found.",
+    error_employer_exists: "Employer account already exists.",
+    error_employer_not_verified: "Employer account is not verified.",
+    error_insufficient_kyc: "Insufficient KYC tier for this operation.",
+    error_no_file_uploaded: "No file uploaded.",
+    error_csv_empty: "CSV file is empty.",
+    error_invalid_csv: "Invalid CSV format.",
+    error_insufficient_funds_payroll: "Insufficient funds — no money was sent.",
+    error_payroll_validation: "Payroll validation failed — no money was sent.",
+    error_employee_added: "Employee already added.",
+    error_worker_not_found: "Worker not found. They must register first.",
+    error_not_linked_employer: "You are not linked to this employer.",
+    error_not_authorized_employer: "Not authorized to receive payments from this employer.",
+    error_employer_unverified: "This employer account has not been verified yet.",
+    error_employer_insufficient_balance: "Employer has insufficient balance for this request.",
+    error_request_exceeds_limit: "Request amount exceeds your limit of {limit} {currency}.",
+    error_duplicate_request: "Duplicate request. You already have a pending request for this amount.",
+    error_internal: "An unexpected error occurred. Please try again.",
+    error_unauthorized: "Unauthorized.",
+    error_access_denied: "Access denied.",
+    error_currency_required: "Currency preference is required.",
+    error_too_many_accounts: "Too many accounts created from this device. Please try again in 24 hours.",
+    error_too_many_kyc: "Too many verification attempts. Please try again in 1 hour.",
+    error_email_confirm_mismatch: "Email confirmation does not match.",
+    error_password_confirm_invalid: "Password confirmation is invalid.",
+    error_not_found: "Not found.",
+    error_withdrawal_in_progress: "A withdrawal for this currency is already being processed. Please wait."
   },
   es: {
     greeting: "¡Hola! 👋 Me llamo Felisa, tu asistente de EGWallet. Puedo ayudarte con:\n\n• Preguntas sobre transacciones\n• Información de cuenta\n• Guías de funciones\n• Tickets de soporte\n\n¿En qué puedo ayudarte hoy?",
@@ -795,7 +852,64 @@ const translations = {
     limit_weekly_reached: "Has alcanzado tu límite semanal de {limit}. Completa tu verificación para aumentar tus límites.",
     limit_monthly_exceeded: "Esta transacción supera tu límite mensual. Este mes puedes enviar hasta {remaining} más.",
     limit_monthly_reached: "Has alcanzado tu límite mensual de {limit}. Completa tu verificación para aumentar tus límites.",
-    limit_upgrade: ""
+    limit_upgrade: "",
+    error_user_not_found: "Usuario no encontrado.",
+    error_invalid_credentials: "Correo o contraseña incorrectos.",
+    error_user_exists: "El usuario ya existe.",
+    error_username_invalid: "El nombre de usuario debe tener entre 3 y 20 caracteres (letras, números y guiones bajos).",
+    error_username_taken: "El nombre de usuario ya está en uso.",
+    error_username_required: "El nombre de usuario es obligatorio.",
+    error_missing_token: "Token faltante.",
+    error_invalid_token: "Token inválido.",
+    error_invalid_refresh_token: "Token de actualización inválido o expirado.",
+    error_missing_fields: "Faltan campos requeridos.",
+    error_cannot_send_to_self: "No puedes enviarte dinero a ti mismo.",
+    error_source_wallet_not_found: "Billetera de origen no encontrada.",
+    error_destination_wallet_not_found: "Billetera de destino no encontrada.",
+    error_insufficient_funds: "Fondos insuficientes.",
+    error_sender_not_found: "Cuenta del remitente no encontrada.",
+    error_wallet_capacity_exceeded: "La billetera de destino superaría la capacidad máxima.",
+    error_transaction_persist: "La transacción no pudo completarse. Por favor intenta de nuevo.",
+    error_wallet_not_found: "Billetera no encontrada.",
+    error_recipient_not_found: "Destinatario no encontrado.",
+    error_qr_not_found: "Código QR no encontrado.",
+    error_qr_expired: "El código QR ha expirado.",
+    error_qr_used: "El código QR ya fue utilizado.",
+    error_qr_fraud: "Firma inválida - posible fraude.",
+    error_invalid_qr_format: "Formato QR inválido.",
+    error_request_not_found: "Solicitud no encontrada.",
+    error_request_processed: "La solicitud ya fue procesada.",
+    error_card_not_found: "Tarjeta no encontrada.",
+    error_card_deleted: "Esta tarjeta ha sido eliminada.",
+    error_max_cards: "Se permiten un máximo de 5 tarjetas.",
+    error_budget_not_found: "Presupuesto no encontrado.",
+    error_employer_not_found: "Cuenta de empleador no encontrada.",
+    error_employer_exists: "La cuenta de empleador ya existe.",
+    error_employer_not_verified: "La cuenta de empleador no está verificada.",
+    error_insufficient_kyc: "Nivel KYC insuficiente para esta operación.",
+    error_no_file_uploaded: "No se subió ningún archivo.",
+    error_csv_empty: "El archivo CSV está vacío.",
+    error_invalid_csv: "Formato CSV inválido.",
+    error_insufficient_funds_payroll: "Fondos insuficientes — no se envió dinero.",
+    error_payroll_validation: "Error de validación de nómina — no se envió dinero.",
+    error_employee_added: "Empleado ya agregado.",
+    error_worker_not_found: "Trabajador no encontrado. Primero debe registrarse.",
+    error_not_linked_employer: "No estás vinculado a este empleador.",
+    error_not_authorized_employer: "No estás autorizado a recibir pagos de este empleador.",
+    error_employer_unverified: "Esta cuenta de empleador aún no ha sido verificada.",
+    error_employer_insufficient_balance: "El empleador no tiene saldo suficiente para esta solicitud.",
+    error_request_exceeds_limit: "El monto de la solicitud supera tu límite de {limit} {currency}.",
+    error_duplicate_request: "Solicitud duplicada. Ya tienes una solicitud pendiente por este monto.",
+    error_internal: "Ocurrió un error inesperado. Por favor intenta de nuevo.",
+    error_unauthorized: "No autorizado.",
+    error_access_denied: "Acceso denegado.",
+    error_currency_required: "La preferencia de moneda es obligatoria.",
+    error_too_many_accounts: "Demasiadas cuentas creadas desde este dispositivo. Por favor intenta en 24 horas.",
+    error_too_many_kyc: "Demasiados intentos de verificación. Por favor intenta en 1 hora.",
+    error_email_confirm_mismatch: "La confirmación del correo no coincide.",
+    error_password_confirm_invalid: "La confirmación de contraseña es inválida.",
+    error_not_found: "No encontrado.",
+    error_withdrawal_in_progress: "Ya hay un retiro en proceso para esta moneda. Por favor espera."
   },
   fr: {
     greeting: "Bonjour ! 👋 Je m'appelle Felisa, votre assistante EGWallet. Je peux vous aider avec :\n\n• Questions sur les transactions\n• Informations sur le compte\n• Guides des fonctionnalités\n• Tickets de support\n\nComment puis-je vous aider aujourd'hui ?",
@@ -883,7 +997,64 @@ const translations = {
     limit_weekly_reached: "Vous avez atteint votre plafond hebdomadaire de {limit}. Finalisez votre vérification pour augmenter vos limites.",
     limit_monthly_exceeded: "Ce virement dépasse votre plafond mensuel. Vous pouvez encore envoyer jusqu'à {remaining} ce mois-ci.",
     limit_monthly_reached: "Vous avez atteint votre plafond mensuel de {limit}. Finalisez votre vérification pour augmenter vos limites.",
-    limit_upgrade: ""
+    limit_upgrade: "",
+    error_user_not_found: "Utilisateur introuvable.",
+    error_invalid_credentials: "Email ou mot de passe incorrect.",
+    error_user_exists: "Cet utilisateur existe déjà.",
+    error_username_invalid: "Le nom d'utilisateur doit comporter entre 3 et 20 caractères (lettres, chiffres, tirets bas uniquement).",
+    error_username_taken: "Ce nom d'utilisateur est déjà pris.",
+    error_username_required: "Le nom d'utilisateur est obligatoire.",
+    error_missing_token: "Jeton manquant.",
+    error_invalid_token: "Jeton invalide.",
+    error_invalid_refresh_token: "Jeton de rafraîchissement invalide ou expiré.",
+    error_missing_fields: "Champs obligatoires manquants.",
+    error_cannot_send_to_self: "Vous ne pouvez pas vous envoyer de l'argent à vous-même.",
+    error_source_wallet_not_found: "Portefeuille source introuvable.",
+    error_destination_wallet_not_found: "Portefeuille de destination introuvable.",
+    error_insufficient_funds: "Fonds insuffisants.",
+    error_sender_not_found: "Compte de l'expéditeur introuvable.",
+    error_wallet_capacity_exceeded: "Le portefeuille de destination dépasserait la capacité maximale.",
+    error_transaction_persist: "La transaction n'a pas pu être complétée. Veuillez réessayer.",
+    error_wallet_not_found: "Portefeuille introuvable.",
+    error_recipient_not_found: "Destinataire introuvable.",
+    error_qr_not_found: "Code QR introuvable.",
+    error_qr_expired: "Le code QR a expiré.",
+    error_qr_used: "Le code QR a déjà été utilisé.",
+    error_qr_fraud: "Signature invalide - fraude possible.",
+    error_invalid_qr_format: "Format QR invalide.",
+    error_request_not_found: "Demande introuvable.",
+    error_request_processed: "La demande a déjà été traitée.",
+    error_card_not_found: "Carte introuvable.",
+    error_card_deleted: "Cette carte a été supprimée.",
+    error_max_cards: "Maximum 5 cartes autorisées.",
+    error_budget_not_found: "Budget introuvable.",
+    error_employer_not_found: "Compte employeur introuvable.",
+    error_employer_exists: "Le compte employeur existe déjà.",
+    error_employer_not_verified: "Le compte employeur n'est pas vérifié.",
+    error_insufficient_kyc: "Niveau KYC insuffisant pour cette opération.",
+    error_no_file_uploaded: "Aucun fichier téléchargé.",
+    error_csv_empty: "Le fichier CSV est vide.",
+    error_invalid_csv: "Format CSV invalide.",
+    error_insufficient_funds_payroll: "Fonds insuffisants — aucun argent n'a été envoyé.",
+    error_payroll_validation: "Échec de la validation de la paie — aucun argent n'a été envoyé.",
+    error_employee_added: "Employé déjà ajouté.",
+    error_worker_not_found: "Travailleur introuvable. Il doit d'abord s'inscrire.",
+    error_not_linked_employer: "Vous n'êtes pas lié à cet employeur.",
+    error_not_authorized_employer: "Non autorisé à recevoir des paiements de cet employeur.",
+    error_employer_unverified: "Ce compte employeur n'a pas encore été vérifié.",
+    error_employer_insufficient_balance: "L'employeur n'a pas assez de solde pour cette demande.",
+    error_request_exceeds_limit: "Le montant de la demande dépasse votre limite de {limit} {currency}.",
+    error_duplicate_request: "Demande dupliquée. Vous avez déjà une demande en attente pour ce montant.",
+    error_internal: "Une erreur inattendue s'est produite. Veuillez réessayer.",
+    error_unauthorized: "Non autorisé.",
+    error_access_denied: "Accès refusé.",
+    error_currency_required: "La préférence de devise est obligatoire.",
+    error_too_many_accounts: "Trop de comptes créés depuis cet appareil. Veuillez réessayer dans 24 heures.",
+    error_too_many_kyc: "Trop de tentatives de vérification. Veuillez réessayer dans 1 heure.",
+    error_email_confirm_mismatch: "La confirmation d'email ne correspond pas.",
+    error_password_confirm_invalid: "La confirmation du mot de passe est invalide.",
+    error_not_found: "Introuvable.",
+    error_withdrawal_in_progress: "Un retrait dans cette devise est déjà en cours. Veuillez patienter."
   },
   pt: {
     greeting: "Olá! 👋 Meu nome é Felisa, sua assistente da EGWallet. Posso ajudá-lo com:\n\n• Perguntas sobre transações\n• Informações da conta\n• Guias de recursos\n• Tickets de suporte\n\nComo posso ajudá-lo hoje?",
@@ -971,7 +1142,64 @@ const translations = {
     limit_weekly_reached: "Você atingiu o seu limite semanal de {limit}. Conclua a verificação para aumentar os seus limites.",
     limit_monthly_exceeded: "Esta transferência excede o seu limite mensal. Você ainda pode enviar até {remaining} este mês.",
     limit_monthly_reached: "Você atingiu o seu limite mensal de {limit}. Conclua a verificação para aumentar os seus limites.",
-    limit_upgrade: ""
+    limit_upgrade: "",
+    error_user_not_found: "Utilizador não encontrado.",
+    error_invalid_credentials: "Email ou palavra-passe incorretos.",
+    error_user_exists: "O utilizador já existe.",
+    error_username_invalid: "O nome de utilizador deve ter entre 3 e 20 caracteres (letras, números e underscores).",
+    error_username_taken: "O nome de utilizador já está em uso.",
+    error_username_required: "O nome de utilizador é obrigatório.",
+    error_missing_token: "Token em falta.",
+    error_invalid_token: "Token inválido.",
+    error_invalid_refresh_token: "Token de atualização inválido ou expirado.",
+    error_missing_fields: "Campos obrigatórios em falta.",
+    error_cannot_send_to_self: "Não pode enviar dinheiro para si mesmo.",
+    error_source_wallet_not_found: "Carteira de origem não encontrada.",
+    error_destination_wallet_not_found: "Carteira de destino não encontrada.",
+    error_insufficient_funds: "Fundos insuficientes.",
+    error_sender_not_found: "Conta do remetente não encontrada.",
+    error_wallet_capacity_exceeded: "A carteira de destino excederia a capacidade máxima.",
+    error_transaction_persist: "A transação não pôde ser concluída. Por favor tente novamente.",
+    error_wallet_not_found: "Carteira não encontrada.",
+    error_recipient_not_found: "Destinatário não encontrado.",
+    error_qr_not_found: "Código QR não encontrado.",
+    error_qr_expired: "O código QR expirou.",
+    error_qr_used: "O código QR já foi utilizado.",
+    error_qr_fraud: "Assinatura inválida - possível fraude.",
+    error_invalid_qr_format: "Formato QR inválido.",
+    error_request_not_found: "Pedido não encontrado.",
+    error_request_processed: "O pedido já foi processado.",
+    error_card_not_found: "Cartão não encontrado.",
+    error_card_deleted: "Este cartão foi eliminado.",
+    error_max_cards: "Máximo de 5 cartões permitidos.",
+    error_budget_not_found: "Orçamento não encontrado.",
+    error_employer_not_found: "Conta de empregador não encontrada.",
+    error_employer_exists: "A conta de empregador já existe.",
+    error_employer_not_verified: "A conta de empregador não está verificada.",
+    error_insufficient_kyc: "Nível KYC insuficiente para esta operação.",
+    error_no_file_uploaded: "Nenhum ficheiro enviado.",
+    error_csv_empty: "O ficheiro CSV está vazio.",
+    error_invalid_csv: "Formato CSV inválido.",
+    error_insufficient_funds_payroll: "Fundos insuficientes — nenhum dinheiro foi enviado.",
+    error_payroll_validation: "Falha na validação da folha de pagamento — nenhum dinheiro foi enviado.",
+    error_employee_added: "Funcionário já adicionado.",
+    error_worker_not_found: "Trabalhador não encontrado. Deve registar-se primeiro.",
+    error_not_linked_employer: "Não está vinculado a este empregador.",
+    error_not_authorized_employer: "Não está autorizado a receber pagamentos deste empregador.",
+    error_employer_unverified: "Esta conta de empregador ainda não foi verificada.",
+    error_employer_insufficient_balance: "O empregador não tem saldo suficiente para este pedido.",
+    error_request_exceeds_limit: "O montante do pedido excede o seu limite de {limit} {currency}.",
+    error_duplicate_request: "Pedido duplicado. Já tem um pedido pendente para este montante.",
+    error_internal: "Ocorreu um erro inesperado. Por favor tente novamente.",
+    error_unauthorized: "Não autorizado.",
+    error_access_denied: "Acesso negado.",
+    error_currency_required: "A preferência de moeda é obrigatória.",
+    error_too_many_accounts: "Demasiadas contas criadas a partir deste dispositivo. Por favor tente em 24 horas.",
+    error_too_many_kyc: "Demasiadas tentativas de verificação. Por favor tente em 1 hora.",
+    error_email_confirm_mismatch: "A confirmação de email não corresponde.",
+    error_password_confirm_invalid: "A confirmação de palavra-passe é inválida.",
+    error_not_found: "Não encontrado.",
+    error_withdrawal_in_progress: "Já existe um levantamento em processamento nesta moeda. Por favor aguarde."
   },
   zh: {
     greeting: "您好！👋 我叫 Felisa，是您的 EGWallet 助手。我可以帮助您：\n\n• 交易问题\n• 账户信息\n• 功能指南\n• 支持工单\n\n今天我能帮您什么？",
@@ -1059,7 +1287,64 @@ const translations = {
     limit_weekly_reached: "您已达到每周限额 {limit}，请完成身份认证以提升限额。",
     limit_monthly_exceeded: "本次转账超出您的每月限额，本月最多还可转账 {remaining}。",
     limit_monthly_reached: "您已达到每月限额 {limit}，请完成身份认证以提升限额。",
-    limit_upgrade: ""
+    limit_upgrade: "",
+    error_user_not_found: "用户不存在。",
+    error_invalid_credentials: "邮箱或密码错误。",
+    error_user_exists: "用户已存在。",
+    error_username_invalid: "用户名必须为3-20个字符（仅限字母、数字和下划线）。",
+    error_username_taken: "用户名已被使用。",
+    error_username_required: "用户名为必填项。",
+    error_missing_token: "缺少令牌。",
+    error_invalid_token: "令牌无效。",
+    error_invalid_refresh_token: "刷新令牌无效或已过期。",
+    error_missing_fields: "缺少必填字段。",
+    error_cannot_send_to_self: "您不能给自己转账。",
+    error_source_wallet_not_found: "来源钱包不存在。",
+    error_destination_wallet_not_found: "目标钱包不存在。",
+    error_insufficient_funds: "余额不足。",
+    error_sender_not_found: "发送方账户不存在。",
+    error_wallet_capacity_exceeded: "目标钱包将超过最大容量。",
+    error_transaction_persist: "交易无法完成，请重试。",
+    error_wallet_not_found: "钱包不存在。",
+    error_recipient_not_found: "收款方不存在。",
+    error_qr_not_found: "二维码不存在。",
+    error_qr_expired: "二维码已过期。",
+    error_qr_used: "二维码已被使用。",
+    error_qr_fraud: "签名无效 - 可能存在欺诈。",
+    error_invalid_qr_format: "二维码格式无效。",
+    error_request_not_found: "请求不存在。",
+    error_request_processed: "请求已被处理。",
+    error_card_not_found: "卡片不存在。",
+    error_card_deleted: "该卡片已被删除。",
+    error_max_cards: "最多允许5张卡片。",
+    error_budget_not_found: "预算不存在。",
+    error_employer_not_found: "雇主账户不存在。",
+    error_employer_exists: "雇主账户已存在。",
+    error_employer_not_verified: "雇主账户未经验证。",
+    error_insufficient_kyc: "此操作的KYC级别不足。",
+    error_no_file_uploaded: "未上传文件。",
+    error_csv_empty: "CSV文件为空。",
+    error_invalid_csv: "CSV格式无效。",
+    error_insufficient_funds_payroll: "资金不足——未发送任何款项。",
+    error_payroll_validation: "薪资验证失败——未发送任何款项。",
+    error_employee_added: "员工已添加。",
+    error_worker_not_found: "员工不存在，请先注册。",
+    error_not_linked_employer: "您未与此雇主关联。",
+    error_not_authorized_employer: "您未被授权从此雇主处接收付款。",
+    error_employer_unverified: "此雇主账户尚未验证。",
+    error_employer_insufficient_balance: "雇主余额不足，无法处理此请求。",
+    error_request_exceeds_limit: "请求金额超过您的限额 {limit} {currency}。",
+    error_duplicate_request: "重复请求。您已有此金额的待处理请求。",
+    error_internal: "发生意外错误，请重试。",
+    error_unauthorized: "未授权。",
+    error_access_denied: "拒绝访问。",
+    error_currency_required: "货币偏好设置为必填项。",
+    error_too_many_accounts: "此设备创建的账户过多，请24小时后重试。",
+    error_too_many_kyc: "验证尝试次数过多，请1小时后重试。",
+    error_email_confirm_mismatch: "邮箱确认不匹配。",
+    error_password_confirm_invalid: "密码确认无效。",
+    error_not_found: "未找到。",
+    error_withdrawal_in_progress: "此货币的提款正在处理中，请稍候。"
   },
   ja: {
     greeting: "こんにちは！👋 私はFelisaです、EGWalletのアシスタントです。以下についてサポートできます：\n\n• 取引に関する質問\n• アカウント情報\n• 機能ガイド\n• サポートチケット\n\n本日はどのようにお手伝いできますか？",
@@ -1147,7 +1432,64 @@ const translations = {
     limit_weekly_reached: "週間の送金上限 {limit} に達しました。上限を引き上げるには本人確認を完了してください。",
     limit_monthly_exceeded: "この送金は月間の送金上限を超えています。今月はあと {remaining} まで送金できます。",
     limit_monthly_reached: "月間の送金上限 {limit} に達しました。上限を引き上げるには本人確認を完了してください。",
-    limit_upgrade: ""
+    limit_upgrade: "",
+    error_user_not_found: "ユーザーが見つかりません。",
+    error_invalid_credentials: "メールアドレスまたはパスワードが間違っています。",
+    error_user_exists: "このユーザーは既に存在します。",
+    error_username_invalid: "ユーザー名は3〜20文字（英字、数字、アンダースコアのみ）にしてください。",
+    error_username_taken: "このユーザー名は既に使用されています。",
+    error_username_required: "ユーザー名は必須です。",
+    error_missing_token: "トークンがありません。",
+    error_invalid_token: "無効なトークンです。",
+    error_invalid_refresh_token: "リフレッシュトークンが無効または期限切れです。",
+    error_missing_fields: "必須フィールドが不足しています。",
+    error_cannot_send_to_self: "自分自身に送金することはできません。",
+    error_source_wallet_not_found: "送金元ウォレットが見つかりません。",
+    error_destination_wallet_not_found: "送金先ウォレットが見つかりません。",
+    error_insufficient_funds: "残高不足です。",
+    error_sender_not_found: "送信者のアカウントが見つかりません。",
+    error_wallet_capacity_exceeded: "送金先ウォレットの最大容量を超えます。",
+    error_transaction_persist: "取引を完了できませんでした。再試行してください。",
+    error_wallet_not_found: "ウォレットが見つかりません。",
+    error_recipient_not_found: "受取人が見つかりません。",
+    error_qr_not_found: "QRコードが見つかりません。",
+    error_qr_expired: "QRコードの有効期限が切れています。",
+    error_qr_used: "QRコードは既に使用済みです。",
+    error_qr_fraud: "署名が無効です - 不正の可能性があります。",
+    error_invalid_qr_format: "QRフォーマットが無効です。",
+    error_request_not_found: "リクエストが見つかりません。",
+    error_request_processed: "リクエストは既に処理済みです。",
+    error_card_not_found: "カードが見つかりません。",
+    error_card_deleted: "このカードは削除されています。",
+    error_max_cards: "最大5枚のカードまで使用できます。",
+    error_budget_not_found: "予算が見つかりません。",
+    error_employer_not_found: "雇用主アカウントが見つかりません。",
+    error_employer_exists: "雇用主アカウントは既に存在します。",
+    error_employer_not_verified: "雇用主アカウントは確認されていません。",
+    error_insufficient_kyc: "この操作にはKYCレベルが不足しています。",
+    error_no_file_uploaded: "ファイルがアップロードされていません。",
+    error_csv_empty: "CSVファイルが空です。",
+    error_invalid_csv: "CSVフォーマットが無効です。",
+    error_insufficient_funds_payroll: "残高不足のため、送金されませんでした。",
+    error_payroll_validation: "給与の検証に失敗しました。送金されませんでした。",
+    error_employee_added: "この従業員は既に追加されています。",
+    error_worker_not_found: "ワーカーが見つかりません。先に登録してください。",
+    error_not_linked_employer: "この雇用主に連携されていません。",
+    error_not_authorized_employer: "この雇用主からの支払いを受け取る権限がありません。",
+    error_employer_unverified: "この雇用主アカウントはまだ確認されていません。",
+    error_employer_insufficient_balance: "雇用主のこのリクエストの残高が不足しています。",
+    error_request_exceeds_limit: "リクエスト金額が上限 {limit} {currency} を超えています。",
+    error_duplicate_request: "重複リクエストです。この金額の保留中のリクエストが既にあります。",
+    error_internal: "予期しないエラーが発生しました。再試行してください。",
+    error_unauthorized: "権限がありません。",
+    error_access_denied: "アクセスが拒否されました。",
+    error_currency_required: "通貨の設定が必要です。",
+    error_too_many_accounts: "このデバイスから作成されたアカウントが多すぎます。24時間後に再試行してください。",
+    error_too_many_kyc: "確認の試みが多すぎます。1時間後に再試行してください。",
+    error_email_confirm_mismatch: "メールアドレスの確認が一致しません。",
+    error_password_confirm_invalid: "パスワードの確認が無効です。",
+    error_not_found: "見つかりません。",
+    error_withdrawal_in_progress: "この通貨の出金は現在処理中です。しばらくお待ちください。"
   },
   ru: {
     greeting: "Здравствуйте! 👋 Меня зовут Фелиса, ваш помощник EGWallet. Я могу помочь вам с:\n\n• Вопросами о транзакциях\n• Информацией об учетной записи\n• Руководствами по функциям\n• Заявками в поддержку\n\nКак я могу помочь вам сегодня?",
@@ -1235,7 +1577,64 @@ const translations = {
     limit_weekly_reached: "Вы исчерпали недельный лимит {limit}. Пройдите верификацию, чтобы увеличить лимиты.",
     limit_monthly_exceeded: "Перевод превышает ваш месячный лимит. В этом месяце вы можете отправить ещё до {remaining}.",
     limit_monthly_reached: "Вы исчерпали месячный лимит {limit}. Пройдите верификацию, чтобы увеличить лимиты.",
-    limit_upgrade: ""
+    limit_upgrade: "",
+    error_user_not_found: "Пользователь не найден.",
+    error_invalid_credentials: "Неверный email или пароль.",
+    error_user_exists: "Пользователь уже существует.",
+    error_username_invalid: "Имя пользователя должно содержать от 3 до 20 символов (только буквы, цифры и символы подчёркивания).",
+    error_username_taken: "Это имя пользователя уже занято.",
+    error_username_required: "Имя пользователя обязательно.",
+    error_missing_token: "Токен отсутствует.",
+    error_invalid_token: "Недействительный токен.",
+    error_invalid_refresh_token: "Токен обновления недействителен или истёк.",
+    error_missing_fields: "Отсутствуют обязательные поля.",
+    error_cannot_send_to_self: "Вы не можете отправить деньги самому себе.",
+    error_source_wallet_not_found: "Исходный кошелёк не найден.",
+    error_destination_wallet_not_found: "Целевой кошелёк не найден.",
+    error_insufficient_funds: "Недостаточно средств.",
+    error_sender_not_found: "Аккаунт отправителя не найден.",
+    error_wallet_capacity_exceeded: "Целевой кошелёк превысит максимальную вместимость.",
+    error_transaction_persist: "Транзакцию не удалось завершить. Пожалуйста, попробуйте снова.",
+    error_wallet_not_found: "Кошелёк не найден.",
+    error_recipient_not_found: "Получатель не найден.",
+    error_qr_not_found: "QR-код не найден.",
+    error_qr_expired: "Срок действия QR-кода истёк.",
+    error_qr_used: "QR-код уже был использован.",
+    error_qr_fraud: "Недействительная подпись — возможное мошенничество.",
+    error_invalid_qr_format: "Недействительный формат QR.",
+    error_request_not_found: "Запрос не найден.",
+    error_request_processed: "Запрос уже был обработан.",
+    error_card_not_found: "Карта не найдена.",
+    error_card_deleted: "Эта карта была удалена.",
+    error_max_cards: "Допускается не более 5 карт.",
+    error_budget_not_found: "Бюджет не найден.",
+    error_employer_not_found: "Аккаунт работодателя не найден.",
+    error_employer_exists: "Аккаунт работодателя уже существует.",
+    error_employer_not_verified: "Аккаунт работодателя не подтверждён.",
+    error_insufficient_kyc: "Недостаточный уровень KYC для этой операции.",
+    error_no_file_uploaded: "Файл не загружен.",
+    error_csv_empty: "Файл CSV пуст.",
+    error_invalid_csv: "Недействительный формат CSV.",
+    error_insufficient_funds_payroll: "Недостаточно средств — деньги не были отправлены.",
+    error_payroll_validation: "Ошибка проверки зарплатной ведомости — деньги не были отправлены.",
+    error_employee_added: "Сотрудник уже добавлен.",
+    error_worker_not_found: "Работник не найден. Им необходимо сначала зарегистрироваться.",
+    error_not_linked_employer: "Вы не связаны с этим работодателем.",
+    error_not_authorized_employer: "Вы не авторизованы для получения платежей от этого работодателя.",
+    error_employer_unverified: "Этот аккаунт работодателя ещё не верифицирован.",
+    error_employer_insufficient_balance: "У работодателя недостаточно баланса для этого запроса.",
+    error_request_exceeds_limit: "Сумма запроса превышает ваш лимит {limit} {currency}.",
+    error_duplicate_request: "Дублирующий запрос. У вас уже есть ожидающий запрос на эту сумму.",
+    error_internal: "Произошла непредвиденная ошибка. Пожалуйста, попробуйте снова.",
+    error_unauthorized: "Не авторизован.",
+    error_access_denied: "Доступ запрещён.",
+    error_currency_required: "Требуется настройка валюты.",
+    error_too_many_accounts: "Слишком много аккаунтов создано с этого устройства. Пожалуйста, повторите попытку через 24 часа.",
+    error_too_many_kyc: "Слишком много попыток верификации. Пожалуйста, повторите попытку через 1 час.",
+    error_email_confirm_mismatch: "Подтверждение email не совпадает.",
+    error_password_confirm_invalid: "Подтверждение пароля недействительно.",
+    error_not_found: "Не найдено.",
+    error_withdrawal_in_progress: "Вывод средств в этой валюте уже обрабатывается. Пожалуйста, подождите."
   },
   de: {
     greeting: "Hallo! 👋 Mein Name ist Felisa, Ihre EGWallet-Assistentin. Ich kann Ihnen helfen mit:\n\n• Transaktionsfragen\n• Kontoinformationen\n• Funktionsanleitungen\n• Support-Tickets\n\nWie kann ich Ihnen heute helfen?",
@@ -1323,7 +1722,65 @@ const translations = {
     limit_weekly_reached: "Sie haben Ihr Wochenlimit von {limit} erreicht. Schließen Sie die Verifizierung ab, um Ihre Limits zu erhöhen.",
     limit_monthly_exceeded: "Diese Überweisung übersteigt Ihr verfügbares Monatslimit. Diesen Monat können Sie noch bis zu {remaining} senden.",
     limit_monthly_reached: "Sie haben Ihr Monatslimit von {limit} erreicht. Schließen Sie die Verifizierung ab, um Ihre Limits zu erhöhen.",
-    limit_upgrade: ""
+    limit_upgrade: "",
+    error_user_not_found: "Benutzer nicht gefunden.",
+    error_invalid_credentials: "Falsche E-Mail-Adresse oder falsches Passwort.",
+    error_user_exists: "Ein Konto mit dieser E-Mail-Adresse existiert bereits.",
+    error_username_invalid: "Der Benutzername muss 3–20 Zeichen lang sein (nur Buchstaben, Zahlen und Unterstriche).",
+    error_username_taken: "Dieser Benutzername ist bereits vergeben.",
+    error_username_required: "Benutzername ist erforderlich.",
+    error_missing_token: "Authentifizierung erforderlich. Bitte melden Sie sich an.",
+    error_invalid_token: "Sitzung abgelaufen. Bitte melden Sie sich erneut an.",
+    error_invalid_refresh_token: "Sitzung abgelaufen. Bitte melden Sie sich erneut an.",
+    error_missing_fields: "Bitte füllen Sie alle Pflichtfelder aus.",
+    error_cannot_send_to_self: "Sie können kein Geld an sich selbst senden.",
+    error_source_wallet_not_found: "Ihre Wallet wurde nicht gefunden.",
+    error_destination_wallet_not_found: "Empfänger-Wallet nicht gefunden.",
+    error_insufficient_funds: "Unzureichendes Guthaben.",
+    error_sender_not_found: "Absender-Konto nicht gefunden.",
+    error_wallet_capacity_exceeded: "Die Empfänger-Wallet hat ihre maximale Kapazität erreicht.",
+    error_transaction_persist: "Die Transaktion konnte nicht abgeschlossen werden. Bitte versuchen Sie es erneut.",
+    error_wallet_not_found: "Wallet nicht gefunden.",
+    error_recipient_not_found: "Empfänger nicht gefunden.",
+    error_qr_not_found: "QR-Code nicht gefunden.",
+    error_qr_expired: "Dieser QR-Code ist abgelaufen.",
+    error_qr_used: "Dieser QR-Code wurde bereits verwendet.",
+    error_qr_fraud: "Ungültige QR-Signatur — möglicher Betrug.",
+    error_invalid_qr_format: "Ungültiges QR-Code-Format.",
+    error_request_not_found: "Zahlungsanforderung nicht gefunden.",
+    error_request_processed: "Diese Anforderung wurde bereits verarbeitet.",
+    error_card_not_found: "Karte nicht gefunden.",
+    error_card_deleted: "Diese Karte wurde gelöscht.",
+    error_max_cards: "Sie können maximal 5 virtuelle Karten haben.",
+    error_budget_not_found: "Budget nicht gefunden.",
+    error_employer_not_found: "Arbeitgeberkonto nicht gefunden.",
+    error_employer_exists: "Ein Arbeitgeberkonto existiert bereits.",
+    error_employer_not_verified: "Das Arbeitgeberkonto wurde noch nicht verifiziert.",
+    error_insufficient_kyc: "Sie müssen die KYC-Verifizierung der Stufe 2 abschließen, um sich als Arbeitgeber zu registrieren.",
+    error_no_file_uploaded: "Es wurde keine Datei hochgeladen.",
+    error_csv_empty: "Die CSV-Datei ist leer.",
+    error_invalid_csv: "Ungültiges CSV-Format.",
+    error_insufficient_funds_payroll: "Unzureichendes Guthaben — keine Zahlungen wurden gesendet.",
+    error_payroll_validation: "Lohnvalidierung fehlgeschlagen — keine Zahlungen wurden gesendet.",
+    error_employee_added: "Dieser Mitarbeiter wurde bereits hinzugefügt.",
+    error_worker_not_found: "Mitarbeiter nicht gefunden. Er muss sich zuerst bei EGWallet registrieren.",
+    error_not_linked_employer: "Sie sind nicht mit diesem Arbeitgeber verknüpft.",
+    error_not_authorized_employer: "Sie müssen ein autorisierter Mitarbeiter sein, um Zahlungen von diesem Arbeitgeber anzufordern.",
+    error_employer_unverified: "Dieses Arbeitgeberkonto wurde noch nicht verifiziert.",
+    error_employer_insufficient_balance: "Der Arbeitgeber hat nicht genug Guthaben für diese Anfrage.",
+    error_request_exceeds_limit: "Der Anfragebetrag überschreitet Ihr Limit von {limit} {currency}.",
+    error_duplicate_request: "Doppelte Anfrage. Sie haben bereits eine ausstehende Anfrage für diesen Betrag.",
+    error_internal: "Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut.",
+    error_unauthorized: "Nicht autorisiert.",
+    error_access_denied: "Zugriff verweigert.",
+    error_currency_required: "Währungspräferenz ist erforderlich.",
+    error_too_many_accounts: "Zu viele Konten von diesem Gerät erstellt. Bitte versuchen Sie es in 24 Stunden erneut.",
+    error_too_many_kyc: "Zu viele Verifizierungsversuche. Bitte versuchen Sie es in 1 Stunde erneut.",
+    error_email_confirm_mismatch: "E-Mail-Bestätigung stimmt nicht überein.",
+    error_password_confirm_invalid: "Passwortbestätigung ist ungültig.",
+    error_not_found: "Nicht gefunden.",
+    error_withdrawal_in_progress: "Eine Auszahlung in dieser Währung wird bereits verarbeitet. Bitte warten Sie."
+  
   }
 };
 
@@ -1729,7 +2186,7 @@ function authMiddleware(req, res, next) {
   const auth = req.headers.authorization;
   if (!auth || !auth.startsWith('Bearer ')) {
     logger.warn('Missing auth token', { ip: req.clientIP, path: req.path });
-    return res.status(401).json({ error: 'Missing token' });
+    return res.status(401).json({ error: t('error_missing_token', req.headers['accept-language'] || 'en') });
   }
   const token = auth.slice(7);
   try {
@@ -1738,7 +2195,7 @@ function authMiddleware(req, res, next) {
     next();
   } catch (e) {
     logger.warn('Invalid token', { error: e.message, ip: req.clientIP });
-    return res.status(401).json({ error: 'Invalid token' });
+    return res.status(401).json({ error: t('error_invalid_token', req.headers['accept-language'] || 'en') });
   }
 }
 
@@ -1774,18 +2231,19 @@ app.post('/auth/register',
   (req, res) => {
   const db = loadDB();
   const { email, password, region, deviceInfo, username } = req.body;
-  if (!email || !password) return res.status(400).json({ error: 'email and password required' });
-  if (findUserByEmail(db, email)) return res.status(400).json({ error: 'User exists' });
+  const lang = req.lang || 'en';
+  if (!email || !password) return res.status(400).json({ error: t('error_missing_fields', lang) });
+  if (findUserByEmail(db, email)) return res.status(400).json({ error: t('error_user_exists', lang) });
 
   // Optional username — validate format and uniqueness
   let normalizedUsername = null;
   if (username) {
     normalizedUsername = username.replace(/^@/, '').toLowerCase();
     if (!/^[a-z0-9_]{3,20}$/.test(normalizedUsername)) {
-      return res.status(400).json({ error: 'Username must be 3-20 characters (letters, numbers, underscores only)' });
+      return res.status(400).json({ error: t('error_username_invalid', lang) });
     }
     if ((db.users || []).some(u => u.username === normalizedUsername)) {
-      return res.status(400).json({ error: 'Username already taken' });
+      return res.status(400).json({ error: t('error_username_taken', lang) });
     }
   }
 
@@ -1810,7 +2268,7 @@ app.post('/auth/register',
     if (recentSignups.length >= DEVICE_SIGNUP_LIMIT) {
       logger.warn('Device signup rate limit exceeded', { deviceId, ip: req.clientIP });
       return res.status(429).json({
-        error: 'Too many accounts created from this device. Please try again in 24 hours.',
+        error: t('error_too_many_accounts', lang),
       });
     }
     recentSignups.push(now);
@@ -1921,16 +2379,17 @@ app.post('/auth/login',
   (req, res) => {
   const db = loadDB();
   const { email, password, deviceInfo } = req.body;
+  const lang = req.lang || 'en';
   
   const u = findUserByEmail(db, email);
   if (!u) {
     logger.warn('Login attempt - user not found', { email: maskEmail(email), ip: req.clientIP });
-    return res.status(401).json({ error: 'Invalid credentials' });
+    return res.status(401).json({ error: t('error_invalid_credentials', lang) });
   }
   
   if (!bcrypt.compareSync(password, u.passwordHash)) {
     logger.warn('Login attempt - invalid password', { userId: u.id, ip: req.clientIP });
-    return res.status(401).json({ error: 'Invalid credentials' });
+    return res.status(401).json({ error: t('error_invalid_credentials', lang) });
   }
 
   // Check if this is a new device
@@ -1987,7 +2446,7 @@ app.post('/auth/login',
 app.get('/auth/me', authMiddleware, (req, res) => {
   const db = loadDB();
   const user = db.users.find(u => u.id === req.user.userId);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
   res.json({ id: user.id, email: user.email, username: user.username || null, preferredCurrency: user.preferredCurrency || 'USD', autoConvertIncoming: user.autoConvertIncoming !== false, kycTier: user.kycTier || 0, kycStatus: user.kycStatus || 'pending', tierLimits: KYC_TIERS[user.kycTier || 0] });
 });
 
@@ -1995,20 +2454,20 @@ app.get('/auth/me', authMiddleware, (req, res) => {
 app.put('/auth/username', authMiddleware, (req, res) => {
   const db = loadDB();
   const user = db.users.find(u => u.id === req.user.userId);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
 
   const raw = req.body.username;
-  if (!raw || typeof raw !== 'string') return res.status(400).json({ error: 'username required' });
+  if (!raw || typeof raw !== 'string') return res.status(400).json({ error: t('error_username_required', req.lang || 'en') });
 
   const normalized = raw.replace(/^@/, '').toLowerCase().trim();
   if (!/^[a-z0-9_]{3,20}$/.test(normalized)) {
-    return res.status(400).json({ error: 'Username must be 3-20 characters (letters, numbers, underscores only)' });
+    return res.status(400).json({ error: t('error_username_invalid', req.lang || 'en') });
   }
 
   // Uniqueness check — skip if user already owns this name
   const existing = db.users.find(u => u.username === normalized);
   if (existing && existing.id !== user.id) {
-    return res.status(409).json({ error: 'Username already taken' });
+    return res.status(409).json({ error: t('error_username_taken', req.lang || 'en') });
   }
 
   user.username = normalized;
@@ -2021,27 +2480,27 @@ app.put('/auth/username', authMiddleware, (req, res) => {
 app.post('/auth/refresh', (req, res) => {
   const db = loadDB();
   const { refreshToken } = req.body;
-  if (!refreshToken) return res.status(400).json({ error: 'refreshToken required' });
+  if (!refreshToken) return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   
   // Verify refresh token
   try {
     const payload = jwt.verify(refreshToken, JWT_SECRET);
     if (payload.type !== 'refresh') {
-      return res.status(401).json({ error: 'Invalid refresh token' });
+      return res.status(401).json({ error: t('error_invalid_refresh_token', req.lang || 'en') });
     }
     
     // Check if refresh token exists in db
     if (!db.refreshTokens) db.refreshTokens = [];
     const tokenRecord = db.refreshTokens.find(t => t.token === refreshToken && t.userId === payload.userId);
     if (!tokenRecord) {
-      return res.status(401).json({ error: 'Refresh token not found or revoked' });
+      return res.status(401).json({ error: t('error_invalid_refresh_token', req.lang || 'en') });
     }
     
     // Issue new access token
     const newToken = jwt.sign({ userId: payload.userId, email: payload.email, type: 'access' }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token: newToken });
   } catch (e) {
-    return res.status(401).json({ error: 'Invalid or expired refresh token' });
+    return res.status(401).json({ error: t('error_invalid_refresh_token', req.lang || 'en') });
   }
 });
 
@@ -2060,9 +2519,9 @@ app.post('/auth/logout', authMiddleware, (req, res) => {
 app.post('/auth/update-currency', authMiddleware, (req, res) => {
   const db = loadDB();
   const { preferredCurrency } = req.body;
-  if (!preferredCurrency) return res.status(400).json({ error: 'preferredCurrency required' });
+  if (!preferredCurrency) return res.status(400).json({ error: t('error_currency_required', req.lang || 'en') });
   const user = db.users.find(u => u.id === req.user.userId);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
   user.preferredCurrency = preferredCurrency;
   saveDB(db);
   res.json({ success: true, preferredCurrency });
@@ -2071,9 +2530,9 @@ app.post('/auth/update-currency', authMiddleware, (req, res) => {
 app.post('/auth/update-auto-convert', authMiddleware, (req, res) => {
   const db = loadDB();
   const { autoConvertIncoming } = req.body;
-  if (typeof autoConvertIncoming !== 'boolean') return res.status(400).json({ error: 'autoConvertIncoming must be boolean' });
+  if (typeof autoConvertIncoming !== 'boolean') return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   const user = db.users.find(u => u.id === req.user.userId);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
   user.autoConvertIncoming = autoConvertIncoming;
   saveDB(db);
   res.json({ success: true, autoConvertIncoming });
@@ -2083,7 +2542,7 @@ app.post('/auth/update-auto-convert', authMiddleware, (req, res) => {
 app.get('/wallets/:id/balance', authMiddleware, (req, res) => {
   const db = loadDB();
   const wallet = db.wallets.find(w => w.id === req.params.id && w.userId === req.user.userId);
-  if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+  if (!wallet) return res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
   res.json({ balances: wallet.balances, maxLimitUSD: wallet.maxLimitUSD });
 });
 
@@ -2115,7 +2574,7 @@ app.get('/wallets', authMiddleware, (req, res) => {
 app.get('/wallets/:id/transactions', authMiddleware, (req, res) => {
   const db = loadDB();
   const wallet = db.wallets.find(w => w.id === req.params.id && w.userId === req.user.userId);
-  if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+  if (!wallet) return res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
   const txs = db.transactions
     .filter(t => t.fromWalletId === wallet.id || t.toWalletId === wallet.id)
     .sort((a, b) => b.timestamp - a.timestamp)
@@ -2226,8 +2685,9 @@ function resolveRecipient(db, input) {
 // Send money (simple internal transfer between wallets by walletId or @username)
 app.post('/transactions', authMiddleware, (req, res) => {
   const db = loadDB();
+  const lang = req.lang || 'en';
   const { fromWalletId, toWalletId: rawToId, amount, currency, memo, idempotencyKey } = req.body; // amount is expected in minor units (integer)
-  if (!fromWalletId || !rawToId || typeof amount === 'undefined' || !currency) return res.status(400).json({ error: 'missing fields' });
+  if (!fromWalletId || !rawToId || typeof amount === 'undefined' || !currency) return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
 
   // ── Idempotency check ──────────────────────────────────────────────────────
   const clientKey = idempotencyKey || req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
@@ -2242,19 +2702,19 @@ app.post('/transactions', authMiddleware, (req, res) => {
   let toWalletId = rawToId;
   if (typeof rawToId === 'string' && (rawToId.startsWith('@') || (rawToId.includes('@') && rawToId.includes('.')))) {
     const resolved = resolveRecipient(db, rawToId);
-    if (!resolved) return res.status(404).json({ error: 'User not found' });
-    if (resolved.userId === req.user.userId) return res.status(400).json({ error: 'Cannot send money to yourself' });
+    if (!resolved) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
+    if (resolved.userId === req.user.userId) return res.status(400).json({ error: t('error_cannot_send_to_self', lang) });
     toWalletId = resolved.walletId;
   }
 
   const fromWallet = db.wallets.find(w => w.id === fromWalletId && w.userId === req.user.userId);
-  if (!fromWallet) return res.status(404).json({ error: 'Source wallet not found' });
+  if (!fromWallet) return res.status(404).json({ error: t('error_source_wallet_not_found', req.lang || 'en') });
   const toWallet = db.wallets.find(w => w.id === toWalletId);
-  if (!toWallet) return res.status(404).json({ error: 'Destination wallet not found' });
+  if (!toWallet) return res.status(404).json({ error: t('error_destination_wallet_not_found', req.lang || 'en') });
   
   // find balance entries (amount stored in minor units)
   const fromBalance = fromWallet.balances.find(b=>b.currency===currency) || { currency, amount: 0 };
-  if (fromBalance.amount < amount) return res.status(400).json({ error: 'Insufficient funds' });
+  if (fromBalance.amount < amount) return res.status(400).json({ error: t('error_insufficient_funds', lang) });
   
   const rates = db.rates.values;
   const amountMajor = minorToMajor(amount, currency);
@@ -2262,12 +2722,10 @@ app.post('/transactions', authMiddleware, (req, res) => {
 
   // CHECK #1: KYC tier limits (daily / weekly / monthly rolling windows)
   const senderUser = db.users.find(u => u.id === req.user.userId);
-  if (!senderUser) return res.status(404).json({ error: 'Sender account not found' });
+  if (!senderUser) return res.status(404).json({ error: t('error_sender_not_found', lang) });
 
   const limitCheck = checkKYCLimits(senderUser, toAmountInUSD, db);
   if (!limitCheck.allowed) {
-    console.log("LANG HEADER:", req.headers['accept-language']);
-    const lang = req.headers['accept-language'] || senderUser.language || 'en';
     const upgradeMsg = limitCheck.nextTier
       ? ' ' + t('limit_upgrade', lang, { tierName: limitCheck.nextTier.name })
       : '';
@@ -2292,7 +2750,7 @@ app.post('/transactions', authMiddleware, (req, res) => {
   const MAX_WALLET_CAPACITY_USD = toWallet.maxLimitUSD || 250000;
   if (destTotalUSD > MAX_WALLET_CAPACITY_USD) {
     return res.status(400).json({ 
-      error: `Destination wallet would exceed maximum capacity of ${MAX_WALLET_CAPACITY_USD.toLocaleString()} USD`,
+      error: t('error_wallet_capacity_exceeded', lang),
       destinationTotal: destTotalUSD,
       maxCapacity: MAX_WALLET_CAPACITY_USD
     });
@@ -2374,7 +2832,7 @@ app.post('/transactions', authMiddleware, (req, res) => {
     else toWallet.balances = toWallet.balances.filter(b => b.currency !== receivedCurrency);
     db.transactions.pop();
     console.error('[/transactions] saveDB failed — rolled back in-memory state:', saveErr);
-    return res.status(500).json({ error: 'Transaction could not be persisted. Please try again.' });
+    return res.status(500).json({ error: t('error_transaction_persist', lang) });
   }
 
   // Notify sender
@@ -2430,7 +2888,7 @@ app.post('/withdrawals', authMiddleware, (req, res) => {
   } = req.body;
 
   if (!fromWalletId || typeof amount === 'undefined' || !currency || !method)
-    return res.status(400).json({ error: 'Missing required fields' });
+    return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
 
   // ── Client-supplied idempotency key (optional header) ──────────────────────
   const clientKey = req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
@@ -2443,7 +2901,7 @@ app.post('/withdrawals', authMiddleware, (req, res) => {
   // ── Per-user/currency mutex — blocks concurrent in-flight withdrawals ───────
   const inflightKey = `${req.user.userId}:${currency}`;
   if (withdrawalInFlight.has(inflightKey))
-    return res.status(409).json({ error: 'A withdrawal for this currency is already being processed. Please wait.' });
+    return res.status(409).json({ error: t('error_withdrawal_in_progress', req.lang || 'en') });
   withdrawalInFlight.add(inflightKey);
 
   const db = loadDB();
@@ -2576,7 +3034,7 @@ app.patch('/notifications/read-all', authMiddleware, (req, res) => {
 app.patch('/notifications/:id/read', authMiddleware, (req, res) => {
   const db = loadDB();
   const notif = (db.notifications || []).find(n => n.id === req.params.id && n.userId === req.user.userId);
-  if (!notif) return res.status(404).json({ error: 'Notification not found' });
+  if (!notif) return res.status(404).json({ error: t('error_not_found', req.lang || 'en') });
   notif.read = true;
   saveDB(db);
   res.json({ ok: true });
@@ -2586,9 +3044,9 @@ app.patch('/notifications/:id/read', authMiddleware, (req, res) => {
 // GET /fx-quote?from=XAF&to=NGN&amount=500000  (amount in minor units of 'from')
 app.get('/fx-quote', authMiddleware, (req, res) => {
   const { from, to, amount } = req.query;
-  if (!from || !to || !amount) return res.status(400).json({ error: 'from, to, and amount are required' });
+  if (!from || !to || !amount) return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   const sentAmountMinor = Math.round(Number(amount));
-  if (isNaN(sentAmountMinor) || sentAmountMinor <= 0) return res.status(400).json({ error: 'amount must be a positive integer in minor units' });
+  if (isNaN(sentAmountMinor) || sentAmountMinor <= 0) return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
 
   const db = loadDB();
   const rates = db.rates.values;
@@ -2643,7 +3101,7 @@ app.get('/wallets/:id/currency', authMiddleware, (req, res) => {
     if (resolved) wallet = db.wallets.find(w => w.id === resolved.walletId);
   }
 
-  if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+  if (!wallet) return res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
   const owner = db.users.find(u => u.id === wallet.userId);
   // Prefer user's explicitly set preferredCurrency, then first balance currency
   const currency = owner?.preferredCurrency || wallet.balances?.[0]?.currency || 'USD';
@@ -2679,9 +3137,9 @@ app.post('/deposits/create-intent', authMiddleware,
     const db = loadDB();
     const { amount, currency, walletId } = req.body;
     const user = db.users.find(u => u.id === req.user.userId);
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
     const wallet = db.wallets.find(w => w.id === walletId && w.userId === req.user.userId);
-    if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+    if (!wallet) return res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
 
     // Compute fee BEFORE charging — so the total charged to the card includes the fee
     const depositCount = getUserDepositCount(db, req.user.userId);
@@ -2723,7 +3181,7 @@ app.post('/deposits/create-intent', authMiddleware,
         });
       } catch (err) {
         logger.error('Stripe PaymentIntent failed', { error: err.message, userId: req.user.userId });
-        return res.status(500).json({ error: 'Payment provider error', message: err.message });
+        return res.status(500).json({ error: t('error_internal', req.lang || 'en'), message: err.message });
       }
     }
 
@@ -2773,9 +3231,9 @@ app.post('/deposits/confirm', authMiddleware,
     const db = loadDB();
     const { intentId, walletId } = req.body;
     const user = db.users.find(u => u.id === req.user.userId);
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
     const wallet = db.wallets.find(w => w.id === walletId && w.userId === req.user.userId);
-    if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+    if (!wallet) return res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
 
     let amount, currency, netCredited, feeAmount, feeRate;
 
@@ -2787,7 +3245,7 @@ app.post('/deposits/confirm', authMiddleware,
           return res.status(400).json({ error: `Payment not completed. Status: ${intent.status}` });
         }
         if (intent.metadata.walletId !== walletId || intent.metadata.userId !== req.user.userId) {
-          return res.status(403).json({ error: 'Intent mismatch' });
+          return res.status(403).json({ error: t('error_internal', req.lang || 'en') });
         }
         // netCredited is stored in metadata (amount entered by user, not total charged)
         netCredited = Number(intent.metadata.netCredited) || intent.amount;
@@ -2796,14 +3254,14 @@ app.post('/deposits/confirm', authMiddleware,
         amount      = netCredited; // use net credited as the canonical "deposit amount"
         currency    = intent.currency.toUpperCase();
       } catch (err) {
-        return res.status(500).json({ error: 'Failed to verify payment', message: err.message });
+        return res.status(500).json({ error: t('error_internal', req.lang || 'en'), message: err.message });
       }
     } else {
       // Demo mode — look up pending intent
-      if (!db.demoIntents) return res.status(400).json({ error: 'No demo intent found' });
+      if (!db.demoIntents) return res.status(400).json({ error: t('error_not_found', req.lang || 'en') });
       const demo = db.demoIntents.find(d => d.id === intentId && d.userId === req.user.userId && d.walletId === walletId);
-      if (!demo) return res.status(404).json({ error: 'Demo intent not found or already used' });
-      if (demo.status !== 'pending') return res.status(400).json({ error: 'Intent already used' });
+      if (!demo) return res.status(404).json({ error: t('error_not_found', req.lang || 'en') });
+      if (demo.status !== 'pending') return res.status(400).json({ error: t('error_request_processed', req.lang || 'en') });
       amount      = demo.amount;
       netCredited = demo.netCredited  ?? demo.amount;
       feeAmount   = demo.feeAmount    ?? 0;
@@ -2871,7 +3329,7 @@ app.post('/deposits/confirm', authMiddleware,
 app.get('/me', authMiddleware, (req, res) => {
   const db = loadDB();
   const u = db.users.find(x=>x.id===req.user.userId);
-  if (!u) return res.status(404).json({ error: 'Not found' });
+  if (!u) return res.status(404).json({ error: t('error_not_found', req.lang || 'en') });
   res.json({ id: u.id, email: u.email, username: u.username || null, region: u.region, kycTier: u.kycTier || 0, kycStatus: u.kycStatus || 'pending', tierLimits: KYC_TIERS[u.kycTier || 0] });
 });
 
@@ -2881,7 +3339,7 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
   const db = loadDB();
   const { walletId, amount, currency, memo, idempotencyKey, targetWalletId } = req.body;
   if (!walletId || typeof amount === 'undefined' || !currency) {
-    return res.status(400).json({ error: 'walletId, amount, and currency required' });
+    return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   }
   
   // Check idempotency
@@ -2894,7 +3352,7 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
   }
   
   const wallet = db.wallets.find(w => w.id === walletId && w.userId === req.user.userId);
-  if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+  if (!wallet) return res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
   
   // SECURITY CHECK: If requesting from a specific wallet (employer), verify authorization
   let isEmployerRequest = false;
@@ -2903,7 +3361,7 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
   if (targetWalletId) {
     const targetWallet = db.wallets.find(w => w.id === targetWalletId);
     if (!targetWallet) {
-      return res.status(404).json({ error: 'Target wallet not found' });
+      return res.status(404).json({ error: t('error_destination_wallet_not_found', req.lang || 'en') });
     }
     
     // Check if target wallet belongs to an employer
@@ -2932,14 +3390,14 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
           currency
         });
         return res.status(403).json({ 
-          error: 'Unauthorized. You must be an authorized employee to request payments from this employer.' 
+          error: t('error_not_authorized_employer', req.lang || 'en') 
         });
       }
       
       // SECURITY CHECK: Employer must be verified
       if (targetEmployer.verificationStatus !== 'verified') {
         return res.status(403).json({ 
-          error: 'Employer account is not verified yet' 
+          error: t('error_employer_unverified', req.lang || 'en') 
         });
       }
       
@@ -2947,14 +3405,14 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
       const targetBalance = targetWallet.balances.find(b => b.currency === currency);
       if (!targetBalance || targetBalance.amount < amount) {
         return res.status(400).json({ 
-          error: 'Employer has insufficient balance for this request' 
+          error: t('error_employer_insufficient_balance', req.lang || 'en') 
         });
       }
       
       // SECURITY CHECK: Amount within employee's max request limit
       if (employerRelationship.maxRequestAmount && amount > employerRelationship.maxRequestAmount) {
         return res.status(403).json({ 
-          error: `Request amount exceeds your limit of ${employerRelationship.maxRequestAmount} ${currency}` 
+          error: t('error_request_exceeds_limit', req.lang || 'en', { limit: employerRelationship.maxRequestAmount, currency }) 
         });
       }
       
@@ -3008,7 +3466,7 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
           employerId: targetEmployer.id
         });
         return res.status(429).json({ 
-          error: `Rate limit exceeded. Maximum ${RATE_LIMIT_MAX} requests per hour to each employer.`,
+          error: t('error_duplicate_request', req.lang || 'en'),
           retryAfter: 3600
         });
       }
@@ -3032,7 +3490,7 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
           currency
         });
         return res.status(400).json({ 
-          error: 'Duplicate request detected. You already have a pending request for this amount.',
+          error: t('error_duplicate_request', req.lang || 'en'),
           existingRequestId: recentRequests[0].id
         });
       }
@@ -3115,7 +3573,7 @@ app.get('/payment-requests', authMiddleware, (req, res) => {
 app.get('/payment-requests/:id', (req, res) => {
   const db = loadDB();
   const request = db.paymentRequests.find(r => r.id === req.params.id);
-  if (!request) return res.status(404).json({ error: 'Request not found' });
+  if (!request) return res.status(404).json({ error: t('error_request_not_found', req.lang || 'en') });
   
   const requester = db.users.find(u => u.id === request.requesterId);
   // Mask email on this public endpoint — only expose enough to identify the requester
@@ -3129,21 +3587,21 @@ app.get('/payment-requests/:id', (req, res) => {
 app.post('/payment-requests/:id/pay', authMiddleware, (req, res) => {
   const db = loadDB();
   const { fromWalletId } = req.body;
-  if (!fromWalletId) return res.status(400).json({ error: 'fromWalletId required' });
+  if (!fromWalletId) return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   
   const request = db.paymentRequests.find(r => r.id === req.params.id);
-  if (!request) return res.status(404).json({ error: 'Request not found' });
-  if (request.status !== 'pending') return res.status(400).json({ error: 'Request already processed' });
+  if (!request) return res.status(404).json({ error: t('error_request_not_found', req.lang || 'en') });
+  if (request.status !== 'pending') return res.status(400).json({ error: t('error_request_processed', req.lang || 'en') });
   
   const fromWallet = db.wallets.find(w => w.id === fromWalletId && w.userId === req.user.userId);
-  if (!fromWallet) return res.status(404).json({ error: 'Source wallet not found' });
+  if (!fromWallet) return res.status(404).json({ error: t('error_source_wallet_not_found', req.lang || 'en') });
   
   const toWallet = db.wallets.find(w => w.id === request.walletId);
-  if (!toWallet) return res.status(404).json({ error: 'Destination wallet not found' });
+  if (!toWallet) return res.status(404).json({ error: t('error_destination_wallet_not_found', req.lang || 'en') });
   
   // Check balance
   const fromBalance = fromWallet.balances.find(b => b.currency === request.currency) || { currency: request.currency, amount: 0 };
-  if (fromBalance.amount < request.amount) return res.status(400).json({ error: 'Insufficient funds' });
+  if (fromBalance.amount < request.amount) return res.status(400).json({ error: t('error_insufficient_funds', req.lang || 'en') });
   
   // Deduct from payer
   fromBalance.amount -= request.amount;
@@ -3219,9 +3677,9 @@ app.post('/payment-requests/:id/pay', authMiddleware, (req, res) => {
 app.post('/payment-requests/:id/cancel', authMiddleware, (req, res) => {
   const db = loadDB();
   const request = db.paymentRequests.find(r => r.id === req.params.id);
-  if (!request) return res.status(404).json({ error: 'Request not found' });
-  if (request.requesterId !== req.user.userId) return res.status(403).json({ error: 'Unauthorized' });
-  if (request.status !== 'pending') return res.status(400).json({ error: 'Request already processed' });
+  if (!request) return res.status(404).json({ error: t('error_request_not_found', req.lang || 'en') });
+  if (request.requesterId !== req.user.userId) return res.status(403).json({ error: t('error_unauthorized', req.lang || 'en') });
+  if (request.status !== 'pending') return res.status(400).json({ error: t('error_request_processed', req.lang || 'en') });
   
   request.status = 'cancelled';
   saveDB(db);
@@ -3233,7 +3691,7 @@ app.post('/payment-requests/:id/cancel', authMiddleware, (req, res) => {
 app.post('/virtual-cards', authMiddleware, (req, res) => {
   const db = loadDB();
   const { walletId, currency, label, idempotencyKey } = req.body;
-  if (!walletId || !currency) return res.status(400).json({ error: 'walletId and currency required' });
+  if (!walletId || !currency) return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   
   // Check idempotency
   if (idempotencyKey) {
@@ -3245,11 +3703,11 @@ app.post('/virtual-cards', authMiddleware, (req, res) => {
   }
   
   const wallet = db.wallets.find(w => w.id === walletId && w.userId === req.user.userId);
-  if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+  if (!wallet) return res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
   
   // Check card limit (max 5 cards per user)
   const userCards = (db.virtualCards || []).filter(c => c.userId === req.user.userId && c.status !== 'deleted');
-  if (userCards.length >= 5) return res.status(400).json({ error: 'Maximum 5 cards allowed' });
+  if (userCards.length >= 5) return res.status(400).json({ error: t('error_max_cards', req.lang || 'en') });
   
   // Generate card details
   const cardNumber = '4' + Math.floor(Math.random() * 1e15).toString().padStart(15, '0');
@@ -3301,7 +3759,7 @@ app.get('/virtual-cards', authMiddleware, (req, res) => {
 app.get('/virtual-cards/:id', authMiddleware, (req, res) => {
   const db = loadDB();
   const card = (db.virtualCards || []).find(c => c.id === req.params.id && c.userId === req.user.userId);
-  if (!card) return res.status(404).json({ error: 'Card not found' });
+  if (!card) return res.status(404).json({ error: t('error_card_not_found', req.lang || 'en') });
   res.json({ card });
 });
 
@@ -3320,8 +3778,8 @@ app.post('/virtual-cards/:id/toggle-freeze', authMiddleware, (req, res) => {
   }
   
   const card = (db.virtualCards || []).find(c => c.id === req.params.id && c.userId === req.user.userId);
-  if (!card) return res.status(404).json({ error: 'Card not found' });
-  if (card.status === 'deleted') return res.status(400).json({ error: 'Card is deleted' });
+  if (!card) return res.status(404).json({ error: t('error_card_not_found', req.lang || 'en') });
+  if (card.status === 'deleted') return res.status(400).json({ error: t('error_card_deleted', req.lang || 'en') });
   
   card.status = card.status === 'active' ? 'frozen' : 'active';
   saveDB(db);
@@ -3340,7 +3798,7 @@ app.post('/virtual-cards/:id/toggle-freeze', authMiddleware, (req, res) => {
 app.delete('/virtual-cards/:id', authMiddleware, (req, res) => {
   const db = loadDB();
   const card = (db.virtualCards || []).find(c => c.id === req.params.id && c.userId === req.user.userId);
-  if (!card) return res.status(404).json({ error: 'Card not found' });
+  if (!card) return res.status(404).json({ error: t('error_card_not_found', req.lang || 'en') });
   
   card.status = 'deleted';
   saveDB(db);
@@ -3352,10 +3810,10 @@ app.delete('/virtual-cards/:id', authMiddleware, (req, res) => {
 app.get('/qr/static', authMiddleware, (req, res) => {
   const db = loadDB();
   const user = db.users.find(u => u.id === req.user.userId);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
   
   const userWallets = db.wallets.filter(w => w.userId === req.user.userId);
-  if (userWallets.length === 0) return res.status(404).json({ error: 'No wallet found' });
+  if (userWallets.length === 0) return res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
   
   // Static QR payload - never expires, always points to user
   const qrPayload = {
@@ -3383,14 +3841,14 @@ app.post('/qr/dynamic', authMiddleware, (req, res) => {
   const { amount, currency, memo, expiryMinutes } = req.body;
   
   if (!amount || !currency) {
-    return res.status(400).json({ error: 'amount and currency required' });
+    return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   }
   
   const user = db.users.find(u => u.id === req.user.userId);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
   
   const userWallets = db.wallets.filter(w => w.userId === req.user.userId);
-  if (userWallets.length === 0) return res.status(404).json({ error: 'No wallet found' });
+  if (userWallets.length === 0) return res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
   
   // Create dynamic QR with expiry
   const qrId = uuidv4();
@@ -3470,7 +3928,7 @@ app.post('/qr/validate', authMiddleware, (req, res) => {
   const { qrString } = req.body;
   
   if (!qrString) {
-    return res.status(400).json({ error: 'qrString required' });
+    return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   }
   
   // Parse QR string
@@ -3480,7 +3938,7 @@ app.post('/qr/validate', authMiddleware, (req, res) => {
     const user = db.users.find(u => u.id === userId);
     
     if (!user) {
-      return res.status(404).json({ error: 'User not found', valid: false });
+      return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en'), valid: false });
     }
     
     const userWallet = db.wallets.find(w => w.userId === userId);
@@ -3500,21 +3958,21 @@ app.post('/qr/validate', authMiddleware, (req, res) => {
   const requestId = url.searchParams.get('r');
   
   if (!requestId) {
-    return res.status(400).json({ error: 'Invalid QR format', valid: false });
+    return res.status(400).json({ error: t('error_invalid_qr_format', req.lang || 'en'), valid: false });
   }
   
   const qrCode = db.qrCodes?.find(qr => qr.id === requestId);
   const request = db.paymentRequests?.find(r => r.id === requestId);
   
   if (!qrCode || !request) {
-    return res.status(404).json({ error: 'QR code not found', valid: false });
+    return res.status(404).json({ error: t('error_qr_not_found', req.lang || 'en'), valid: false });
   }
   
   // Check expiry
   if (Date.now() > qrCode.expiry) {
     return res.json({
       valid: false,
-      error: 'QR code expired',
+      error: t('error_qr_expired', req.lang || 'en'),
       expiredAt: qrCode.expiry
     });
   }
@@ -3523,7 +3981,7 @@ app.post('/qr/validate', authMiddleware, (req, res) => {
   if (qrCode.used || request.status !== 'pending') {
     return res.json({
       valid: false,
-      error: 'QR code already used',
+      error: t('error_qr_used', req.lang || 'en'),
       status: request.status
     });
   }
@@ -3549,7 +4007,7 @@ app.post('/qr/validate', authMiddleware, (req, res) => {
   if (qrCode.payload.signature !== expectedSignature) {
     return res.json({
       valid: false,
-      error: 'Invalid signature - possible fraud'
+      error: t('error_qr_fraud', req.lang || 'en')
     });
   }
   
@@ -3577,7 +4035,7 @@ app.post('/qr/pay', authMiddleware, (req, res) => {
   const { qrString, fromWalletId, amount, currency } = req.body;
   
   if (!qrString || !fromWalletId) {
-    return res.status(400).json({ error: 'qrString and fromWalletId required' });
+    return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   }
   
   // Validate QR first
@@ -3586,12 +4044,12 @@ app.post('/qr/pay', authMiddleware, (req, res) => {
   if (qrString.startsWith('egwallet://pay/')) {
     // Static QR - requires amount from payer
     if (!amount || !currency) {
-      return res.status(400).json({ error: 'amount and currency required for static QR' });
+      return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
     }
     
     targetUserId = qrString.replace('egwallet://pay/', '');
     const targetUser = db.users.find(u => u.id === targetUserId);
-    if (!targetUser) return res.status(404).json({ error: 'Recipient not found' });
+    if (!targetUser) return res.status(404).json({ error: t('error_recipient_not_found', req.lang || 'en') });
     
     targetWalletId = db.wallets.find(w => w.userId === targetUserId)?.id;
     paymentAmount = amount;
@@ -3604,17 +4062,17 @@ app.post('/qr/pay', authMiddleware, (req, res) => {
     requestId = url.searchParams.get('r');
     
     const request = db.paymentRequests?.find(r => r.id === requestId);
-    if (!request) return res.status(404).json({ error: 'Payment request not found' });
+    if (!request) return res.status(404).json({ error: t('error_request_not_found', req.lang || 'en') });
     
     if (request.status !== 'pending') {
-      return res.status(400).json({ error: 'Payment request already processed' });
+      return res.status(400).json({ error: t('error_request_processed', req.lang || 'en') });
     }
     
     const qrCode = db.qrCodes?.find(qr => qr.id === requestId);
-    if (!qrCode) return res.status(404).json({ error: 'QR code not found' });
+    if (!qrCode) return res.status(404).json({ error: t('error_qr_not_found', req.lang || 'en') });
     
     if (Date.now() > qrCode.expiry) {
-      return res.status(400).json({ error: 'QR code expired' });
+      return res.status(400).json({ error: t('error_qr_expired', req.lang || 'en') });
     }
     
     targetUserId = request.requesterId;
@@ -3626,15 +4084,15 @@ app.post('/qr/pay', authMiddleware, (req, res) => {
   
   // Verify payer wallet
   const fromWallet = db.wallets.find(w => w.id === fromWalletId && w.userId === req.user.userId);
-  if (!fromWallet) return res.status(404).json({ error: 'Source wallet not found' });
+  if (!fromWallet) return res.status(404).json({ error: t('error_source_wallet_not_found', req.lang || 'en') });
   
   const toWallet = db.wallets.find(w => w.id === targetWalletId);
-  if (!toWallet) return res.status(404).json({ error: 'Destination wallet not found' });
+  if (!toWallet) return res.status(404).json({ error: t('error_destination_wallet_not_found', req.lang || 'en') });
   
   // Check balance
   const fromBalance = fromWallet.balances.find(b => b.currency === paymentCurrency) || { currency: paymentCurrency, amount: 0 };
   if (fromBalance.amount < paymentAmount) {
-    return res.status(400).json({ error: 'Insufficient funds' });
+    return res.status(400).json({ error: t('error_insufficient_funds', req.lang || 'en') });
   }
   
   // Process payment
@@ -3704,7 +4162,7 @@ app.post('/budgets', authMiddleware, (req, res) => {
   const db = loadDB();
   const { walletId, currency, monthlyLimit, categoryLimits, idempotencyKey } = req.body;
   if (!walletId || !currency || typeof monthlyLimit === 'undefined') {
-    return res.status(400).json({ error: 'walletId, currency, and monthlyLimit required' });
+    return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   }
   
   // Check idempotency
@@ -3717,7 +4175,7 @@ app.post('/budgets', authMiddleware, (req, res) => {
   }
   
   const wallet = db.wallets.find(w => w.id === walletId && w.userId === req.user.userId);
-  if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+  if (!wallet) return res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
   
   if (!db.budgets) db.budgets = [];
   
@@ -3767,7 +4225,7 @@ app.get('/budgets', authMiddleware, (req, res) => {
 app.get('/budgets/:id/analytics', authMiddleware, (req, res) => {
   const db = loadDB();
   const budget = (db.budgets || []).find(b => b.id === req.params.id && b.userId === req.user.userId);
-  if (!budget) return res.status(404).json({ error: 'Budget not found' });
+  if (!budget) return res.status(404).json({ error: t('error_budget_not_found', req.lang || 'en') });
   
   // Calculate spending for current month
   const now = new Date();
@@ -3802,7 +4260,7 @@ app.get('/budgets/:id/analytics', authMiddleware, (req, res) => {
 app.delete('/budgets/:id', authMiddleware, (req, res) => {
   const db = loadDB();
   const idx = (db.budgets || []).findIndex(b => b.id === req.params.id && b.userId === req.user.userId);
-  if (idx === -1) return res.status(404).json({ error: 'Budget not found' });
+  if (idx === -1) return res.status(404).json({ error: t('error_budget_not_found', req.lang || 'en') });
   
   db.budgets.splice(idx, 1);
   saveDB(db);
@@ -3835,7 +4293,7 @@ app.delete('/devices/:id', authMiddleware, (req, res) => {
   if (!db.devices) db.devices = [];
   
   const idx = db.devices.findIndex(d => d.id === req.params.id && d.userId === req.user.userId);
-  if (idx === -1) return res.status(404).json({ error: 'Device not found' });
+  if (idx === -1) return res.status(404).json({ error: t('error_not_found', req.lang || 'en') });
   
   db.devices.splice(idx, 1);
   saveDB(db);
@@ -3848,7 +4306,7 @@ app.post('/devices/:id/trust', authMiddleware, (req, res) => {
   if (!db.devices) db.devices = [];
   
   const device = db.devices.find(d => d.id === req.params.id && d.userId === req.user.userId);
-  if (!device) return res.status(404).json({ error: 'Device not found' });
+  if (!device) return res.status(404).json({ error: t('error_not_found', req.lang || 'en') });
   
   device.trusted = true;
   saveDB(db);
@@ -3877,7 +4335,7 @@ app.post('/kyc/upload', authMiddleware, (req, res) => {
   if (!db.kyc) db.kyc = [];
   
   const { documentType } = req.body;
-  if (!documentType) return res.status(400).json({ error: 'documentType required' });
+  if (!documentType) return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   
   let userKyc = db.kyc.find(k => k.userId === req.user.userId);
   if (!userKyc) {
@@ -3936,7 +4394,7 @@ const kycVerifyLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 5,
   keyGenerator: req => req.user?.userId || req.clientIP,
-  handler: (_req, res) => res.status(429).json({ error: 'Too many KYC attempts. Please try again in 1 hour.' }),
+  handler: (req, res) => res.status(429).json({ error: t('error_too_many_kyc', req.lang || 'en') }),
 });
 
 app.post('/kyc/verify',
@@ -3950,7 +4408,7 @@ app.post('/kyc/verify',
   async (req, res) => {
     const db = loadDB();
     const user = db.users.find(u => u.id === req.user.userId);
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
 
     const { idType, idNumber, country, firstName, lastName } = req.body;
     const jobId = uuidv4();
@@ -4486,7 +4944,7 @@ app.post('/user/language', authMiddleware, (req, res) => {
   const db = loadDB();
   const user = db.users.find(u => u.id === req.user.userId);
   
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
   
   user.language = language;
   saveDB(db);
@@ -4684,7 +5142,7 @@ app.post('/ai-assistant',
         return res.json({ response: null, actions: [], suggestions: [], forwardToChat: true });
       }
     } else {
-      return res.status(400).json({ error: 'event or message required' });
+      return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
     }
 
     return res.json({ response, actions, suggestions, language: lang });
@@ -4717,7 +5175,7 @@ app.get('/support/context', authMiddleware, (req, res) => {
   logAIInteraction(req.user.userId, 'GET /support/context', ['user_profile', 'kyc_status', 'account_limits']);
   
   const user = db.users.find(u => u.id === req.user.userId);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
   
   const wallet = (db.wallets || []).find(w => w.userId === req.user.userId);
   const userKyc = (db.kyc || []).find(k => k.userId === req.user.userId);
@@ -4795,14 +5253,14 @@ app.get('/support/transaction/:id', authMiddleware, (req, res) => {
   logAIInteraction(req.user.userId, 'GET /support/transaction/:id', [`transaction_${transactionId}`]);
   
   const wallet = (db.wallets || []).find(w => w.userId === req.user.userId);
-  if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+  if (!wallet) return res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
   
   const transaction = (db.transactions || []).find(t => 
     t.id.startsWith(transactionId.replace('...', '')) && 
     (t.fromWalletId === wallet.id || t.toWalletId === wallet.id)
   );
   
-  if (!transaction) return res.status(404).json({ error: 'Transaction not found' });
+  if (!transaction) return res.status(404).json({ error: t('error_not_found', req.lang || 'en') });
   
   // Masked transaction details
   const details = {
@@ -4853,7 +5311,7 @@ app.post('/support/ticket', authMiddleware, (req, res) => {
   const { subject, description, category } = req.body;
   
   if (!subject || !description) {
-    return res.status(400).json({ error: 'subject and description required' });
+    return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   }
   
   // Detect escalation
@@ -4966,12 +5424,12 @@ app.get('/support/ticket/:ticketId', authMiddleware, (req, res) => {
   const ticket = (db.supportTickets || []).find(t => t.id === req.params.ticketId);
   
   if (!ticket) {
-    return res.status(404).json({ error: 'Ticket not found' });
+    return res.status(404).json({ error: t('error_not_found', req.lang || 'en') });
   }
   
   // Verify user owns this ticket (or is admin)
   if (ticket.userId !== req.user.userId) {
-    return res.status(403).json({ error: 'Access denied' });
+    return res.status(403).json({ error: t('error_access_denied', req.lang || 'en') });
   }
   
   logAIInteraction(req.user.userId, 'TICKET_STATUS_CHECK', [ticket.id]);
@@ -5017,7 +5475,7 @@ app.post('/disputes', authMiddleware, (req, res) => {
 
   // ── Input validation ──────────────────────────────────────────────────────
   if (!transactionId || !reason || !description) {
-    return res.status(400).json({ error: 'transactionId, reason, and description required' });
+    return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   }
 
   const VALID_REASONS = ['unauthorized', 'wrong_amount', 'not_received', 'duplicate', 'other'];
@@ -5026,7 +5484,7 @@ app.post('/disputes', authMiddleware, (req, res) => {
   }
 
   if (typeof description !== 'string' || description.trim().length < 10 || description.trim().length > 2000) {
-    return res.status(400).json({ error: 'description must be between 10 and 2000 characters' });
+    return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   }
 
   // ── Resolve authenticated user's email from DB (never trust client) ───────
@@ -5064,7 +5522,7 @@ app.post('/payroll/report-fraud', authMiddleware, async (req, res) => {
   const { transactionId, type, details, expectedAmount, receivedAmount } = req.body;
   
   if (!transactionId || !type || !details) {
-    return res.status(400).json({ error: 'transactionId, type, and details required' });
+    return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   }
   
   const validTypes = ['unauthorized', 'wrong_amount', 'missing_payment', 'duplicate', 'fraud', 'other'];
@@ -5075,13 +5533,13 @@ app.post('/payroll/report-fraud', authMiddleware, async (req, res) => {
   // Find transaction
   const transaction = db.transactions.find(t => t.id === transactionId);
   if (!transaction) {
-    return res.status(404).json({ error: 'Transaction not found' });
+    return res.status(404).json({ error: t('error_not_found', req.lang || 'en') });
   }
   
   // Verify user is involved in transaction
   const userWallets = db.wallets.filter(w => w.userId === req.user.userId).map(w => w.id);
   if (!userWallets.includes(transaction.fromWalletId) && !userWallets.includes(transaction.toWalletId)) {
-    return res.status(403).json({ error: 'Unauthorized - transaction not related to your account' });
+    return res.status(403).json({ error: t('error_unauthorized', req.lang || 'en') });
   }
   
   const user = db.users.find(u => u.id === req.user.userId);
@@ -5268,7 +5726,7 @@ app.post('/employer/report', authMiddleware, (req, res) => {
   const { employerId, type, details } = req.body;
   
   if (!employerId || !type || !details) {
-    return res.status(400).json({ error: 'employerId, type, and details required' });
+    return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   }
   
   const validTypes = ['fraud', 'scam', 'fake_payroll', 'harassment', 'spam', 'other'];
@@ -5278,7 +5736,7 @@ app.post('/employer/report', authMiddleware, (req, res) => {
   
   const employer = db.employers.find(e => e.id === employerId);
   if (!employer) {
-    return res.status(404).json({ error: 'Employer not found' });
+    return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
   }
   
   const user = db.users.find(u => u.id === req.user.userId);
@@ -5377,15 +5835,15 @@ app.delete('/gdpr/delete-account', authMiddleware, async (req, res) => {
   const { confirmEmail, confirmPassword } = req.body;
   
   const user = db.users.find(u => u.id === userId);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
   
   // Require email and password confirmation
   if (user.email !== confirmEmail) {
-    return res.status(400).json({ error: 'Email confirmation does not match' });
+    return res.status(400).json({ error: t('error_email_confirm_mismatch', req.lang || 'en') });
   }
   
   if (!confirmPassword || !bcrypt.compareSync(confirmPassword, user.passwordHash)) {
-    return res.status(400).json({ error: 'Password confirmation invalid' });
+    return res.status(400).json({ error: t('error_password_confirm_invalid', req.lang || 'en') });
   }
   
   logger.warn('Account deletion requested', { userId, email: maskEmail(user.email), ip: req.clientIP });
@@ -5432,7 +5890,7 @@ app.get('/gdpr/consent', authMiddleware, (req, res) => {
   const db = loadDB();
   const user = db.users.find(u => u.id === req.user.userId);
   
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
   
   res.json({
     userId: user.id,
@@ -5451,7 +5909,7 @@ app.post('/gdpr/consent', authMiddleware, (req, res) => {
   const db = loadDB();
   const user = db.users.find(u => u.id === req.user.userId);
   
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
   
   const { marketing, analytics, thirdPartySharing } = req.body;
   
@@ -5877,7 +6335,7 @@ app.post('/employer/register',
     // Check if user already has an employer account
     const existing = db.employers.find(e => e.userId === req.user.userId);
     if (existing) {
-      return res.status(400).json({ error: 'Employer account already exists' });
+      return res.status(400).json({ error: t('error_employer_exists', req.lang || 'en') });
     }
     
     // User must be at least Tier 2 to register as employer
@@ -5947,7 +6405,7 @@ app.get('/employer/profile', authMiddleware, (req, res) => {
   const employer = db.employers.find(e => e.userId === req.user.userId);
   
   if (!employer) {
-    return res.status(404).json({ error: 'Employer account not found' });
+    return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
   }
   
   const fundingWallet = db.wallets.find(w => w.id === employer.fundingWalletId);
@@ -5970,7 +6428,7 @@ app.post('/employer/upload-payroll',
     
     const employer = db.employers.find(e => e.userId === req.user.userId);
     if (!employer) {
-      return res.status(404).json({ error: 'Employer account not found' });
+      return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
     }
     
     if (employer.verificationStatus !== 'verified') {
@@ -5981,7 +6439,7 @@ app.post('/employer/upload-payroll',
     }
     
     if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
+      return res.status(400).json({ error: t('error_no_file_uploaded', req.lang || 'en') });
     }
     
     try {
@@ -5994,7 +6452,7 @@ app.post('/employer/upload-payroll',
       });
       
       if (records.length === 0) {
-        return res.status(400).json({ error: 'CSV file is empty' });
+        return res.status(400).json({ error: t('error_csv_empty', req.lang || 'en') });
       }
       
       // Validate CSV structure (required columns: worker_id or email, amount, currency)
@@ -6042,14 +6500,14 @@ app.post('/employer/upload-payroll',
         }
         
         if (!workerUser) {
-          errors.push({ row: rowNum, error: `Worker not found: ${workerId || email}` });
+          errors.push({ row: rowNum, error: t('error_worker_not_found', req.lang || 'en') });
           continue;
         }
         
         // Find worker's wallet
         const workerWallet = db.wallets.find(w => w.userId === workerUser.id && w.type !== 'employer_funding');
         if (!workerWallet) {
-          errors.push({ row: rowNum, error: `Worker ${workerUser.email} has no wallet` });
+          errors.push({ row: rowNum, error: t('error_wallet_not_found', req.lang || 'en') });
           continue;
         }
         
@@ -6094,7 +6552,7 @@ app.post('/employer/upload-payroll',
     } catch (error) {
       logger.error('CSV parsing error', { error: error.message, employerId: employer.id });
       res.status(400).json({ 
-        error: 'Failed to parse CSV',
+        error: t('error_invalid_csv', req.lang || 'en'),
         message: error.message
       });
     }
@@ -6115,13 +6573,13 @@ app.post('/employer/bulk-payment',
     const db = loadDB();
 
     const employer = db.employers.find(e => e.userId === req.user.userId);
-    if (!employer) return res.status(404).json({ error: 'Employer account not found' });
-    if (employer.verificationStatus !== 'verified') return res.status(403).json({ error: 'Employer not verified' });
+    if (!employer) return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
+    if (employer.verificationStatus !== 'verified') return res.status(403).json({ error: t('error_employer_not_verified', req.lang || 'en') });
 
     const { payrollItems, payPeriod, notes } = req.body;
 
     const fundingWallet = db.wallets.find(w => w.id === employer.fundingWalletId);
-    if (!fundingWallet) return res.status(500).json({ error: 'Funding wallet not found' });
+    if (!fundingWallet) return res.status(500).json({ error: t('error_employer_not_found', req.lang || 'en') });
 
     // ── PHASE 1: PRE-VALIDATE ALL ITEMS (no money moves yet) ──────────────────
     // Resolve every worker wallet up-front. If any are missing, reject the
@@ -6147,7 +6605,7 @@ app.post('/employer/bulk-payment',
         validationErrors,
       });
       return res.status(400).json({
-        error: 'Payroll validation failed — no money was sent',
+        error: t('error_payroll_validation', req.lang || 'en'),
         validationErrors,
       });
     }
@@ -6164,7 +6622,7 @@ app.post('/employer/bulk-payment',
           employerId: employer.id, currency, needed: total, available: balance?.amount || 0,
         });
         return res.status(400).json({
-          error: 'Insufficient funds — no money was sent',
+          error: t('error_insufficient_funds_payroll', req.lang || 'en'),
           currency,
           needed: total,
           available: balance?.amount || 0,
@@ -6350,7 +6808,7 @@ app.get('/employer/payroll-history', authMiddleware, (req, res) => {
   
   const employer = db.employers.find(e => e.userId === req.user.userId);
   if (!employer) {
-    return res.status(404).json({ error: 'Employer account not found' });
+    return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
   }
   
   const batches = db.payrollBatches
@@ -6366,7 +6824,7 @@ app.get('/employer/payroll-batch/:batchId', authMiddleware, (req, res) => {
   
   const employer = db.employers.find(e => e.userId === req.user.userId);
   if (!employer) {
-    return res.status(404).json({ error: 'Employer account not found' });
+    return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
   }
   
   const batch = db.payrollBatches.find(b => 
@@ -6374,7 +6832,7 @@ app.get('/employer/payroll-batch/:batchId', authMiddleware, (req, res) => {
   );
   
   if (!batch) {
-    return res.status(404).json({ error: 'Batch not found' });
+    return res.status(404).json({ error: t('error_not_found', req.lang || 'en') });
   }
   
   // Get full transaction details
@@ -6403,18 +6861,18 @@ app.post('/employer/add-employee',
     // Find employer
     const employer = db.employers.find(e => e.userId === req.user.userId);
     if (!employer) {
-      return res.status(404).json({ error: 'Employer account not found. Register as employer first.' });
+      return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
     }
     
     // Must be verified employer
     if (employer.verificationStatus !== 'verified') {
-      return res.status(403).json({ error: 'Employer account must be verified to add employees' });
+      return res.status(403).json({ error: t('error_employer_not_verified', req.lang || 'en') });
     }
     
     // Find worker by email
     const worker = db.users.find(u => u.email === workerEmail);
     if (!worker) {
-      return res.status(404).json({ error: 'Worker not found. They must register first.' });
+      return res.status(404).json({ error: t('error_worker_not_found', req.lang || 'en') });
     }
     
     // Check if relationship already exists
@@ -6422,7 +6880,7 @@ app.post('/employer/add-employee',
       ee => ee.employerId === employer.id && ee.workerId === worker.id
     );
     if (existing) {
-      return res.status(400).json({ error: 'Employee already added' });
+      return res.status(400).json({ error: t('error_employee_added', req.lang || 'en') });
     }
     
     // Create relationship
@@ -6463,7 +6921,7 @@ app.get('/employer/employees', authMiddleware, (req, res) => {
   
   const employer = db.employers.find(e => e.userId === req.user.userId);
   if (!employer) {
-    return res.status(404).json({ error: 'Employer account not found' });
+    return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
   }
   
   const employees = db.employerEmployees
@@ -6480,9 +6938,9 @@ app.get('/employer/employees', authMiddleware, (req, res) => {
 app.post('/employer/fund-wallet', authMiddleware, (req, res) => {
   const db = loadDB();
   const employer = db.employers.find(e => e.userId === req.user.userId);
-  if (!employer) return res.status(404).json({ error: 'Employer account not found' });
+  if (!employer) return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
   const fundingWallet = db.wallets.find(w => w.id === employer.fundingWalletId);
-  if (!fundingWallet) return res.status(500).json({ error: 'Funding wallet not found' });
+  if (!fundingWallet) return res.status(500).json({ error: t('error_employer_not_found', req.lang || 'en') });
   const { amount = 1000000, currency = 'XAF' } = req.body;
   const addAmount = typeof amount === 'number' ? amount : 1000000;
   let balance = fundingWallet.balances.find(b => b.currency === currency);
@@ -6538,18 +6996,18 @@ app.post('/employer/payment-request',
     );
     
     if (!relationship) {
-      return res.status(403).json({ error: 'Not linked to this employer' });
+      return res.status(403).json({ error: t('error_not_linked_employer', req.lang || 'en') });
     }
     
     const employer = db.employers.find(e => e.id === employerId);
     if (!employer) {
-      return res.status(404).json({ error: 'Employer not found' });
+      return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
     }
     
     // Get worker's wallet
     const userWallet = db.wallets.find(w => w.userId === req.user.userId);
     if (!userWallet) {
-      return res.status(404).json({ error: 'Wallet not found' });
+      return res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
     }
     
     // Create payment request
@@ -6605,7 +7063,7 @@ app.post('/payroll/confirm-payment',
     // Validate required fields
     if (!employerId || !batchId || !amount || !currency) {
       return res.status(400).json({ 
-        error: 'Missing required fields: employerId, batchId, amount, currency' 
+        error: t('error_missing_fields', req.lang || 'en') 
       });
     }
     
@@ -6634,7 +7092,7 @@ app.post('/payroll/confirm-payment',
     // Find employer
     const employer = db.employers.find(e => e.id === employerId);
     if (!employer) {
-      return res.status(404).json({ error: 'Employer not found' });
+      return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
     }
     
     // Find user relationship with employer
@@ -6648,7 +7106,7 @@ app.post('/payroll/confirm-payment',
         userId: req.user.userId
       });
       return res.status(403).json({ 
-        error: 'Not authorized to receive payments from this employer' 
+        error: t('error_not_authorized_employer', req.lang || 'en') 
       });
     }
     
@@ -6659,7 +7117,7 @@ app.post('/payroll/confirm-payment',
     
     if (!wallet) {
       return res.status(404).json({ 
-        error: `No ${currency} wallet found` 
+        error: t('error_wallet_not_found', req.lang || 'en') 
       });
     }
     
@@ -6715,7 +7173,7 @@ app.post('/employer/remove-employee/:relationshipId',
     
     const employer = db.employers.find(e => e.userId === req.user.userId);
     if (!employer) {
-      return res.status(404).json({ error: 'Employer account not found' });
+      return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
     }
     
     const relationshipIndex = db.employerEmployees.findIndex(
@@ -6723,7 +7181,7 @@ app.post('/employer/remove-employee/:relationshipId',
     );
     
     if (relationshipIndex === -1) {
-      return res.status(404).json({ error: 'Employee relationship not found' });
+      return res.status(404).json({ error: t('error_not_linked_employer', req.lang || 'en') });
     }
     
     const removed = db.employerEmployees.splice(relationshipIndex, 1)[0];
@@ -6751,13 +7209,13 @@ app.post('/admin/update-kyc-tier',
     const db = loadDB();
     const requestingUser = db.users.find(u => u.id === req.user.userId);
     if (!requestingUser || requestingUser.role !== 'admin') {
-      return res.status(403).json({ error: 'Forbidden: admin access required' });
+      return res.status(403).json({ error: t('error_access_denied', req.lang || 'en') });
     }
     const { userId, kycTier, kycStatus } = req.body;
     
     const user = db.users.find(u => u.id === userId);
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
     }
     
     user.kycTier = kycTier;
@@ -6797,13 +7255,13 @@ app.post('/admin/verify-employer',
     const db = loadDB();
     const requestingUser = db.users.find(u => u.id === req.user.userId);
     if (!requestingUser || requestingUser.role !== 'admin') {
-      return res.status(403).json({ error: 'Forbidden: admin access required' });
+      return res.status(403).json({ error: t('error_access_denied', req.lang || 'en') });
     }
     const { employerId, verificationStatus, notes } = req.body;
     
     const employer = db.employers.find(e => e.id === employerId);
     if (!employer) {
-      return res.status(404).json({ error: 'Employer not found' });
+      return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
     }
     
     employer.verificationStatus = verificationStatus;
