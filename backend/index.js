@@ -2018,6 +2018,15 @@ app.use((req, res, next) => {
   next();
 });
 
+// Language middleware — read Accept-Language header, validate against supported langs
+const SUPPORTED_LANGS = ['en', 'es', 'fr', 'pt', 'zh', 'ja', 'ru', 'de'];
+app.use((req, res, next) => {
+  const header = (req.headers['accept-language'] || 'en').toLowerCase().trim();
+  const lang = SUPPORTED_LANGS.find(l => header.startsWith(l)) || 'en';
+  req.lang = lang;
+  next();
+});
+
 // Request logging middleware
 app.use((req, res, next) => {
   const start = Date.now();
