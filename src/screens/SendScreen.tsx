@@ -934,9 +934,9 @@ export default function SendScreen() {
           <View style={styles.infoBox}>
             <Text style={styles.infoText}>
               {activeTab === 'withdraw'
-                ? `ℹ️ ${isIntlWithdrawal ? 'International' : 'Local'} ${t('send.withdrawalFeeInfo')}: ${isIntlWithdrawal ? t('send.intlFeeHint') : t('send.localFeeHint')} deducted from the amount.`
+                ? `ℹ️ ${t(isIntlWithdrawal ? 'send.typeInternational' : 'send.typeLocal')} ${t('send.withdrawalFeeInfo')}: ${isIntlWithdrawal ? t('send.intlFeeHint') : t('send.localFeeHint')} ${t('send.deductedSuffix')}.`
                 : preview.isCrossCurrency
-                  ? `ℹ️ ${t('send.fxFeeInfo')} is deducted from the converted amount (${preview.receiverCurrency}).`
+                  ? `ℹ️ ${t('send.fxFeeNote')} (${preview.receiverCurrency}).`
                   : t('send.sameCurrencyFree')
               }
             </Text>
@@ -1398,7 +1398,7 @@ export default function SendScreen() {
             <View style={styles.infoBox}>
               <Text style={styles.infoText}>
                 {activeTab === 'withdraw'
-                  ? `ℹ️ ${t('send.intlFeeHint')}${isIntlWithdrawal ? ' (international)' : ` — ${t('send.withdrawalFeeInfo')}`}`
+                  ? `ℹ️ ${t('send.intlFeeHint')}${isIntlWithdrawal ? ` (${t('send.typeInternational').toLowerCase()})` : ` — ${t('send.withdrawalFeeInfo')}`}`
                   : t('send.transferFreeInfo')
                 }
               </Text>
