@@ -35,7 +35,7 @@ module.exports = function phase13(check) {
 
   check(
     '[Withdrawal] Bank withdrawal warning alert present (3–5 business days)',
-    SEND.includes('3\u20135 business days') || SEND.includes('3-5 business days'),
+    SEND.includes("t('send.bankWithdrawalMsg')") || SEND.includes('send.bankTransferArrival'),
   );
 
   check(
@@ -70,12 +70,12 @@ module.exports = function phase13(check) {
 
   check(
     "[Withdrawal] Debit card has 'Instant' badge in method selector",
-    SEND.includes('methodBadge') && SEND.includes('Instant'),
+    SEND.includes('methodBadge') && SEND.includes("send.instant"),
   );
 
   check(
     "[Withdrawal] Bank transfer has '3-5 days' badge in method selector",
-    SEND.includes('methodBadgeSlow') && SEND.includes('3-5 days'),
+    SEND.includes('methodBadgeSlow') && SEND.includes("send.bankDays"),
   );
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -89,12 +89,12 @@ module.exports = function phase13(check) {
 
   check(
     '[Withdrawal] Available balance display banner rendered in withdraw tab',
-    SEND.includes('balanceSummaryBanner') && SEND.includes('Available to withdraw'),
+    SEND.includes('balanceSummaryBanner') && SEND.includes("send.availableToWithdraw"),
   );
 
   check(
     '[Withdrawal] Pending withdrawal amount displayed when non-zero',
-    SEND.includes('Pending withdrawal') && SEND.includes('pendingMinor > 0'),
+    SEND.includes("send.pendingWithdrawal") && SEND.includes('pendingMinor > 0'),
   );
 
   // ════════════════════════════════════════════════════════════════════════════

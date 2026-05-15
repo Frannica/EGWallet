@@ -55,7 +55,7 @@ module.exports = function phase11(check) {
   check(
     '[Send] Credit Card picker button present in withdrawal method selector',
     SEND.includes("onPress={() => setWithdrawalMethod('credit')}") &&
-    SEND.includes('>Credit Card</Text>'),
+    SEND.includes("send.creditCard"),
   );
   check(
     '[Send] Card form renders for both debit and credit',

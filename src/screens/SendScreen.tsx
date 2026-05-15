@@ -4,9 +4,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { listWallets } from '../api/auth';
 import { sendTransaction, getWalletCurrency, fetchFxQuote, FxQuote } from '../api/transactions';
-import { API_BASE } from '../api/client';
+import { API_BASE, fetchRates } from '../api/client';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { majorToMinor, minorToMajor, decimalsFor, formatCurrency, CURRENCY_INFO } from '../utils/currency';
+import { majorToMinor, minorToMajor, decimalsFor, formatCurrency, formatMajorAmount, CURRENCY_INFO, convert } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { useToast } from '../utils/toast';
 import { getLocalBalances, debitLocalBalance, syncLocalBalancesFromBackend, mergeWithLocalBalances, logLocalTransaction, getPendingWithdrawals, addPendingWithdrawal, clearPendingWithdrawal } from '../utils/localBalance';
@@ -45,6 +45,11 @@ export default function SendScreen() {
   const [bankName, setBankName] = useState<string>('');
   const [accountNumber, setAccountNumber] = useState<string>('');
   const [accountName, setAccountName] = useState<string>('');
+  const [bankCode, setBankCode] = useState<string>('');
+  const [branchCode, setBranchCode] = useState<string>('');
+  const [iban, setIban] = useState<string>('');
+  const [swiftBic, setSwiftBic] = useState<string>('');
+  const [withdrawalCountry, setWithdrawalCountry] = useState<string>('');
   const [withdrawalMethod, setWithdrawalMethod] = useState<'bank' | 'mobile' | 'debit' | 'credit'>('debit');
   const [isIntlWithdrawal, setIsIntlWithdrawal] = useState(false);
   const [withdrawalCardNumber, setWithdrawalCardNumber] = useState<string>('');
@@ -99,16 +104,24 @@ export default function SendScreen() {
     setReceiverCurrency(null);
     const isAtUsername = toWalletId.trim().startsWith('@');
     if (!toWalletId.trim() || (!isAtUsername && toWalletId.length < 8) || !auth.token) return;
+    let cancelled = false;
     fxDebounceRef.current = setTimeout(async () => {
-      const toCurrency = await getWalletCurrency(auth.token!, toWalletId.trim());
-      setReceiverCurrency(toCurrency);
-      const amt = parseFloat(amount.replace(/,/g, ''));
-      if (amt > 0 && toCurrency !== currency) {
-        const amtMinor = majorToMinor(amt, currency);
-        const quote = await fetchFxQuote(auth.token!, currency, toCurrency, amtMinor);
-        setFxQuote(quote);
+      try {
+        const toCurrency = await getWalletCurrency(auth.token!, toWalletId.trim());
+        if (cancelled) return;
+        setReceiverCurrency(toCurrency);
+        const amt = parseFloat(amount.replace(/,/g, ''));
+        if (amt > 0 && toCurrency !== currency) {
+          const amtMinor = majorToMinor(amt, currency);
+          const quote = await fetchFxQuote(auth.token!, currency, toCurrency, amtMinor);
+          if (cancelled) return;
+          setFxQuote(quote);
+        }
+      } catch {
+        if (!cancelled) setFxQuote(null);
       }
     }, 500);
+    return () => { cancelled = true; };
   }, [toWalletId, currency, amount, auth.token]);
 
   async function loadWallets() {
@@ -196,17 +209,33 @@ export default function SendScreen() {
     const pendingMajor = pendingMinor / Math.pow(10, decimalsFor(currency));
     const balanceMajor = Math.max(0, grossMajor - pendingMajor);
 
-    if (balanceMajor >= amt) {
+    // Cross-currency check: if the user has no direct balance in the send currency,
+    // compute total wallet value across all balances using live FX rates.
+    // The backend handles cross-currency sends automatically.
+    let effectiveMajor = balanceMajor;
+    if (balanceMajor < amt && (wallet?.balances?.length ?? 0) >= 1) {
+      try {
+        const rates = await fetchRates();
+        const totalInSendCurrency = (wallet.balances as any[]).reduce((sum: number, b: any) => {
+          if (!b.amount || b.amount <= 0) return sum;
+          const inSendMinor = convert(b.amount, b.currency, currency, rates);
+          return sum + inSendMinor / Math.pow(10, decimalsFor(currency));
+        }, 0);
+        effectiveMajor = Math.max(balanceMajor, totalInSendCurrency);
+      } catch { /* rate fetch failed — fall back to direct balance */ }
+    }
+
+    if (effectiveMajor >= amt) {
       setScamAcknowledged(false);
       setShowConfirmation(true);
     } else {
       // Insufficient balance — direct user to add money instead of a non-functional card form
-      const shortfall = (amt - balanceMajor).toFixed(2);
+      const shortfall = formatMajorAmount(amt - effectiveMajor, currency);
       Alert.alert(
         t('send.insufficientBalance'),
         t('send.insufficientBalanceMsg')
-          .replace('{balance}', balanceMajor.toFixed(2))
-          .replace('{currency}', currency)
+          .replace('{balance}', formatMajorAmount(effectiveMajor, currency))
+          .replace(/\{currency\}/g, currency)
           .replace('{shortfall}', shortfall),
         [
           { text: t('common.cancel'), style: 'cancel' },
@@ -314,6 +343,7 @@ export default function SendScreen() {
   }
   
   async function onWithdrawConfirmed() {
+    if (loading) return;
     if (__DEV__) console.log('[Send] Withdraw confirmed — currency:', currency, 'method:', withdrawalMethod);
     if (!auth.token || !fromWalletId) return;
     
@@ -338,8 +368,8 @@ export default function SendScreen() {
         Alert.alert(
           t('send.insufficientFunds'),
           t('send.insufficientFundsMsg')
-            .replace('{balance}', minorToMajor(trueAvailable, currency).toFixed(2))
-            .replace('{currency}', currency)
+            .replace('{balance}', formatMajorAmount(minorToMajor(trueAvailable, currency), currency))
+            .replace(/\{currency\}/g, currency)
         );
         return;
       }
@@ -363,6 +393,11 @@ export default function SendScreen() {
           accountNumber: (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? withdrawalCardNumber.replace(/\s/g, '') : accountNumber,
           accountHolderName: accountName,
           ...((withdrawalMethod === 'debit' || withdrawalMethod === 'credit') && { cardExpiry: withdrawalCardExpiry }),
+          ...(withdrawalMethod === 'bank' && !isIntlWithdrawal && bankCode.trim()   && { bankCode:    bankCode.trim() }),
+          ...(withdrawalMethod === 'bank' && !isIntlWithdrawal && branchCode.trim() && { branchCode:  branchCode.trim() }),
+          ...(withdrawalMethod === 'bank' && isIntlWithdrawal  && iban.trim()       && { iban:        iban.trim().toUpperCase() }),
+          ...(withdrawalMethod === 'bank' && isIntlWithdrawal  && swiftBic.trim()   && { swiftBic:    swiftBic.trim().toUpperCase() }),
+          ...(withdrawalMethod === 'bank' && isIntlWithdrawal  && withdrawalCountry.trim() && { country: withdrawalCountry.trim() }),
         }),
       });
       
@@ -389,6 +424,11 @@ export default function SendScreen() {
       setBankName('');
       setAccountNumber('');
       setAccountName('');
+      setBankCode('');
+      setBranchCode('');
+      setIban('');
+      setSwiftBic('');
+      setWithdrawalCountry('');
       setShowConfirmation(false);
       (navigation as any).navigate('Receipt', {
         amount: amountMinor,
@@ -480,6 +520,7 @@ export default function SendScreen() {
   }
 
   async function onSendConfirmed() {
+    if (loading) return;
     if (__DEV__) console.log('[Send] Confirm & Send pressed — currency:', currency);
     if (!auth.token) return Alert.alert(t('common.error'), t('common.notAuthenticated'));
     if (!fromWalletId) return Alert.alert(t('common.error'), t('send.selectSourceWallet'));
@@ -1237,8 +1278,9 @@ export default function SendScreen() {
                       <TextInput
                         value={bankName}
                         onChangeText={setBankName}
-                        placeholder={withdrawalMethod === 'bank' ? 'Enter bank name' : 'e.g., MTN, Orange'}
+                        placeholder={withdrawalMethod === 'bank' ? t('send.enterBankName') : t('send.mobileOperatorPlaceholder')}
                         placeholderTextColor="#AAB8C2"
+                        maxLength={100}
                         editable={!loading}
                         style={styles.input}
                       />
@@ -1249,9 +1291,10 @@ export default function SendScreen() {
                       <TextInput
                         value={accountNumber}
                         onChangeText={setAccountNumber}
-                        placeholder={withdrawalMethod === 'bank' ? 'Enter account number' : 'Enter mobile number'}
+                        placeholder={withdrawalMethod === 'bank' ? t('send.enterAccountNumber') : t('send.enterMobileNumber')}
                         placeholderTextColor="#AAB8C2"
                         keyboardType={withdrawalMethod === 'mobile' ? 'phone-pad' : 'default'}
+                        maxLength={50}
                         editable={!loading}
                         style={styles.input}
                       />
@@ -1262,12 +1305,86 @@ export default function SendScreen() {
                       <TextInput
                         value={accountName}
                         onChangeText={setAccountName}
-                        placeholder="Full name as on account"
+                        placeholder={t('send.fullNameAsOnAccount')}
                         placeholderTextColor="#AAB8C2"
+                        maxLength={100}
                         editable={!loading}
                         style={styles.input}
                       />
                     </View>
+                    {withdrawalMethod === 'bank' && !isIntlWithdrawal && (
+                      <>
+                        <View style={styles.section}>
+                          <Text style={styles.label}>{t('send.bankCode')} <Text style={{ color: '#9BAEC8', fontWeight: 'normal' }}>{t('send.optional')}</Text></Text>
+                          <TextInput
+                            value={bankCode}
+                            onChangeText={setBankCode}
+                            placeholder="e.g., 057"
+                            placeholderTextColor="#AAB8C2"
+                            keyboardType="default"
+                            maxLength={20}
+                            editable={!loading}
+                            style={styles.input}
+                          />
+                        </View>
+                        <View style={styles.section}>
+                          <Text style={styles.label}>{t('send.branchCode')} <Text style={{ color: '#9BAEC8', fontWeight: 'normal' }}>{t('send.optional')}</Text></Text>
+                          <TextInput
+                            value={branchCode}
+                            onChangeText={setBranchCode}
+                            placeholder="e.g., 001"
+                            placeholderTextColor="#AAB8C2"
+                            keyboardType="default"
+                            maxLength={20}
+                            editable={!loading}
+                            style={styles.input}
+                          />
+                        </View>
+                        <Text style={styles.infoText}>{t('send.bankTransferArrival')}</Text>
+                      </>
+                    )}
+                    {withdrawalMethod === 'bank' && isIntlWithdrawal && (
+                      <>
+                        <View style={styles.section}>
+                          <Text style={styles.label}>IBAN <Text style={{ color: '#9BAEC8', fontWeight: 'normal' }}>{t('send.optional')}</Text></Text>
+                          <TextInput
+                            value={iban}
+                            onChangeText={v => setIban(v.replace(/\s/g, '').toUpperCase())}
+                            placeholder="e.g., GB29NWBK60161331926819"
+                            placeholderTextColor="#AAB8C2"
+                            autoCapitalize="characters"
+                            maxLength={34}
+                            editable={!loading}
+                            style={styles.input}
+                          />
+                        </View>
+                        <View style={styles.section}>
+                          <Text style={styles.label}>SWIFT / BIC <Text style={{ color: '#9BAEC8', fontWeight: 'normal' }}>{t('send.optional')}</Text></Text>
+                          <TextInput
+                            value={swiftBic}
+                            onChangeText={v => setSwiftBic(v.replace(/\s/g, '').toUpperCase())}
+                            placeholder="e.g., NWBKGB2L"
+                            placeholderTextColor="#AAB8C2"
+                            autoCapitalize="characters"
+                            maxLength={11}
+                            editable={!loading}
+                            style={styles.input}
+                          />
+                        </View>
+                        <View style={styles.section}>
+                          <Text style={styles.label}>{t('send.country')} <Text style={{ color: '#9BAEC8', fontWeight: 'normal' }}>{t('send.optional')}</Text></Text>
+                          <TextInput
+                            value={withdrawalCountry}
+                            onChangeText={setWithdrawalCountry}
+                            placeholder="e.g., United Kingdom"
+                            placeholderTextColor="#AAB8C2"
+                            maxLength={60}
+                            editable={!loading}
+                            style={styles.input}
+                          />
+                        </View>
+                      </>
+                    )}
                   </>
                 )}
               </>
