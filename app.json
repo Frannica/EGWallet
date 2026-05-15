@@ -24,7 +24,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.francisco1953.egwalletmobile",
-      "versionCode": 52
+      "versionCode": 53
     },
     "web": {
       "favicon": "./assets/favicon.png"
