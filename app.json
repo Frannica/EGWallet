@@ -3,7 +3,7 @@
     "name": "EGWallet",
     "slug": "EGWalletSimple",
     "scheme": "egwallet",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -24,7 +24,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.francisco1953.egwalletmobile",
-      "versionCode": 42
+      "versionCode": 52
     },
     "web": {
       "favicon": "./assets/favicon.png"
