@@ -179,9 +179,11 @@ export async function syncLocalBalancesFromBackend(
       const localAmt = localBals[b.currency];
 
       // Ephemeral-backend reset guard (e.g. Railway db.json wiped on restart):
-      // If the backend returns 0 but we have local funds, the server likely lost
-      // its state. Keep local balance in all cases — debitTimes irrelevant here.
-      if (b.amount === 0 && localAmt !== undefined && localAmt > 0) {
+      // If the backend returns 0 but we have local funds AND there is no debit
+      // record, the server likely lost its state — keep local balance.
+      // If there IS a debit record the $0 is a legitimate confirmed debit, so
+      // fall through to the debit-record branch below (trust backend).
+      if (b.amount === 0 && localAmt !== undefined && localAmt > 0 && !hasDebitRecord) {
         synced[b.currency] = localAmt;
         continue;
       }

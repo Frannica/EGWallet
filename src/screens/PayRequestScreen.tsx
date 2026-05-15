@@ -1,21 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
-import { API_BASE } from '../api/client';
+import { API_BASE, getApiLanguage } from '../api/client';
 import { useLanguage } from '../i18n/LanguageContext';
+import { minorToMajor, formatMajorAmount } from '../utils/currency';
+import { debitLocalBalance } from '../utils/localBalance';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const ZERO_DECIMAL_CURRENCIES = new Set([
-  'JPY', 'KRW', 'VND', 'IDR', 'XOF', 'XAF', 'CLP', 'HUF', 'PYG',
-  'UGX', 'RWF', 'GNF', 'MGA', 'KMF', 'DJF', 'BIF',
-]);
-
-function minorToMajor(amount: number, currency: string): number {
-  return ZERO_DECIMAL_CURRENCIES.has(currency) ? amount : amount / 100;
+// formatAmount: format a major-unit amount with correct decimals and commas
+function formatAmount(amountMajor: number, currency: string): string {
+  return formatMajorAmount(amountMajor, currency);
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -31,6 +29,15 @@ interface PaymentRequest {
   createdAt: number;
 }
 
+interface FeePreview {
+  debitAmount: number;
+  debitCurrency: string;
+  creditAmount: number;
+  creditCurrency: string;
+  wasConverted: boolean;
+  fxFeeAmount: number;
+}
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export default function PayRequestScreen({ route, navigation }: any) {
@@ -43,6 +50,10 @@ export default function PayRequestScreen({ route, navigation }: any) {
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState('');
+  const [walletId, setWalletId] = useState<string | null>(null);
+  const [feePreview, setFeePreview] = useState<FeePreview | null>(null);
+  const isMounted = useRef(true);
+  useEffect(() => () => { isMounted.current = false; }, []);
 
   useEffect(() => {
     if (!requestId) {
@@ -50,7 +61,7 @@ export default function PayRequestScreen({ route, navigation }: any) {
       setLoading(false);
       return;
     }
-    fetch(`${API_BASE}/payment-requests/${requestId}`)
+    fetch(`${API_BASE}/payment-requests/${requestId}`, { headers: { 'Accept-Language': getApiLanguage() } })
       .then(r => r.json())
       .then(data => {
         if (data.error) {
@@ -65,6 +76,36 @@ export default function PayRequestScreen({ route, navigation }: any) {
       .catch(() => setError(t('payRequest.loadError')))
       .finally(() => setLoading(false));
   }, [requestId]);
+
+  // Fetch wallet + fee preview once request is loaded and user is logged in
+  useEffect(() => {
+    if (!request || request.status !== 'pending' || !auth.token) return;
+    (async () => {
+      try {
+        const walletsRes = await fetch(`${API_BASE}/wallets`, {
+          headers: { Authorization: `Bearer ${auth.token}`, 'Accept-Language': getApiLanguage() },
+        });
+        const walletsData = await walletsRes.json();
+        const wid = walletsData.wallets?.[0]?.id;
+        if (!wid) return;
+        setWalletId(wid);
+
+        const previewRes = await fetch(`${API_BASE}/payment-requests/${request.id}/preview`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${auth.token}`,
+            'Accept-Language': getApiLanguage(),
+          },
+          body: JSON.stringify({ fromWalletId: wid }),
+        });
+        if (previewRes.ok) {
+          const previewData = await previewRes.json();
+          setFeePreview(previewData);
+        }
+      } catch {}
+    })();
+  }, [request?.id, auth.token]);
 
   const handlePay = async () => {
     if (!auth.token) {
@@ -81,36 +122,65 @@ export default function PayRequestScreen({ route, navigation }: any) {
     if (!request) return;
     setPaying(true);
     try {
-      // Fetch user's wallet
-      const walletsRes = await fetch(`${API_BASE}/wallets`, {
-        headers: { Authorization: `Bearer ${auth.token}` },
-      });
-      const walletsData = await walletsRes.json();
-      const walletId = walletsData.wallets?.[0]?.id;
-      if (!walletId) throw new Error(t('payRequest.noWallet'));
+      // Reuse cached walletId or fetch if needed
+      let wid = walletId;
+      if (!wid) {
+        const walletsRes = await fetch(`${API_BASE}/wallets`, {
+          headers: { Authorization: `Bearer ${auth.token}`, 'Accept-Language': getApiLanguage() },
+        });
+        const walletsData = await walletsRes.json();
+        wid = walletsData.wallets?.[0]?.id;
+        if (!wid) throw new Error(t('payRequest.noWallet'));
+        setWalletId(wid);
+      }
 
       const payRes = await fetch(`${API_BASE}/payment-requests/${request.id}/pay`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${auth.token}`,
+          'Accept-Language': getApiLanguage(),
         },
-        body: JSON.stringify({ fromWalletId: walletId }),
+        body: JSON.stringify({ fromWalletId: wid }),
       });
       const payData = await payRes.json();
       if (!payRes.ok) throw new Error(payData.error || 'Payment failed');
 
-      const displayAmount = minorToMajor(request.amount, request.currency).toFixed(2);
       setRequest(prev => prev ? { ...prev, status: 'paid' } : prev);
-      Alert.alert(
-        t('payRequest.paymentSentTitle'),
-        t('payRequest.paymentSentMsg').replace('{{amount}}', displayAmount).replace('{{currency}}', request.currency),
-        [{ text: t('common.done'), onPress: () => navigation.goBack() }]
-      );
+
+      const tx = payData.transaction;
+      // Debit local balance immediately so the wallet screen shows the correct amount
+      // tx.amount/tx.currency reflect the actual debited currency (handles FX case)
+      const debitCurr = tx?.currency || request.currency;
+      const debitAmt: number = tx != null ? tx.amount : request.amount;
+      await debitLocalBalance(debitCurr, debitAmt);
+      if (tx?.wasConverted) {
+        const debitDisplay = formatAmount(minorToMajor(tx.amount, tx.currency), tx.currency);
+        const feeDisplay = formatAmount(minorToMajor(tx.fxFeeAmount, tx.currency), tx.currency);
+        const creditDisplay = formatAmount(minorToMajor(tx.receivedAmount, tx.receivedCurrency), tx.receivedCurrency);
+        Alert.alert(
+          t('payRequest.paymentSentTitle'),
+          t('payRequest.paymentSentFxMsg')
+            .replace('{debitAmount}', debitDisplay)
+            .replace('{debitCurrency}', tx.currency)
+            .replace('{creditAmount}', creditDisplay)
+            .replace('{creditCurrency}', tx.receivedCurrency)
+            .replace('{feeAmount}', feeDisplay)
+            .replace('{feeCurrency}', tx.currency),
+          [{ text: t('common.done'), onPress: () => navigation.goBack() }]
+        );
+      } else {
+        const displayAmount = formatAmount(minorToMajor(request.amount, request.currency), request.currency);
+        Alert.alert(
+          t('payRequest.paymentSentTitle'),
+          t('payRequest.paymentSentMsg').replace('{{amount}}', displayAmount).replace('{{currency}}', request.currency),
+          [{ text: t('common.done'), onPress: () => navigation.goBack() }]
+        );
+      }
     } catch (e: any) {
       Alert.alert(t('payRequest.paymentFailed'), e.message || t('payRequest.couldNotProcess'));
     } finally {
-      setPaying(false);
+      if (isMounted.current) setPaying(false);
     }
   };
 
@@ -145,6 +215,11 @@ export default function PayRequestScreen({ route, navigation }: any) {
   const isCancelled = request.status === 'cancelled';
   const displayAmount = minorToMajor(request.amount, request.currency);
 
+  // Pay button label: show sender's actual currency/amount if conversion applies
+  const payBtnLabel = feePreview?.wasConverted
+    ? `Pay ${formatAmount(minorToMajor(feePreview.debitAmount, feePreview.debitCurrency), feePreview.debitCurrency)} ${feePreview.debitCurrency}`
+    : `Pay ${formatAmount(displayAmount, request.currency)} ${request.currency}`;
+
   return (
     <View style={styles.container}>
       <View style={styles.card}>
@@ -164,12 +239,30 @@ export default function PayRequestScreen({ route, navigation }: any) {
         <Text style={styles.fromValue}>{requesterEmail || t('payRequest.egWalletUser')}</Text>
 
         <Text style={styles.amount}>
-          {displayAmount.toFixed(2)}
+          {formatAmount(displayAmount, request.currency)}
           <Text style={styles.currency}> {request.currency}</Text>
         </Text>
 
         {!!request.memo && (
           <Text style={styles.memo}>"{request.memo}"</Text>
+        )}
+
+        {/* FX fee breakdown — shown when sender's currency differs from request currency */}
+        {!isPaid && !isCancelled && feePreview?.wasConverted && (
+          <View style={styles.feeBox}>
+            <View style={styles.feeRow}>
+              <Ionicons name="swap-horizontal-outline" size={14} color="#1565C0" />
+              <Text style={styles.feeLabel}> {t('payRequest.youWillPay')}</Text>
+              <Text style={styles.feeValue}>
+                {formatAmount(minorToMajor(feePreview.debitAmount, feePreview.debitCurrency), feePreview.debitCurrency)} {feePreview.debitCurrency}
+              </Text>
+            </View>
+            <Text style={styles.feeNote}>
+              {t('payRequest.fxFeeIncluded')
+                .replace('{fee}', formatAmount(minorToMajor(feePreview.fxFeeAmount, feePreview.debitCurrency), feePreview.debitCurrency))
+                .replace('{currency}', feePreview.debitCurrency)}
+            </Text>
+          </View>
         )}
 
         {!isPaid && !isCancelled && (
@@ -181,11 +274,7 @@ export default function PayRequestScreen({ route, navigation }: any) {
           >
             {paying
               ? <ActivityIndicator color="#fff" size="small" />
-              : (
-                <Text style={styles.payBtnText}>
-                  Pay {displayAmount.toFixed(2)} {request.currency}
-                </Text>
-              )
+              : <Text style={styles.payBtnText}>{payBtnLabel}</Text>
             }
           </TouchableOpacity>
         )}
@@ -359,5 +448,37 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
     fontSize: 14,
+  },
+  feeBox: {
+    backgroundColor: '#FFF8E1',
+    borderRadius: 12,
+    padding: 14,
+    width: '100%',
+    marginTop: 4,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#FFE082',
+  },
+  feeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  feeLabel: {
+    fontSize: 13,
+    color: '#1565C0',
+    fontWeight: '600',
+    flex: 1,
+  },
+  feeValue: {
+    fontSize: 15,
+    color: '#0D1B2E',
+    fontWeight: '800',
+  },
+  feeNote: {
+    fontSize: 11,
+    color: '#E65100',
+    fontWeight: '500',
+    paddingLeft: 18,
   },
 });
