@@ -358,6 +358,8 @@ const en: TranslationMap = {
   'exchange.enterAmount': 'Enter amount',
   'exchange.success': 'Exchange completed!',
   'exchange.insufficientBalance': 'Insufficient balance',
+  'exchange.ratesUpdatedAt': 'Rates updated',
+  'exchange.ratesStale': 'Rates may be outdated — verify before large exchanges',
 
   // Employer dashboard
   'employer.registerTitle': 'REGISTER AS EMPLOYER',
@@ -1388,6 +1390,8 @@ const fr: TranslationMap = {
   'exchange.enterAmount': 'Saisir le montant',
   'exchange.success': 'Échange effectué !',
   'exchange.insufficientBalance': 'Solde insuffisant',
+  'exchange.ratesUpdatedAt': 'Taux mis à jour',
+  'exchange.ratesStale': 'Taux potentiellement obsolètes — vérifiez avant les gros montants',
 
   // Employer dashboard
   'employer.registerTitle': "S'INSCRIRE COMME EMPLOYEUR",
@@ -2379,6 +2383,8 @@ const es: TranslationMap = {
   'exchange.enterAmount': 'Ingresar monto',
   'exchange.success': '¡Cambio completado!',
   'exchange.insufficientBalance': 'Saldo insuficiente',
+  'exchange.ratesUpdatedAt': 'Tasas actualizadas',
+  'exchange.ratesStale': 'Las tasas pueden estar desactualizadas — verifique antes de grandes cambios',
 
   // Employer dashboard
   'employer.registerTitle': 'REGISTRARSE COMO EMPLEADOR',
@@ -3371,6 +3377,8 @@ const pt: TranslationMap = {
   'exchange.enterAmount': 'Inserir valor',
   'exchange.success': 'Câmbio concluído!',
   'exchange.insufficientBalance': 'Saldo insuficiente',
+  'exchange.ratesUpdatedAt': 'Taxas atualizadas',
+  'exchange.ratesStale': 'Taxas podem estar desatualizadas — verifique antes de grandes trocas',
 
   // Employer dashboard
   'employer.registerTitle': 'REGISTRAR COMO EMPREGADOR',
@@ -4363,6 +4371,8 @@ const ar: TranslationMap = {
   'exchange.enterAmount': 'أدخل المبلغ',
   'exchange.success': 'تم التحويل!',
   'exchange.insufficientBalance': 'رصيد غير كافٍ',
+  'exchange.ratesUpdatedAt': 'تم تحديث الأسعار',
+  'exchange.ratesStale': 'قد تكون الأسعار قديمة — تحقق قبل التحويلات الكبيرة',
 
   // Employer dashboard
   'employer.registerTitle': 'التسجيل كصاحب عمل',
@@ -5356,6 +5366,8 @@ const zh: TranslationMap = {
   'exchange.enterAmount': '输入金额',
   'exchange.success': '兑换成功！',
   'exchange.insufficientBalance': '余额不足',
+  'exchange.ratesUpdatedAt': '汇率更新时间',
+  'exchange.ratesStale': '汇率可能已过期 — 大额兑换前请核实',
 
   // Employer dashboard
   'employer.registerTitle': '注册为雇主',
@@ -6349,6 +6361,8 @@ const ja: TranslationMap = {
   'exchange.enterAmount': '金額を入力',
   'exchange.success': '両替完了！',
   'exchange.insufficientBalance': '残高不足',
+  'exchange.ratesUpdatedAt': 'レート更新日時',
+  'exchange.ratesStale': 'レートが古い可能性あり — 大口取引前にご確認ください',
 
   // Employer dashboard
   'employer.registerTitle': '雇用主として登録',

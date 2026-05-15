@@ -1965,6 +1965,12 @@ async function fetchLiveRates() {
     const merged = { ...db.rates.values, ...liveRates };
     // Force USD = 1 as the base
     merged.USD = 1;
+    // Re-derive CFA franc currencies from live EUR rate (fixed peg: 1 EUR = 655.957 XAF/XOF)
+    // open.er-api.com free plan may not include these; this ensures they are always current.
+    if (merged.EUR) {
+      merged.XAF = merged.EUR * 655.957;
+      merged.XOF = merged.EUR * 655.957;
+    }
     db.rates = { base: 'USD', values: merged, updatedAt: Date.now(), source: 'open.er-api.com' };
     saveDB(db);
     logger.info(`[FX] Live rates refreshed — ${Object.keys(liveRates).length} currencies`);
@@ -1973,9 +1979,12 @@ async function fetchLiveRates() {
   }
 }
 
-// Refresh on startup (async, non-blocking) and every 6 hours
+// Refresh on startup (async, non-blocking) and every hour (open.er-api.com updates hourly)
 fetchLiveRates();
-setInterval(fetchLiveRates, 6 * 60 * 60 * 1000);
+setInterval(fetchLiveRates, 60 * 60 * 1000);
+
+// Rates older than 25 hours are treated as stale — flagged in quote/exchange responses
+const FX_STALE_THRESHOLD_MS = 25 * 60 * 60 * 1000;
 
 // ==================== EXPRESS APP INITIALIZATION ====================
 
@@ -3285,6 +3294,7 @@ app.get('/fx-quote', authMiddleware, (req, res) => {
       fxFeeAmount: 0, receivedAmountMinorAfterFee: sentAmountMinor,
       rate: 1, rateDisplay: `1 ${from} = 1 ${to}`,
       isSameCurrency: true, fxFeeRate: 0, ratesUpdatedAt: db.rates.updatedAt,
+      ratesStale: (Date.now() - (db.rates.updatedAt || 0)) > FX_STALE_THRESHOLD_MS,
     });
   }
 
@@ -3314,6 +3324,7 @@ app.get('/fx-quote', authMiddleware, (req, res) => {
     fxFeeRate: FEES.FX_RATE,
     rate, rateDisplay: `1 ${from} = ${rate.toFixed(6)} ${to}`,
     isSameCurrency: false, ratesUpdatedAt: db.rates.updatedAt,
+    ratesStale: (Date.now() - (db.rates.updatedAt || 0)) > FX_STALE_THRESHOLD_MS,
   });
 });
 
@@ -3387,6 +3398,15 @@ app.post('/exchange', authMiddleware, (req, res) => {
   const toRate   = rates[toCurrency];
   if (!fromRate) return res.status(400).json({ error: `Unsupported currency: ${fromCurrency}` });
   if (!toRate)   return res.status(400).json({ error: `Unsupported currency: ${toCurrency}` });
+
+  const ratesAgeMs = Date.now() - (db.rates.updatedAt || 0);
+  const ratesStale = ratesAgeMs > FX_STALE_THRESHOLD_MS;
+  if (ratesStale) {
+    logger.warn('[/exchange] Using stale FX rates', {
+      ageHours: (ratesAgeMs / 3600000).toFixed(1),
+      updatedAt: db.rates.updatedAt,
+    });
+  }
 
   const amountMajorFrom = minorToMajor(amount, fromCurrency);
   const amountUSD       = amountMajorFrom / fromRate;
@@ -3494,6 +3514,8 @@ app.post('/exchange', authMiddleware, (req, res) => {
       remainingMonthlyUSD: limitCheck.remainingMonthlyUSD,
       tierLevel:           limitCheck.tierLevel,
     },
+    ratesUpdatedAt: db.rates.updatedAt,
+    ratesStale,
   };
 
   if (clientKey) {
@@ -3501,6 +3523,21 @@ app.post('/exchange', authMiddleware, (req, res) => {
   }
 
   res.json(responseBody);
+});
+
+// GET /fx-rates/status — rate freshness info (safe: no balances or user data)
+app.get('/fx-rates/status', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const updatedAt = db.rates.updatedAt || 0;
+  const ageMs = Date.now() - updatedAt;
+  res.json({
+    updatedAt,
+    source:        db.rates.source || 'seeded',
+    ageSeconds:    Math.floor(ageMs / 1000),
+    ageMinutes:    Math.floor(ageMs / 60000),
+    currencyCount: Object.keys(db.rates.values || {}).length,
+    isStale:       ageMs > FX_STALE_THRESHOLD_MS,
+  });
 });
 
 // ==================== DEPOSIT / TOP-UP ENDPOINTS ====================

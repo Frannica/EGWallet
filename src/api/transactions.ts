@@ -33,6 +33,9 @@ export interface FxQuote {
   fxFeeAmount?: number;
   receivedAmountMinorAfterFee?: number;
   fxFeeRate?: number;
+  // Rate freshness (populated by backend FX system)
+  ratesUpdatedAt?: number;
+  ratesStale?: boolean;
 }
 
 /** Get a real-time FX quote for a cross-currency transfer preview. */

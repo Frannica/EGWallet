@@ -19,6 +19,7 @@ const SUITES = [
   ['Phase 13 — Critical withdrawal safety',              require('./regression/phase13.test')],
   ['Phase 14 — Balance sync, dedup & dispute security',  require('./regression/phase14.test')],
   ['Phase 15 — In-wallet currency exchange (backend)',   require('./regression/phase15.test')],
+  ['Phase 16 — Live FX rate architecture',               require('./regression/phase16.test')],
 ];
 
 // ── Runner ────────────────────────────────────────────────────────────────────

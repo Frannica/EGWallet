@@ -29,6 +29,15 @@ const POPULAR_CURRENCIES = [
   'BRL', 'EGP', 'RWF', 'TND',
 ];
 
+function rateAgeText(ts: number): string {
+  const mins = Math.floor((Date.now() - ts) / 60000);
+  if (mins < 2) return '< 1 min ago';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
 type Balance = { currency: string; amount: number };
 
 export default function ExchangeScreen({ route, navigation }: any) {
@@ -217,6 +226,17 @@ export default function ExchangeScreen({ route, navigation }: any) {
             value={`${formatMinorAmount(netReceive, toCurrency)} ${toCurrency}`}
             bold
           />
+          {quote.ratesUpdatedAt ? (
+            <Text style={styles.rateAge}>
+              {t('exchange.ratesUpdatedAt')}: {rateAgeText(quote.ratesUpdatedAt)}
+            </Text>
+          ) : null}
+          {quote.ratesStale ? (
+            <View style={styles.staleWarning}>
+              <Ionicons name="warning-outline" size={13} color="#F57C00" />
+              <Text style={styles.staleWarningText}>{t('exchange.ratesStale')}</Text>
+            </View>
+          ) : null}
         </View>
       )}
 
@@ -441,6 +461,28 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#E3EAF2',
     marginVertical: 6,
+  },
+  rateAge: {
+    fontSize: 11,
+    color: '#9BAEC8',
+    marginTop: 8,
+    textAlign: 'right',
+  },
+  staleWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    backgroundColor: '#FFF3E0',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    gap: 4,
+  },
+  staleWarningText: {
+    fontSize: 12,
+    color: '#F57C00',
+    fontWeight: '500',
+    flex: 1,
   },
   btn: {
     marginTop: 24,
