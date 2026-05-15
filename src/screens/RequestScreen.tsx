@@ -1,15 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity,
   Alert, ActivityIndicator, Share, Modal, FlatList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../auth/AuthContext';
 import { useLanguage } from '../i18n/LanguageContext';
 import { listWallets } from '../api/auth';
-import { API_BASE } from '../api/client';
-import { getCurrencySymbol, majorToMinor } from '../utils/currency';
+import { API_BASE, getApiLanguage } from '../api/client';
+import { getCurrencySymbol, majorToMinor, formatMajorAmount, formatCurrency, decimalsFor } from '../utils/currency';
 import { logLocalTransaction } from '../utils/localBalance';
+import { sendTransaction } from '../api/transactions';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import QRCode from 'react-native-qrcode-svg';
 import { useToast } from '../utils/toast';
@@ -34,7 +36,18 @@ interface Employee {
   id: string;
   firstName: string;
   lastName: string;
-  email: string;
+  walletHandle: string;
+}
+
+interface IncomingRequest {
+  id: string;
+  requesterId: string;
+  requesterName: string;
+  amount: number;
+  currency: string;
+  memo: string;
+  status: string;
+  createdAt: number;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -46,10 +59,11 @@ const ALL_CURRENCIES = [
 ];
 
 const QR_PURPOSES = [
-  { label: '🛒 Grocery', memo: 'Grocery Payment' },
-  { label: '🍺 Bar / Restaurant', memo: 'Bar / Restaurant' },
-  { label: '🏪 Open Market', memo: 'Market Payment' },
-  { label: '📦 Other', memo: '' },
+  { label: '🛒 Grocery', memoKey: 'request.qr.groceryMemo' },
+  { label: '🍺 Bar / Restaurant', memoKey: 'request.qr.barMemo' },
+  { label: '🏪 Open Market', memoKey: 'request.qr.marketMemo' },
+  { label: '👗 Clothing', memoKey: 'request.qr.clothingMemo' },
+  { label: '📦 Other', memoKey: '' },
 ];
 
 const DEMO_WALLET_ID = 'egwallet-demo-001'; // fallback only
@@ -61,11 +75,43 @@ export default function RequestScreen() {
   const { t } = useLanguage();
   const { isOnline } = useNetworkStatus();
   const toast = useToast();
+  const navigation = useNavigation();
 
   const [activeTab, setActiveTab] = useState<'contact' | 'employer' | 'qr'>('contact');
 
   // Single currency modal driven by which field opened it
   const [currencyModalFor, setCurrencyModalFor] = useState<'contact' | 'employer' | 'qr' | null>(null);
+
+  // ── Incoming requests (from others) ───────────────────────────────────────
+  const [incomingRequests, setIncomingRequests] = useState<IncomingRequest[]>([]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!auth.token) return;
+      // Load incoming requests (others requesting money from me)
+      fetch(`${API_BASE}/payment-requests/incoming`, {
+        headers: { Authorization: `Bearer ${auth.token}`, 'Accept-Language': getApiLanguage() },
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d?.requests) setIncomingRequests(d.requests); })
+        .catch(() => {});
+      // Sync status of my sent requests so cards show PAID/CANCELLED when recipient pays
+      fetch(`${API_BASE}/payment-requests`, {
+        headers: { Authorization: `Bearer ${auth.token}`, 'Accept-Language': getApiLanguage() },
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+          if (!d?.requests) return;
+          setRequests(prev => prev.map(local => {
+            if (!local.backendId) return local;
+            const server = d.requests.find((r: any) => r.id === local.backendId);
+            if (!server || server.status === local.status) return local;
+            return { ...local, status: server.status };
+          }));
+        })
+        .catch(() => {});
+    }, [auth.token])
+  );
 
   // ── Local request history ──────────────────────────────────────────────────
   const [requests, setRequests] = useState<LocalRequest[]>([]);
@@ -91,7 +137,7 @@ export default function RequestScreen() {
   const [showAddEmployee, setShowAddEmployee] = useState(false);
   const [empFirstName, setEmpFirstName] = useState('');
   const [empLastName, setEmpLastName] = useState('');
-  const [empEmail, setEmpEmail] = useState('');
+  const [empWalletHandle, setEmpWalletHandle] = useState('');
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [payrollAmount, setPayrollAmount] = useState('');
   const [payrollCurrency, setPayrollCurrency] = useState('USD');
@@ -185,12 +231,14 @@ export default function RequestScreen() {
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${auth.token}`,
+            'Accept-Language': getApiLanguage(),
           },
           body: JSON.stringify({
             walletId: realWalletId,
             amount: majorToMinor(amountNum, contactCurrency),
             currency: contactCurrency,
             memo: req.note || `Request from ${req.firstName} ${req.lastName}`,
+            recipientHandle: contactInfo.trim() || undefined,
           }),
         });
         const data = await res.json();
@@ -203,7 +251,7 @@ export default function RequestScreen() {
     }
 
     setRequests(prev => [req, ...prev]);
-    logLocalTransaction({
+    await logLocalTransaction({
       type: 'payment_request',
       direction: 'out',
       amount: majorToMinor(amountNum, contactCurrency),
@@ -220,7 +268,9 @@ export default function RequestScreen() {
     toast.show(t('request.requestSentToast'));
     Alert.alert(
       t('request.sentTitle'),
-      `Your request to ${req.firstName} ${req.lastName} for ${getCurrencySymbol(req.currency)}${amountNum.toFixed(2)} ${req.currency} has been sent successfully.`
+      t('request.requestSentSuccessBody')
+        .replace('{name}', `${req.firstName} ${req.lastName}`)
+        .replace('{amount}', `${getCurrencySymbol(req.currency)}${formatMajorAmount(amountNum, req.currency)} ${req.currency}`)
     );
   };
 
@@ -229,19 +279,19 @@ export default function RequestScreen() {
   const handleAddEmployee = () => {
     if (!empFirstName.trim()) return Alert.alert(t('send.missingInfo'), t('request.missingFirstName'));
     if (!empLastName.trim()) return Alert.alert(t('send.missingInfo'), t('request.missingLastName'));
-    if (!empEmail.trim() || !empEmail.includes('@')) {
-      return Alert.alert(t('common.error'), t('request.invalidEmail'));
+    if (!empWalletHandle.trim()) {
+      return Alert.alert(t('common.error'), t('request.invalidWalletHandle') || 'Please enter a valid wallet ID or @username.');
     }
     const emp: Employee = {
       id: uid(),
       firstName: empFirstName.trim(),
       lastName: empLastName.trim(),
-      email: empEmail.trim().toLowerCase(),
+      walletHandle: empWalletHandle.trim(),
     };
     setEmployees(prev => [...prev, emp]);
     setEmpFirstName('');
     setEmpLastName('');
-    setEmpEmail('');
+    setEmpWalletHandle('');
     setShowAddEmployee(false);
     Alert.alert(t('request.employeeAddedTitle'), `${emp.firstName} ${emp.lastName} ${t('request.employeeAddedMsg')}`);
   };
@@ -261,42 +311,57 @@ export default function RequestScreen() {
 
     Alert.alert(
       t('request.confirmPayrollTitle'),
-      `Request ${getCurrencySymbol(payrollCurrency)}${amountNum.toFixed(2)} ${payrollCurrency} from ${selectedEmployee.firstName} ${selectedEmployee.lastName}?`,
+      `Pay ${getCurrencySymbol(payrollCurrency)}${formatMajorAmount(amountNum, payrollCurrency)} ${payrollCurrency} to ${selectedEmployee.firstName} ${selectedEmployee.lastName}?`,
       [
         { text: t('common.cancel'), style: 'cancel' },
         {
           text: t('request.sendRequestBtn'),
-          onPress: () => {
+          onPress: async () => {
+            if (!auth.token || realWalletId === DEMO_WALLET_ID) {
+              Alert.alert(t('common.error'), t('request.loginRequiredForPayroll'));
+              return;
+            }
             setIsSendingPayroll(true);
-            setTimeout(() => {
+            try {
+              await sendTransaction(
+                auth.token,
+                realWalletId,
+                selectedEmployee.walletHandle,
+                majorToMinor(amountNum, payrollCurrency),
+                payrollCurrency,
+                payrollNote.trim() || `Payroll payment to ${selectedEmployee.firstName} ${selectedEmployee.lastName}`,
+              );
               const req: LocalRequest = {
                 id: uid(),
                 type: 'employer',
                 firstName: selectedEmployee.firstName,
                 lastName: selectedEmployee.lastName,
-                contactInfo: selectedEmployee.email,
+                contactInfo: selectedEmployee.walletHandle,
                 amount: amountNum,
                 currency: payrollCurrency,
-                note: payrollNote.trim() || 'Payroll request',
-                status: 'pending',
+                note: payrollNote.trim() || 'Payroll payment',
+                status: 'paid',
                 createdAt: Date.now(),
               };
               setRequests(prev => [req, ...prev]);
-              logLocalTransaction({
+              await logLocalTransaction({
                 type: 'payment_request',
                 direction: 'out',
                 amount: majorToMinor(amountNum, payrollCurrency),
                 currency: payrollCurrency,
-                memo: `Payroll request to ${req.firstName} ${req.lastName}`,
+                memo: `Payroll to ${req.firstName} ${req.lastName}`,
               });
               setPayrollAmount('');
               setPayrollNote('');
               setSelectedEmployee(null);
-              setIsSendingPayroll(false);
-              if (__DEV__) console.log('[Request] Employer request created:', req.id);
+              if (__DEV__) console.log('[Request] Payroll sent:', req.id);
               toast.show(t('request.requestSentToast'));
-              Alert.alert(t('request.sentTitle'), `${t('request.payrollSentMsg')} ${req.firstName} ${req.lastName}.`);
-            }, 600);
+              Alert.alert(t('request.sentTitle'), `${t('request.payrollSentMsg')} ${selectedEmployee.firstName} ${selectedEmployee.lastName}.`);
+            } catch (err: any) {
+              Alert.alert(t('common.error'), err?.message || t('request.payrollFailed'));
+            } finally {
+              setIsSendingPayroll(false);
+            }
           },
         },
       ]
@@ -319,7 +384,7 @@ export default function RequestScreen() {
   const handleShare = async (req: LocalRequest) => {
     const id = req.backendId || req.id;
     const link = `egwallet://pay/${id}`;
-    const msg = `Hi ${req.firstName}, I'm requesting ${getCurrencySymbol(req.currency)}${req.amount.toFixed(2)} ${req.currency}${req.note ? ` for "${req.note}"` : ''}.\n\nPay via EGWallet: ${link}`;
+    const msg = `Hi ${req.firstName}, I'm requesting ${getCurrencySymbol(req.currency)}${formatMajorAmount(req.amount, req.currency)} ${req.currency}${req.note ? ` for "${req.note}"` : ''}.\n\nPay via EGWallet: ${link}`;
     try { await Share.share({ message: msg }); } catch (_) {}
   };
 
@@ -381,6 +446,41 @@ export default function RequestScreen() {
         ))}
       </View>
 
+      {/* ══════════════════════ INCOMING REQUESTS (always visible) ══════════════════════ */}
+      {incomingRequests.length > 0 && (
+        <>
+          <Text style={styles.historyTitle}>{t('request.incomingRequests') || 'Incoming Requests'}</Text>
+          {incomingRequests.map(req => (
+            <View key={req.id} style={[styles.requestCard, { borderLeftColor: '#7C3AED', borderLeftWidth: 3 }]}>
+              <View style={styles.requestHeader}>
+                <View style={[styles.statusBadge, req.status === 'paid' && styles.statusPaid]}>
+                  <Text style={[styles.statusText, req.status === 'paid' && { color: '#2E7D32' }]}>
+                    {req.status.toUpperCase()}
+                  </Text>
+                </View>
+                <Text style={styles.dateText}>{formatDate(req.createdAt)}</Text>
+              </View>
+              <Text style={styles.requestName}>{req.requesterName}</Text>
+              <Text style={styles.amountText}>
+                {formatCurrency(req.amount, req.currency)}
+              </Text>
+              {req.memo ? <Text style={styles.memoText}>{req.memo}</Text> : null}
+              {req.status === 'pending' && (
+                <View style={styles.actions}>
+                  <TouchableOpacity
+                    style={styles.shareButton}
+                    onPress={() => (navigation as any).navigate('PayRequest', { requestId: req.id })}
+                  >
+                    <Ionicons name="cash-outline" size={18} color="#7C3AED" />
+                    <Text style={[styles.shareButtonText, { color: '#7C3AED' }]}>{t('request.payNow') || 'Pay Now'}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          ))}
+        </>
+      )}
+
       {/* ══════════════════════ CONTACT TAB ══════════════════════ */}
       {activeTab === 'contact' && (
         <>
@@ -412,14 +512,14 @@ export default function RequestScreen() {
               </View>
             </View>
 
-            <Text style={styles.label}>{t('request.emailOrPhone')}</Text>
+            <Text style={styles.label}>{t('request.walletIdOrUsername')}</Text>
             <TextInput
               style={styles.input}
               value={contactInfo}
               onChangeText={setContactInfo}
-              placeholder="jane@example.com or +1 555 000 0000"
+              placeholder={t('request.walletIdOrUsernamePlaceholder')}
               placeholderTextColor="#999"
-              keyboardType="email-address"
+              keyboardType="default"
               autoCapitalize="none"
             />
 
@@ -501,7 +601,7 @@ export default function RequestScreen() {
                   <Text style={styles.requestName}>{req.firstName} {req.lastName}</Text>
                   <Text style={styles.requestContact}>{req.contactInfo}</Text>
                   <Text style={styles.amountText}>
-                    {getCurrencySymbol(req.currency)}{req.amount.toFixed(2)} {req.currency}
+                    {getCurrencySymbol(req.currency)}{formatMajorAmount(req.amount, req.currency)} {req.currency}
                   </Text>
                   {req.note ? <Text style={styles.memoText}>{req.note}</Text> : null}
                   {req.status === 'pending' && (
@@ -520,6 +620,7 @@ export default function RequestScreen() {
               ))}
             </>
           )}
+
         </>
       )}
 
@@ -561,14 +662,14 @@ export default function RequestScreen() {
                 placeholderTextColor="#999"
                 autoCapitalize="words"
               />
-              <Text style={styles.label}>{t('request.email')}</Text>
+              <Text style={styles.label}>{t('request.walletIdOrUsername')}</Text>
               <TextInput
                 style={styles.input}
-                value={empEmail}
-                onChangeText={setEmpEmail}
-                placeholder="john@company.com"
+                value={empWalletHandle}
+                onChangeText={setEmpWalletHandle}
+                placeholder={t('request.walletIdOrUsernamePlaceholder')}
                 placeholderTextColor="#999"
-                keyboardType="email-address"
+                keyboardType="default"
                 autoCapitalize="none"
               />
 
@@ -608,7 +709,7 @@ export default function RequestScreen() {
               </View>
               <View style={{ flex: 1, marginLeft: 12 }}>
                 <Text style={styles.employerName}>{emp.firstName} {emp.lastName}</Text>
-                <Text style={styles.employeeEmail}>{emp.email}</Text>
+                <Text style={styles.employeeEmail}>{emp.walletHandle}</Text>
               </View>
               {selectedEmployee?.id === emp.id
                 ? <Ionicons name="checkmark-circle" size={22} color="#007AFF" />
@@ -667,8 +768,8 @@ export default function RequestScreen() {
                   ? <ActivityIndicator color="#FFFFFF" />
                   : (
                     <>
-                      <Ionicons name="send" size={18} color="#FFFFFF" />
-                      <Text style={styles.createButtonText}>{t('request.sendRequest')}</Text>
+                      <Ionicons name="cash-outline" size={18} color="#FFFFFF" />
+                      <Text style={styles.createButtonText}>{t('request.payEmployee') || 'Pay Employee'}</Text>
                     </>
                   )
                 }
@@ -701,7 +802,7 @@ export default function RequestScreen() {
                   <Text style={styles.requestName}>{req.firstName} {req.lastName}</Text>
                   <Text style={styles.requestContact}>{req.contactInfo}</Text>
                   <Text style={styles.amountText}>
-                    {getCurrencySymbol(req.currency)}{req.amount.toFixed(2)} {req.currency}
+                    {getCurrencySymbol(req.currency)}{formatMajorAmount(req.amount, req.currency)} {req.currency}
                   </Text>
                   {req.note ? <Text style={styles.memoText}>{req.note}</Text> : null}
                   {req.status === 'pending' && (
@@ -757,15 +858,15 @@ export default function RequestScreen() {
           {/* Purpose presets */}
           <Text style={styles.label}>{t('request.purpose')}</Text>
           <View style={styles.purposeRow}>
-            {QR_PURPOSES.map(p => (
+            {QR_PURPOSES.map((p, idx) => (
               <TouchableOpacity
                 key={p.label}
                 style={[styles.purposeChip, qrPurpose === p.label && styles.purposeChipActive]}
-                onPress={() => { setQrPurpose(p.label); setQrMemo(p.memo); }}
+                onPress={() => { setQrPurpose(p.label); setQrMemo(p.memoKey ? t(p.memoKey as any) : ''); }}
                 activeOpacity={0.8}
               >
                 <Text style={[styles.purposeChipText, qrPurpose === p.label && styles.purposeChipTextActive]}>
-                  {p.label}
+                  {t((['request.qr.grocery', 'request.qr.barRestaurant', 'request.qr.openMarket', 'request.qr.clothing', 'request.qr.other'] as const)[idx] as any)}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -779,7 +880,7 @@ export default function RequestScreen() {
                 value={qrAmount}
                 onChangeText={v => setQrAmount(formatAmountInput(v))}
                 keyboardType="decimal-pad"
-                placeholder="0.00"
+                placeholder={decimalsFor(qrCurrency) === 0 ? '0' : decimalsFor(qrCurrency) === 3 ? '0.000' : '0.00'}
                 placeholderTextColor="#999"
               />
             </View>
@@ -796,12 +897,12 @@ export default function RequestScreen() {
             </View>
           </View>
 
-          <Text style={styles.label}>Note (Optional)</Text>
+          <Text style={styles.label}>{t('request.noteOptionalLabel')}</Text>
           <TextInput
             style={styles.input}
             value={qrMemo}
             onChangeText={setQrMemo}
-            placeholder="What's this for?"
+            placeholder={t('request.notePlaceholder')}
             placeholderTextColor="#999"
           />
 
@@ -820,6 +921,10 @@ export default function RequestScreen() {
                 <Ionicons name="checkmark-circle" size={22} color="#2E7D32" />
                 <Text style={[styles.qrCardTitle, { color: '#2E7D32' }]}>{t('request.qrReady')}</Text>
               </View>
+              <Text style={{ textAlign: 'center', fontSize: 22, fontWeight: '700', color: '#0A3D7C', marginBottom: 8 }}>
+                {formatCurrency(majorToMinor(parseFloat(qrAmount.replace(/,/g, '')), qrCurrency), qrCurrency)}
+              </Text>
+              {qrMemo ? <Text style={{ textAlign: 'center', fontSize: 13, color: '#657786', marginBottom: 8 }}>{qrMemo}</Text> : null}
               <View style={styles.qrCenter}>
                 <QRCode value={dynamicQR.value} size={200} backgroundColor="white" />
               </View>
