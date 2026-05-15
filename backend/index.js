@@ -17,6 +17,7 @@ const { parse } = require('csv-parse/sync');
 const { createWithdrawal, advanceToProcessing } = require('./withdrawalEngine');
 const { router: adminWithdrawalsRouter, adminLoginHandler } = require('./adminWithdrawals');
 const { executePayout } = require('./payoutProviders');
+const nodemailer = require('nodemailer');
 
 // Stripe — only initialise when secret key is present
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || null;
@@ -577,7 +578,7 @@ function getUserContext(userId, db) {
     email: maskEmail(user?.email),
     username: user?.username || (user?.email ? user.email.split('@')[0] : 'User'),
     walletId: wallet?.id ? wallet.id.slice(-8).toUpperCase() : 'N/A',
-    balance: primaryBal ? (primaryBal.amount / 100).toFixed(2) : '0.00',
+    balance: primaryBal ? minorToMajor(primaryBal.amount, primaryBal.currency).toFixed(decimalsFor(primaryBal.currency)) : '0.00',
     currency: primaryBal?.currency || 'USD',
     kycTier,
     dailyLimit,
@@ -1783,17 +1784,17 @@ const currencyDecimals = {
   MYR: 2, IDR: 0, PHP: 2, VND: 0, INR: 2, PKR: 2, BDT: 2,
   LKR: 2, NPR: 2, MMK: 2, KHR: 2, MNT: 2,
   // Europe
-  SEK: 2, NOK: 2, DKK: 2, PLN: 2, CZK: 2, HUF: 0, RON: 2,
+  SEK: 2, NOK: 2, DKK: 2, ISK: 0, PLN: 2, CZK: 2, HUF: 0, RON: 2,
   BGN: 2, HRK: 2, RSD: 2, UAH: 2, RUB: 2, TRY: 2, GEL: 2,
   // Middle East
-  SAR: 2, AED: 2, QAR: 2, KWD: 3, BHD: 3, OMR: 3, ILS: 2, JOD: 3,
+  SAR: 2, AED: 2, QAR: 2, KWD: 3, BHD: 3, OMR: 3, ILS: 2, JOD: 3, IQD: 3,
   // Africa
   NGN: 2, GHS: 2, ZAR: 2, KES: 2, TZS: 2, UGX: 0, RWF: 0,
   ETB: 2, EGP: 2, TND: 3, MAD: 2, LYD: 3, DZD: 2, ERN: 2,
   AOA: 2, SOS: 2, SDG: 2, GMD: 2, MUR: 2, SCR: 2,
   BWP: 2, ZWL: 2, MZN: 2, NAD: 2, LSL: 2, SZL: 2,
   ZMW: 2, MWK: 2, GNF: 0, MGA: 0, DJF: 0, BIF: 0, KMF: 0,
-  XAF: 2, XOF: 0, CVE: 2, STN: 2,
+  XAF: 0, XOF: 0, CVE: 2, STN: 2,
   // Americas
   BRL: 2, MXN: 2, ARS: 2, CLP: 0, COP: 2, PEN: 2, UYU: 2,
   BOB: 2, PYG: 0, GTQ: 2, HNL: 2, NIO: 2, CRC: 2, JMD: 2,
@@ -1848,7 +1849,8 @@ const COUNTRY_TO_CURRENCY = {
 };
 
 function decimalsFor(currency) {
-  return currencyDecimals[currency] || 2;
+  const d = currencyDecimals[currency];
+  return d !== undefined ? d : 2;
 }
 
 function minorToMajor(amountMinor, currency) {
@@ -1859,6 +1861,15 @@ function minorToMajor(amountMinor, currency) {
 function majorToMinor(amountMajor, currency) {
   const d = decimalsFor(currency);
   return Math.round(amountMajor * Math.pow(10, d));
+}
+
+// Safety guard: ensure FX-converted amounts are finite and non-negative.
+// Returns {safe: true} or {safe: false, reason: string}.
+function fxSafetyCheck(receivedMinor, toCurrency) {
+  if (!Number.isFinite(receivedMinor) || receivedMinor < 0) {
+    return { safe: false, reason: `FX result for ${toCurrency} is not a finite non-negative number: ${receivedMinor}` };
+  }
+  return { safe: true };
 }
 
 function loadDB() {
@@ -1881,6 +1892,7 @@ function loadDB() {
     if (!db.payrollBatches) db.payrollBatches = [];
     if (!db.demoIntents) db.demoIntents = [];
     if (!db.notifications) db.notifications = [];
+    if (!db.passwordResetTokens) db.passwordResetTokens = [];
     return db;
   } catch (e) {
     const initial = {
@@ -1969,6 +1981,9 @@ setInterval(fetchLiveRates, 6 * 60 * 60 * 1000);
 
 const app = express();
 
+// Trust Railway's reverse proxy so express-rate-limit gets the real client IP
+app.set('trust proxy', 1);
+
 // Health check MUST be first — before any middleware (CORS, Helmet, rate-limit)
 // so Railway's healthcheck always gets 200 and never gets blocked
 app.get('/healthz', (req, res) => res.status(200).send('OK'));
@@ -2005,7 +2020,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '100kb' }));
 
 // Expose shared utilities to routers (adminWithdrawals.js uses these)
 app.locals.loadDB = loadDB;
@@ -2489,6 +2504,18 @@ app.post('/auth/refresh', (req, res) => {
   }
 });
 
+// Forgot-password rate limiter (stricter: 3 per 15 min per IP)
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 3,
+  skipSuccessfulRequests: false,
+  handler: (req, res) => {
+    logger.warn('Forgot-password rate limit exceeded', { ip: req.clientIP });
+    // Still return a generic success to avoid leaking info
+    res.json({ success: true });
+  }
+});
+
 // Logout endpoint (revoke refresh token)
 app.post('/auth/logout', authMiddleware, (req, res) => {
   const db = loadDB();
@@ -2499,6 +2526,202 @@ app.post('/auth/logout', authMiddleware, (req, res) => {
   saveDB(db);
   
   res.json({ success: true });
+});
+
+// ─── Forgot Password ──────────────────────────────────────────────────────────
+app.post('/auth/forgot-password', forgotPasswordLimiter, async (req, res) => {
+  try {
+    const { email } = req.body;
+    // Always return success – never reveal whether an email is registered
+    if (!email || typeof email !== 'string') return res.json({ success: true });
+
+    const db = loadDB();
+    const user = db.users.find(u => u.email && u.email.toLowerCase() === email.trim().toLowerCase());
+
+    if (user) {
+      // Clean up any old tokens for this user
+      if (!db.passwordResetTokens) db.passwordResetTokens = [];
+      db.passwordResetTokens = db.passwordResetTokens.filter(tok => tok.userId !== user.id);
+
+      // Generate a secure random token
+      const rawToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+      const expiresAt = Date.now() + 20 * 60 * 1000; // 20 minutes
+
+      db.passwordResetTokens.push({ tokenHash, userId: user.id, expiresAt, createdAt: Date.now() });
+      saveDB(db);
+
+      // Build reset link
+      const frontendUrl = process.env.APP_FRONTEND_URL || 'egwallet://reset-password';
+      const resetLink = `${frontendUrl}?token=${rawToken}`;
+
+      // ── Email delivery ────────────────────────────────────────────────────
+      // Supports SendGrid, Mailgun, or any SMTP provider via env vars.
+      //
+      //  Provider   | SMTP_HOST                        | SMTP_PORT | SMTP_SECURE
+      //  -----------|----------------------------------|-----------|------------
+      //  SendGrid   | smtp.sendgrid.net                | 587       | false
+      //  Mailgun    | smtp.mailgun.org                 | 587       | false
+      //  Gmail      | smtp.gmail.com                   | 465       | true
+      //  Custom     | your-smtp-host                   | 587/465   | true/false
+      //
+      // Set on Railway:
+      //   SMTP_HOST        smtp.sendgrid.net
+      //   SMTP_PORT        587
+      //   SMTP_USER        apikey               (SendGrid literal string "apikey")
+      //   SMTP_PASS        SG.xxxxxxxxxxxx      (your SendGrid API key)
+      //   SMTP_FROM        EGWallet <no-reply@yourdomain.com>
+      //   SMTP_SECURE      false
+      //   APP_FRONTEND_URL egwallet://reset-password
+      // ─────────────────────────────────────────────────────────────────────
+      const smtpHost = process.env.SMTP_HOST;
+      if (smtpHost) {
+        try {
+          const smtpPort = parseInt(process.env.SMTP_PORT || '587');
+          const smtpSecure = process.env.SMTP_SECURE === 'true'; // true only for port 465
+          const transporter = nodemailer.createTransport({
+            host: smtpHost,
+            port: smtpPort,
+            secure: smtpSecure,
+            auth: {
+              user: process.env.SMTP_USER,
+              pass: process.env.SMTP_PASS,
+            },
+            // Enforce TLS upgrade on STARTTLS connections (port 587)
+            requireTLS: !smtpSecure,
+            tls: { rejectUnauthorized: true },
+          });
+
+          const fromAddress = process.env.SMTP_FROM || 'EGWallet <no-reply@egwallet.app>';
+
+          // Mobile-optimised HTML email (table-based, widely compatible)
+          const htmlEmail = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reset your EGWallet password</title></head>
+<body style="margin:0;padding:0;background:#F5F7FA;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F5F7FA;padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" style="max-width:480px;background:#FFFFFF;border-radius:16px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,0.08);" cellpadding="0" cellspacing="0">
+        <!-- Header -->
+        <tr><td style="background:#1565C0;padding:28px 32px;text-align:center;">
+          <p style="margin:0;font-size:28px;">💳</p>
+          <h1 style="margin:8px 0 0;color:#FFFFFF;font-size:22px;font-weight:700;letter-spacing:-0.3px;">EGWallet</h1>
+        </td></tr>
+        <!-- Body -->
+        <tr><td style="padding:32px;">
+          <h2 style="margin:0 0 12px;font-size:20px;color:#14171A;">Reset your password</h2>
+          <p style="margin:0 0 24px;font-size:15px;color:#657786;line-height:1.6;">
+            We received a request to reset the password for your EGWallet account.<br>
+            Tap the button below — this link is valid for <strong>20 minutes</strong>.
+          </p>
+          <!-- CTA button -->
+          <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;">
+            <tr><td align="center">
+              <a href="${resetLink}" target="_blank"
+                style="display:inline-block;background:#1565C0;color:#FFFFFF;text-decoration:none;font-size:16px;font-weight:700;padding:14px 36px;border-radius:10px;letter-spacing:0.2px;">
+                Reset Password
+              </a>
+            </td></tr>
+          </table>
+          <!-- Manual link fallback -->
+          <p style="margin:0 0 8px;font-size:13px;color:#657786;">Or copy this link into your browser / app:</p>
+          <p style="margin:0 0 24px;font-size:12px;color:#1565C0;word-break:break-all;">${resetLink}</p>
+          <hr style="border:none;border-top:1px solid #E1E8ED;margin:0 0 24px;">
+          <p style="margin:0;font-size:13px;color:#AAB8C2;line-height:1.6;">
+            If you didn't request a password reset, you can safely ignore this email — your password will not change.<br><br>
+            — The EGWallet Team
+          </p>
+        </td></tr>
+        <!-- Footer -->
+        <tr><td style="background:#F5F7FA;padding:16px 32px;text-align:center;">
+          <p style="margin:0;font-size:11px;color:#AAB8C2;">© 2026 EGWallet. All rights reserved.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+          const plainText = `Reset your EGWallet password\n\nWe received a request to reset your password.\n\nReset link (valid 20 minutes):\n${resetLink}\n\nIf you didn't request this, ignore this email — your password won't change.\n\n— The EGWallet Team`;
+
+          await transporter.sendMail({
+            from: fromAddress,
+            to: user.email,
+            subject: 'Reset your EGWallet password',
+            text: plainText,
+            html: htmlEmail,
+          });
+
+          logger.info('[Email] Password reset email sent', { userId: user.id, smtpHost });
+        } catch (emailErr) {
+          // SMTP failure: log full error for Railway visibility but DO NOT surface to client
+          logger.error('[Email] FAILED to send password reset email', {
+            userId: user.id,
+            smtpHost,
+            error: emailErr.message,
+            code: emailErr.code,
+            response: emailErr.response,
+          });
+          // Token is still saved — user can request again or check logs in dev
+        }
+      } else {
+        // No SMTP configured — log reset token so it can be tested via Railway logs
+        logger.warn('[Email] SMTP not configured (SMTP_HOST missing). Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM on Railway to enable email delivery.');
+        logger.warn('[Email][DEV] Reset token for manual testing:', { rawToken, userId: user.id, resetLink });
+      }
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Forgot-password error', { err: err.message });
+    // Still return success — do not expose internal errors
+    res.json({ success: true });
+  }
+});
+
+// ─── Reset Password ─────────────────────────────────────────────────────────
+app.post('/auth/reset-password', forgotPasswordLimiter, async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+    if (!token || typeof token !== 'string' || !newPassword || typeof newPassword !== 'string') {
+      return res.status(400).json({ error: 'token_and_password_required' });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: 'password_too_short' });
+    }
+
+    const tokenHash = crypto.createHash('sha256').update(token.trim()).digest('hex');
+    const db = loadDB();
+    if (!db.passwordResetTokens) db.passwordResetTokens = [];
+
+    const record = db.passwordResetTokens.find(tok => tok.tokenHash === tokenHash && tok.expiresAt > Date.now());
+    if (!record) {
+      return res.status(400).json({ error: 'invalid_or_expired_token' });
+    }
+
+    const user = db.users.find(u => u.id === record.userId);
+    if (!user) {
+      return res.status(400).json({ error: 'invalid_or_expired_token' });
+    }
+
+    // Update password
+    user.passwordHash = bcrypt.hashSync(newPassword, 12);
+
+    // Remove used token and all other tokens for this user
+    db.passwordResetTokens = db.passwordResetTokens.filter(tok => tok.userId !== user.id);
+
+    // Invalidate all existing refresh tokens (security: force re-login everywhere)
+    if (!db.refreshTokens) db.refreshTokens = [];
+    db.refreshTokens = db.refreshTokens.filter(t => t.userId !== user.id);
+
+    saveDB(db);
+    logger.info('Password reset successful', { userId: user.id });
+
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Reset-password error', { err: err.message });
+    res.status(500).json({ error: 'internal_error' });
+  }
 });
 
 app.post('/auth/update-currency', authMiddleware, (req, res) => {
@@ -2673,6 +2896,7 @@ app.post('/transactions', authMiddleware, (req, res) => {
   const lang = req.lang || 'en';
   const { fromWalletId, toWalletId: rawToId, amount, currency, memo, idempotencyKey } = req.body; // amount is expected in minor units (integer)
   if (!fromWalletId || !rawToId || typeof amount === 'undefined' || !currency) return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
+  if (!Number.isInteger(amount) || amount <= 0 || amount > 1_000_000_000) return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
 
   // ── Idempotency check ──────────────────────────────────────────────────────
   const clientKey = idempotencyKey || req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
@@ -2711,12 +2935,9 @@ app.post('/transactions', authMiddleware, (req, res) => {
 
   const limitCheck = checkKYCLimits(senderUser, toAmountInUSD, db);
   if (!limitCheck.allowed) {
-    const upgradeMsg = limitCheck.nextTier
-      ? ' ' + t('limit_upgrade', lang, { tierName: limitCheck.nextTier.name })
-      : '';
     return res.status(403).json({
       code:                'LIMIT_EXCEEDED',
-      error:               limitCheck.message + upgradeMsg,
+      error:               limitCheck.message,
       limitType:           limitCheck.limitType,
       remainingDailyUSD:   limitCheck.remainingDailyUSD,
       remainingWeeklyUSD:  limitCheck.remainingWeeklyUSD,
@@ -2823,13 +3044,13 @@ app.post('/transactions', authMiddleware, (req, res) => {
   // Notify sender
   createNotification(db, req.user.userId, 'money_sent',
     'Payment Sent',
-    `You sent ${minorToMajor(amount, currency).toFixed(2)} ${currency}${wasConverted ? ` → ${minorToMajor(receivedAmount, receivedCurrency).toFixed(2)} ${receivedCurrency}` : ''}`,
+    `You sent ${minorToMajor(amount, currency).toFixed(decimalsFor(currency))} ${currency}${wasConverted ? ` → ${minorToMajor(receivedAmount, receivedCurrency).toFixed(decimalsFor(receivedCurrency))} ${receivedCurrency}` : ''}`,
     { transactionId: tx.id, amount, currency });
 
   // Notify receiver
   createNotification(db, toWallet.userId, 'money_received',
     'Payment Received',
-    `You received ${minorToMajor(receivedAmount, receivedCurrency).toFixed(2)} ${receivedCurrency} from ${senderUser.fullName || senderUser.username || senderUser.email || 'someone'}`,
+    `You received ${minorToMajor(receivedAmount, receivedCurrency).toFixed(decimalsFor(receivedCurrency))} ${receivedCurrency} from ${senderUser.fullName || senderUser.username || senderUser.email || 'someone'}`,
     { transactionId: tx.id, amount: receivedAmount, currency: receivedCurrency });
   saveDB(db);
 
@@ -2874,6 +3095,23 @@ app.post('/withdrawals', authMiddleware, (req, res) => {
 
   if (!fromWalletId || typeof amount === 'undefined' || !currency || !method)
     return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
+
+  // ── Amount and method validation ──────────────────────────────────────────
+  if (!Number.isInteger(amount) || amount <= 0 || amount > 1_000_000_000)
+    return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
+  const ALLOWED_WITHDRAWAL_METHODS = new Set(['bank', 'mobile', 'debit', 'credit']);
+  if (!ALLOWED_WITHDRAWAL_METHODS.has(method))
+    return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
+  // String field length limits — prevent oversized strings reaching the DB
+  const WITHDRAWAL_STR_LIMITS = {
+    bankName: 100, accountNumber: 50, accountHolderName: 100,
+    bankCode: 20, branchCode: 20, iban: 34, swiftBic: 11, country: 60,
+  };
+  for (const [field, max] of Object.entries(WITHDRAWAL_STR_LIMITS)) {
+    const val = req.body[field];
+    if (val !== undefined && val !== null && (typeof val !== 'string' || val.length > max))
+      return res.status(400).json({ error: `${field} exceeds maximum allowed length` });
+  }
 
   // ── Client-supplied idempotency key (optional header) ──────────────────────
   const clientKey = req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
@@ -2925,7 +3163,7 @@ app.post('/withdrawals', authMiddleware, (req, res) => {
   const db2 = loadDB();
   createNotification(db2, req.user.userId, 'withdrawal',
     'Withdrawal Submitted',
-    `${minorToMajor(feeCalc.netPayout, currency).toFixed(2)} ${currency} is being sent to your ${isInternational ? 'international' : 'local'} account`,
+    `${minorToMajor(feeCalc.netPayout, currency).toFixed(decimalsFor(currency))} ${currency} is being sent to your ${isInternational ? 'international' : 'local'} account`,
     { withdrawalId: withdrawal.id, amount, currency });
   saveDB(db2);
 
@@ -3056,7 +3294,12 @@ app.get('/fx-quote', authMiddleware, (req, res) => {
   const amountMajorTo = amountUSD * toRate;
   const receivedAmountMinor = majorToMinor(amountMajorTo, to);
 
-  // Apply 1.15% FX conversion fee on the received amount
+  // Safety guard: reject if conversion produces a nonsensical result
+  const fxGuard = fxSafetyCheck(receivedAmountMinor, to);
+  if (!fxGuard.safe) {
+    logger.error('[FX] Safety check failed in /fx-quote', { from, to, sentAmountMinor, receivedAmountMinor, reason: fxGuard.reason });
+    return res.status(500).json({ error: 'FX conversion error — please retry' });
+  }
   const fxFeeCalc = calcFxFee(receivedAmountMinor);
 
   // Exchange rate: 1 unit of fromCurrency in toCurrency
@@ -3123,8 +3366,11 @@ app.post('/deposits/create-intent', authMiddleware,
     const { amount, currency, walletId } = req.body;
     const user = db.users.find(u => u.id === req.user.userId);
     if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
-    const wallet = db.wallets.find(w => w.id === walletId && w.userId === req.user.userId);
+    // Fall back to the user's first wallet if the provided walletId is 'demo' or not found
+    const wallet = db.wallets.find(w => w.id === walletId && w.userId === req.user.userId)
+      || db.wallets.find(w => w.userId === req.user.userId);
     if (!wallet) return res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
+    const effectiveWalletId = wallet.id;
 
     // Compute fee BEFORE charging — so the total charged to the card includes the fee
     const depositCount = getUserDepositCount(db, req.user.userId);
@@ -3141,7 +3387,7 @@ app.post('/deposits/create-intent', authMiddleware,
           currency: currency.toLowerCase(),
           metadata: {
             userId: req.user.userId,
-            walletId,
+            walletId: effectiveWalletId,
             netCredited: String(netCredited),
             feeAmount: String(feeInfo.feeAmount),
             feeRate: String(feeInfo.rate),
@@ -3176,7 +3422,7 @@ app.post('/deposits/create-intent', authMiddleware,
     db.demoIntents.push({
       id: demoIntentId,
       userId: req.user.userId,
-      walletId,
+      walletId: effectiveWalletId,
       amount,
       currency,
       netCredited,
@@ -3289,7 +3535,7 @@ app.post('/deposits/confirm', authMiddleware,
     // Notify user
     createNotification(db, req.user.userId, 'deposit',
       'Deposit Successful',
-      `${minorToMajor(netCredited, currency).toFixed(2)} ${currency} has been added to your wallet${feeAmount > 0 ? ` (fee: ${minorToMajor(feeAmount, currency).toFixed(2)} ${currency})` : ' (free top-up)'}`,
+      `${minorToMajor(netCredited, currency).toFixed(decimalsFor(currency))} ${currency} has been added to your wallet${feeAmount > 0 ? ` (fee: ${minorToMajor(feeAmount, currency).toFixed(decimalsFor(currency))} ${currency})` : ' (free top-up)'}`,
       { transactionId: tx.id, netCredited, feeAmount, currency });
     saveDB(db);
 
@@ -3318,11 +3564,44 @@ app.get('/me', authMiddleware, (req, res) => {
   res.json({ id: u.id, email: u.email, username: u.username || null, region: u.region, kycTier: u.kycTier || 0, kycStatus: u.kycStatus || 'pending', tierLimits: KYC_TIERS[u.kycTier || 0] });
 });
 
+// GET /users/lookup?q=<walletId or @username>
+// Returns minimal public info about another user — used by RequestScreen to resolve recipient.
+app.get('/users/lookup', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const q = (req.query.q || '').toString().trim();
+  if (!q) return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
+
+  let recipientUser = null;
+
+  if (q.startsWith('@')) {
+    // @username lookup
+    const handle = q.slice(1).toLowerCase();
+    recipientUser = db.users.find(u => u.username && u.username.toLowerCase() === handle);
+  } else {
+    // wallet ID lookup
+    const wallet = db.wallets.find(w => w.id === q);
+    if (wallet) {
+      recipientUser = db.users.find(u => u.id === wallet.userId);
+    }
+  }
+
+  if (!recipientUser) {
+    return res.status(404).json({ error: t('error_not_found', req.lang || 'en') });
+  }
+
+  // Never expose the same user to themselves in a misleading way — still return it
+  res.json({
+    userId: recipientUser.id,
+    username: recipientUser.username || null,
+    displayName: `${recipientUser.firstName || ''} ${recipientUser.lastName || ''}`.trim() || recipientUser.email.split('@')[0],
+  });
+});
+
 // ==================== PAYMENT REQUESTS ====================
 // Create a payment request
 app.post('/payment-requests', authMiddleware, (req, res) => {
   const db = loadDB();
-  const { walletId, amount, currency, memo, idempotencyKey, targetWalletId } = req.body;
+  const { walletId, amount, currency, memo, idempotencyKey, targetWalletId, recipientHandle } = req.body;
   if (!walletId || typeof amount === 'undefined' || !currency) {
     return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   }
@@ -3402,7 +3681,7 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
       }
       
       // SECURITY CHECK: AML threshold - flag large requests
-      const amountUSD = convertToUSD(amount, currency, db.rates);
+      const amountUSD = convertToUSD(minorToMajor(amount, currency), currency, db.rates);
       const AML_THRESHOLD_USD = 10000; // $10K+
       if (amountUSD >= AML_THRESHOLD_USD) {
         logger.warn('Large employer payment request (AML threshold)', {
@@ -3502,6 +3781,24 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
     paidBy: null,
     transactionId: null
   };
+
+  // Resolve recipient from recipientHandle (@username or walletId)
+  let recipientUserId = null;
+  if (recipientHandle && !isEmployerRequest) {
+    const handle = recipientHandle.trim();
+    let recipientUser = null;
+    if (handle.startsWith('@')) {
+      const uname = handle.slice(1).toLowerCase();
+      recipientUser = db.users.find(u => u.username && u.username.toLowerCase() === uname);
+    } else {
+      const rWallet = db.wallets.find(w => w.id === handle);
+      if (rWallet) recipientUser = db.users.find(u => u.id === rWallet.userId);
+    }
+    if (recipientUser) {
+      recipientUserId = recipientUser.id;
+      request.recipientUserId = recipientUserId;
+    }
+  }
   
   // Add payroll metadata if employer request
   if (isEmployerRequest && employerRelationship) {
@@ -3522,6 +3819,24 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
   
   db.paymentRequests.push(request);
   saveDB(db);
+
+  // Notify recipient if resolved
+  if (recipientUserId) {
+    const requester = db.users.find(u => u.id === req.user.userId);
+    const requesterName = requester
+      ? `${requester.firstName || ''} ${requester.lastName || ''}`.trim() || requester.email.split('@')[0]
+      : 'Someone';
+    const displayAmount = minorToMajor(amount, currency).toFixed(decimalsFor(currency)); // minor → major
+    createNotification(
+      db,
+      recipientUserId,
+      'payment_request',
+      'Payment Request',
+      `${requesterName} is requesting ${displayAmount} ${currency}`,
+      { requestId: request.id, requesterId: req.user.userId, amount, currency, memo: memo || '' }
+    );
+    saveDB(db);
+  }
   
   // AUDIT TRAIL: Log all employer payment requests
   if (isEmployerRequest) {
@@ -3531,7 +3846,7 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
       employerId: employerRelationship.employerId,
       amount,
       currency,
-      amountUSD: convertToUSD(amount, currency, db.rates)
+      amountUSD: convertToUSD(minorToMajor(amount, currency), currency, db.rates)
     });
   }
   
@@ -3554,6 +3869,22 @@ app.get('/payment-requests', authMiddleware, (req, res) => {
   res.json({ requests });
 });
 
+// List incoming payment requests (where current user is the recipient)
+app.get('/payment-requests/incoming', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const requests = (db.paymentRequests || [])
+    .filter(r => r.recipientUserId === req.user.userId)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map(r => {
+      const requester = db.users.find(u => u.id === r.requesterId);
+      const requesterName = requester
+        ? `${requester.firstName || ''} ${requester.lastName || ''}`.trim() || requester.email.split('@')[0]
+        : 'Unknown';
+      return { ...r, requesterName };
+    });
+  res.json({ requests });
+});
+
 // Get a single payment request by ID (public - shareable link)
 app.get('/payment-requests/:id', (req, res) => {
   const db = loadDB();
@@ -3565,6 +3896,68 @@ app.get('/payment-requests/:id', (req, res) => {
   res.json({ 
     request: { id: request.id, amount: request.amount, currency: request.currency, note: request.note, status: request.status, expiresAt: request.expiresAt, requesterId: request.requesterId },
     requesterEmail: maskEmail(requester?.email || 'unknown')
+  });
+});
+
+// Preview cost of paying a payment request (no transaction executed)
+app.post('/payment-requests/:id/preview', authMiddleware, (req, res) => {
+  const db = loadDB();
+  const { fromWalletId } = req.body;
+  if (!fromWalletId) return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
+
+  const request = db.paymentRequests.find(r => r.id === req.params.id);
+  if (!request) return res.status(404).json({ error: t('error_request_not_found', req.lang || 'en') });
+  if (request.status !== 'pending') return res.status(400).json({ error: t('error_request_processed', req.lang || 'en') });
+
+  const fromWallet = db.wallets.find(w => w.id === fromWalletId && w.userId === req.user.userId);
+  if (!fromWallet) return res.status(404).json({ error: t('error_source_wallet_not_found', req.lang || 'en') });
+
+  const rates = db.rates && db.rates.values ? db.rates.values : {};
+  const reqCurrency = request.currency;
+  const reqAmount = request.amount;
+
+  let debitCurrency = reqCurrency;
+  let debitAmount = reqAmount;
+  let wasConverted = false;
+  let fxFeeAmount = 0;
+
+  const exactBalance = fromWallet.balances.find(b => b.currency === reqCurrency);
+  if (!exactBalance || exactBalance.amount < reqAmount) {
+    const richest = fromWallet.balances.reduce((best, b) => {
+      const valUSD = minorToMajor(b.amount, b.currency) / (rates[b.currency] || 1);
+      const bestUSD = best ? minorToMajor(best.amount, best.currency) / (rates[best.currency] || 1) : 0;
+      return valUSD > bestUSD ? b : best;
+    }, null);
+
+    if (!richest) return res.status(400).json({ error: t('error_insufficient_funds', req.lang || 'en') });
+
+    const reqMajor = minorToMajor(reqAmount, reqCurrency);
+    const reqUSD = reqMajor / (rates[reqCurrency] || 1);
+    const debitMajor = reqUSD * (rates[richest.currency] || 1);
+    const baseDebit = majorToMinor(debitMajor, richest.currency);
+
+    // Safety guard: reject if FX conversion produces a nonsensical result
+    const fxGuard = fxSafetyCheck(baseDebit, richest.currency);
+    if (!fxGuard.safe) {
+      logger.error('[FX] Safety check failed in /preview', { reqCurrency, richest: richest.currency, reqAmount, baseDebit, reason: fxGuard.reason });
+      return res.status(500).json({ error: 'FX conversion error — please retry' });
+    }
+
+    const fxFeeRate = 0.0115;
+    fxFeeAmount = Math.round(baseDebit * fxFeeRate);
+    debitAmount = baseDebit + fxFeeAmount;
+    debitCurrency = richest.currency;
+    wasConverted = true;
+  }
+
+  res.json({
+    debitAmount,
+    debitCurrency,
+    creditAmount: reqAmount,
+    creditCurrency: reqCurrency,
+    wasConverted,
+    fxFeeAmount,
+    fxFeeRate: wasConverted ? 0.0115 : 0,
   });
 });
 
@@ -3583,29 +3976,84 @@ app.post('/payment-requests/:id/pay', authMiddleware, (req, res) => {
   
   const toWallet = db.wallets.find(w => w.id === request.walletId);
   if (!toWallet) return res.status(404).json({ error: t('error_destination_wallet_not_found', req.lang || 'en') });
-  
-  // Check balance
-  const fromBalance = fromWallet.balances.find(b => b.currency === request.currency) || { currency: request.currency, amount: 0 };
-  if (fromBalance.amount < request.amount) return res.status(400).json({ error: t('error_insufficient_funds', req.lang || 'en') });
-  
-  // Deduct from payer
-  fromBalance.amount -= request.amount;
-  
-  // Add to requester
-  const destBalance = toWallet.balances.find(b => b.currency === request.currency);
-  if (destBalance) destBalance.amount += request.amount;
-  else toWallet.balances.push({ currency: request.currency, amount: request.amount });
+
+  const rates = db.rates && db.rates.values ? db.rates.values : {};
+  const reqCurrency = request.currency;
+  const reqAmount = request.amount; // in minor units
+
+  // Determine which balance the payer will debit from.
+  // Prefer exact-currency match; otherwise find the largest balance and convert.
+  let payFromBalance = fromWallet.balances.find(b => b.currency === reqCurrency);
+  let debitCurrency = reqCurrency;
+  let debitAmount = reqAmount; // minor units in debitCurrency
+  let wasConverted = false;
+  let fxFeeAmount = 0;
+
+  if (!payFromBalance || payFromBalance.amount < reqAmount) {
+    // Try cross-currency: pick payer's richest balance (highest USD value)
+    const richest = fromWallet.balances.reduce((best, b) => {
+      const valUSD = minorToMajor(b.amount, b.currency) / (rates[b.currency] || 1);
+      const bestUSD = best ? minorToMajor(best.amount, best.currency) / (rates[best.currency] || 1) : 0;
+      return valUSD > bestUSD ? b : best;
+    }, null);
+
+    if (!richest) return res.status(400).json({ error: t('error_insufficient_funds', req.lang || 'en') });
+
+    // Convert request amount (reqCurrency → USD → richest currency) to find how much to debit
+    const reqMajor = minorToMajor(reqAmount, reqCurrency);
+    const reqUSD = reqMajor / (rates[reqCurrency] || 1);
+    const debitMajor = reqUSD * (rates[richest.currency] || 1);
+    debitAmount = majorToMinor(debitMajor, richest.currency);
+
+    // Safety guard: reject if FX conversion produces a nonsensical result
+    const fxGuard = fxSafetyCheck(debitAmount, richest.currency);
+    if (!fxGuard.safe) {
+      logger.error('[FX] Safety check failed in /pay', { reqCurrency, richest: richest.currency, reqAmount, debitAmount, reason: fxGuard.reason });
+      return res.status(500).json({ error: 'FX conversion error — please retry' });
+    }
+
+    if (richest.amount < debitAmount) {
+      return res.status(400).json({ error: t('error_insufficient_funds', req.lang || 'en') });
+    }
+
+    payFromBalance = richest;
+    debitCurrency = richest.currency;
+    wasConverted = true;
+    // FX fee (1.15%) is charged ON TOP of the debit — sender pays more, receiver gets full amount.
+    // Fee is calculated in the sender's currency proportionally.
+    const fxFeeRate = 0.0115;
+    fxFeeAmount = Math.round(debitAmount * fxFeeRate); // in sender's currency minor units
+    debitAmount = debitAmount + fxFeeAmount; // sender pays reqAmount equivalent + fee
+  } else {
+    payFromBalance = fromWallet.balances.find(b => b.currency === reqCurrency);
+  }
+
+  // Check balance (covers both exact-match and cross-currency paths)
+  if (payFromBalance.amount < debitAmount) {
+    return res.status(400).json({ error: t('error_insufficient_funds', req.lang || 'en') });
+  }
+
+  // Deduct from payer (in their currency, including FX fee if converted)
+  payFromBalance.amount -= debitAmount;
+
+  // Receiver always gets the exact requested amount — fee came from sender
+  const creditAmount = reqAmount;
+  const destBalance = toWallet.balances.find(b => b.currency === reqCurrency);
+  if (destBalance) destBalance.amount += creditAmount;
+  else toWallet.balances.push({ currency: reqCurrency, amount: creditAmount });
   
   // Create transaction with proper tagging
   const tx = {
     id: uuidv4(),
     fromWalletId,
     toWalletId: request.walletId,
-    amount: request.amount,
-    currency: request.currency,
-    receivedAmount: request.amount,
-    receivedCurrency: request.currency,
-    wasConverted: false,
+    amount: debitAmount,
+    currency: debitCurrency,
+    receivedAmount: creditAmount,
+    receivedCurrency: reqCurrency,
+    wasConverted,
+    fxFeeAmount,
+    sendFeeAmount: 0,
     memo: `Payment for request: ${request.memo}`,
     status: 'completed',
     timestamp: Date.now(),
@@ -3643,14 +4091,14 @@ app.post('/payment-requests/:id/pay', authMiddleware, (req, res) => {
   const payerUser = db.users.find(u => u.id === req.user.userId);
   createNotification(db, req.user.userId, 'money_sent',
     'Payment Sent',
-    `You paid ${(request.amount / 100).toFixed(2)} ${request.currency}${request.memo ? ` for "${request.memo}"` : ''}`,
+    `You paid ${minorToMajor(request.amount, request.currency).toFixed(decimalsFor(request.currency))} ${request.currency}${request.memo ? ` for "${request.memo}"` : ''}`,
     { transactionId: tx.id, requestId: request.id, amount: request.amount, currency: request.currency });
 
   // Notify requester (wallet owner)
   const requesterUser = db.users.find(u => u.id === toWallet.userId);
   createNotification(db, toWallet.userId, 'money_received',
     'Payment Received',
-    `You received ${(request.amount / 100).toFixed(2)} ${request.currency} from ${payerUser?.fullName || payerUser?.username || payerUser?.email || 'someone'}${request.memo ? ` for "${request.memo}"` : ''}`,
+    `You received ${minorToMajor(request.amount, request.currency).toFixed(decimalsFor(request.currency))} ${request.currency} from ${payerUser?.fullName || payerUser?.username || payerUser?.email || 'someone'}${request.memo ? ` for "${request.memo}"` : ''}`,
     { transactionId: tx.id, requestId: request.id, amount: request.amount, currency: request.currency });
 
   saveDB(db);
@@ -4123,6 +4571,25 @@ app.post('/qr/pay', authMiddleware, (req, res) => {
     }
   }
   
+  // Notify payer
+  const displayAmt = minorToMajor(paymentAmount, paymentCurrency).toFixed(decimalsFor(paymentCurrency));
+  createNotification(db, req.user.userId, 'money_sent',
+    'Payment Sent',
+    `You paid ${displayAmt} ${paymentCurrency} via QR${memo && memo !== 'QR Payment' ? ` — ${memo}` : ''}`,
+    { transactionId: tx.id, amount: paymentAmount, currency: paymentCurrency }
+  );
+
+  // Notify receiver
+  const payerUser = db.users.find(u => u.id === req.user.userId);
+  const payerName = payerUser
+    ? `${payerUser.firstName || ''} ${payerUser.lastName || ''}`.trim() || payerUser.email.split('@')[0]
+    : 'Someone';
+  createNotification(db, targetUserId, 'money_received',
+    'Payment Received',
+    `${payerName} paid you ${displayAmt} ${paymentCurrency} via QR${memo && memo !== 'QR Payment' ? ` — ${memo}` : ''}`,
+    { transactionId: tx.id, amount: paymentAmount, currency: paymentCurrency }
+  );
+
   saveDB(db);
   
   logger.info('QR payment completed', {
@@ -4695,7 +5162,7 @@ app.post('/ai/chat',
         response += 'Recent transactions:\n';
         userTransactions.slice(0, 5).forEach((tx, idx) => {
           const status = tx.status === 'pending' ? '⏳ PENDING' : tx.status === 'completed' ? '✓' : '✗';
-          const amount = typeof tx.amount === 'number' ? `$${Math.abs(tx.amount).toFixed(2)}` : tx.amount;
+          const amount = typeof tx.amount === 'number' ? `${minorToMajor(Math.abs(tx.amount), tx.currency || 'USD').toFixed(decimalsFor(tx.currency || 'USD'))} ${tx.currency || ''}`.trim() : tx.amount;
           const txId = maskTransactionId(tx.id);
           response += `${idx + 1}. ${status} ${amount} - ${txId}\n`;
         });
@@ -4724,6 +5191,7 @@ app.post('/ai/chat',
           id: maskTransactionId(tx.id),
           fullId: tx.id, // For selection
           amount: tx.amount,
+          currency: tx.currency || 'USD',
           type: tx.type,
           status: tx.status,
           timestamp: tx.timestamp,
@@ -4823,7 +5291,7 @@ app.post('/ai/chat',
       const balEntries = Object.entries(clientBals).filter(([, v]) => Number(v) > 0);
       if (balEntries.length > 0) {
         const [topCur, topAmt] = balEntries[0];
-        const readableAmt = (Number(topAmt) / 100).toFixed(2);
+        const readableAmt = minorToMajor(Number(topAmt), topCur).toFixed(decimalsFor(topCur));
         response = lang === 'fr'
           ? `Votre solde disponible est de ${topCur} ${readableAmt}.\n\n`
           : lang === 'es'
@@ -5010,7 +5478,7 @@ app.post('/ai-assistant',
       const txAmount   = sanitiseAmount(eventContext.amount);
       const txCurrency = sanitiseCurrency(eventContext.currency) || serverCtx.currency;
       const amtStr = (txAmount !== null && txAmount > 0)
-        ? `${txCurrency} ${(txAmount / 100).toFixed(2)}` : '';
+        ? `${txCurrency} ${minorToMajor(txAmount, txCurrency).toFixed(decimalsFor(txCurrency))}` : '';
 
       const reasonMap = {
         insufficient_funds: lang === 'fr' ? `fonds insuffisants — solde disponible\u00a0: ${serverCtx.currency}\u00a0${serverCtx.balance}`
@@ -5043,7 +5511,7 @@ app.post('/ai-assistant',
       const pending = sanitisePendingWithdrawals(clientCtx.pendingWithdrawals);
       const pendingLines = Object.entries(pending)
         .filter(([, amt]) => Number(amt) > 0)
-        .map(([cur, amt]) => `${cur} ${(Number(amt) / 100).toFixed(2)}`)
+        .map(([cur, amt]) => `${cur} ${minorToMajor(Number(amt), cur).toFixed(decimalsFor(cur))}`)
         .join(', ');
       if (lang === 'fr') {
         response = `Votre retrait${pendingLines ? ` de ${pendingLines}` : ''} est en cours de traitement.\n\nLes retraits prennent g\u00e9n\u00e9ralement 3 \u00e0 5 jours ouvr\u00e9s selon votre banque. Vous recevrez une notification par e-mail d\u00e8s que le virement sera effectu\u00e9.\n\nID de portefeuille\u00a0: ${serverCtx.walletId}`;
@@ -5095,7 +5563,7 @@ app.post('/ai-assistant',
       const pending = sanitisePendingWithdrawals(clientCtx.pendingWithdrawals);
       const hasPending = Object.values(pending).some(v => Number(v) > 0);
       const pendingStr = Object.entries(pending).filter(([, v]) => Number(v) > 0)
-        .map(([c, v]) => `${c} ${(Number(v) / 100).toFixed(2)}`).join(', ');
+        .map(([c, v]) => `${c} ${minorToMajor(Number(v), c).toFixed(decimalsFor(c))}`).join(', ');
 
       if (lower.includes('insufficient') || lower.includes('fonds insuffisant') || lower.includes('fondos insuficiente') ||
           (lower.includes('failed') && (lower.includes('balance') || lower.includes('fund')))) {
@@ -5251,7 +5719,7 @@ app.get('/support/transaction/:id', authMiddleware, (req, res) => {
   const details = {
     id: maskTransactionId(transaction.id),
     type: transaction.type,
-    amount: (transaction.amount / 100).toFixed(2),
+    amount: minorToMajor(transaction.amount, transaction.currency).toFixed(decimalsFor(transaction.currency)),
     currency: transaction.currency,
     status: transaction.status,
     createdAt: transaction.createdAt,
@@ -6732,6 +7200,17 @@ app.post('/employer/bulk-payment',
         currency: item.currency,
       });
 
+      // Notify worker immediately via bell icon
+      const displayAmount = minorToMajor(item.amount, item.currency).toFixed(decimalsFor(item.currency));
+      createNotification(
+        db,
+        item.workerId,
+        'money_received',
+        'Payroll Received',
+        `You received ${displayAmount} ${item.currency} from ${employer.companyName}${item.memo ? ` — ${item.memo}` : ''}`,
+        { transactionId: txn.id, batchId, employerId: employer.id, amount: item.amount, currency: item.currency }
+      );
+
       logger.info('Payroll payment applied', {
         batchId,
         employerId: employer.id,
@@ -7282,7 +7761,7 @@ app.get('/payroll/received', authMiddleware, (req, res) => {
       t.type === 'payroll' && 
       walletIds.includes(t.toWalletId)
     )
-    .sort((a, b) => b.createdAt - a.createdAt);
+    .sort((a, b) => b.timestamp - a.timestamp);
   
   res.json({ 
     payrollTransactions: payrollTransactions.map(t => ({
@@ -7291,7 +7770,7 @@ app.get('/payroll/received', authMiddleware, (req, res) => {
       currency: t.currency,
       employerName: t.payrollMetadata?.employerName,
       payPeriod: t.payrollMetadata?.payPeriod,
-      receivedAt: t.createdAt,
+      receivedAt: t.timestamp,
       memo: t.memo
     }))
   });

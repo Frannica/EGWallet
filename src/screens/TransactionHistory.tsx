@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { formatCurrency, convert } from '../utils/currency';
 import { fetchRates, Rates, DEMO_RATES } from '../api/client';
-import { useRoute, RouteProp, useNavigation } from '@react-navigation/native';
+import { useRoute, RouteProp, useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../auth/AuthContext';
 import { fetchTransactions } from '../api/transactions';
 import { Ionicons } from '@expo/vector-icons';
@@ -64,7 +64,7 @@ export default function TransactionHistory() {
     try {
       if (!walletId) throw new Error('no_wallet');
       const [res, localTxs] = await Promise.all([
-        fetchTransactions(auth.token || '', walletId),
+        auth.token ? fetchTransactions(auth.token, walletId) : Promise.resolve({ transactions: [] }),
         getLocalTransactions(),
       ]);
       const backendTxs: any[] = res.transactions || [];
@@ -104,6 +104,9 @@ export default function TransactionHistory() {
   useEffect(() => {
     loadTransactions();
   }, [walletId]);
+
+  // Reload whenever this screen comes back into focus (e.g. after sending money)
+  useFocusEffect(useCallback(() => { loadTransactions(); }, [walletId]));
 
   // Filter transactions based on selected filter
   const filteredTxs = txs.filter(tx => {
