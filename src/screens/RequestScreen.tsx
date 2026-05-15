@@ -10,7 +10,7 @@ import { useLanguage } from '../i18n/LanguageContext';
 import { listWallets } from '../api/auth';
 import { API_BASE, getApiLanguage } from '../api/client';
 import { getCurrencySymbol, majorToMinor, formatMajorAmount, formatCurrency, decimalsFor } from '../utils/currency';
-import { logLocalTransaction } from '../utils/localBalance';
+import { logLocalTransaction, debitLocalBalance } from '../utils/localBalance';
 import { sendTransaction } from '../api/transactions';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import QRCode from 'react-native-qrcode-svg';
@@ -331,6 +331,7 @@ export default function RequestScreen() {
                 payrollCurrency,
                 payrollNote.trim() || `Payroll payment to ${selectedEmployee.firstName} ${selectedEmployee.lastName}`,
               );
+              await debitLocalBalance(payrollCurrency, majorToMinor(amountNum, payrollCurrency));
               const req: LocalRequest = {
                 id: uid(),
                 type: 'employer',
