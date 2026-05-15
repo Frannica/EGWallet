@@ -11,6 +11,7 @@ import { sendTransaction } from '../api/transactions';
 import { listWallets } from '../api/auth';
 import { majorToMinor, formatCurrency } from '../utils/currency';
 import { useLanguage } from '../i18n/LanguageContext';
+import { debitLocalBalance } from '../utils/localBalance';
 
 // ─── QR payload types ────────────────────────────────────────────────────────
 
@@ -86,7 +87,7 @@ export default function QRScannerScreen() {
       Alert.alert(
         t('qrScan.invalidQrTitle'),
         t('qrScan.invalidQrMessage'),
-        [{ text: 'Scan Again', onPress: () => setScanned(false) }],
+        [{ text: t('qrScan.scanAgain'), onPress: () => setScanned(false) }],
       );
       return;
     }
@@ -95,7 +96,7 @@ export default function QRScannerScreen() {
       Alert.alert(
         t('qrScan.unsupportedQrTitle'),
         t('qrScan.unsupportedQrMessage'),
-        [{ text: 'Scan Again', onPress: () => setScanned(false) }],
+        [{ text: t('qrScan.scanAgain'), onPress: () => setScanned(false) }],
       );
       return;
     }
@@ -106,7 +107,7 @@ export default function QRScannerScreen() {
         Alert.alert(
           t('qrScan.qrExpiredTitle'),
           t('qrScan.qrExpiredMessage'),
-          [{ text: 'Scan Again', onPress: () => setScanned(false) }],
+          [{ text: t('qrScan.scanAgain'), onPress: () => setScanned(false) }],
         );
         return;
       }
@@ -169,7 +170,7 @@ export default function QRScannerScreen() {
       toWalletId = qrPayload.walletId;
       amountMinor = majorToMinor(raw, manualCurrency.toUpperCase());
       currency = manualCurrency.toUpperCase();
-      memo = 'QR Payment';
+      memo = t('qrScan.qrPaymentMemo');
     }
 
     if (toWalletId === myWalletId) {
@@ -192,6 +193,9 @@ export default function QRScannerScreen() {
       setShowConfirm(false);
       setPaying(false);
 
+      // Debit local cache immediately so WalletScreen shows the correct balance
+      await debitLocalBalance(currency, amountMinor);
+
       const sentDisplay = formatCurrency(amountMinor, currency);
       const receivedDisplay = tx?.receivedAmount != null
         ? formatCurrency(tx.receivedAmount, tx.receivedCurrency ?? currency)
@@ -200,11 +204,13 @@ export default function QRScannerScreen() {
       Alert.alert(
         t('qrScan.paymentSentTitle'),
         receivedDisplay && tx?.wasConverted
-          ? `You sent ${sentDisplay}\nRecipient received ${receivedDisplay}`
+          ? t('qrScan.paymentSentFxMsg')
+              .replace('{sent}', sentDisplay)
+              .replace('{received}', receivedDisplay)
           : t('qrScan.paymentSentMsg'),
         [
           {
-            text: 'Done',
+            text: t('common.done'),
             onPress: () => {
               setScanned(false);
               navigation.goBack();
