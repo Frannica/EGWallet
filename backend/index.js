@@ -3336,6 +3336,173 @@ app.get('/wallets/:id/currency', authMiddleware, (req, res) => {
   res.json({ currency, walletId: req.params.id });
 });
 
+// ==================== IN-WALLET CURRENCY EXCHANGE ====================
+// Exchange one currency balance for another within the same wallet.
+// The FX fee (1.15%) is deducted from the converted (received) amount.
+// This endpoint is additive — it does NOT touch /transactions, /withdrawals, or any other path.
+//
+// POST /exchange  { walletId, fromCurrency, toCurrency, amount, idempotencyKey }
+//   amount : integer, minor units of fromCurrency  (e.g. 60000 for 60,000 XAF; 10000 for $100 USD)
+app.post('/exchange', authMiddleware, (req, res) => {
+  const db   = loadDB();
+  const lang = req.lang || 'en';
+  const { walletId, fromCurrency, toCurrency, amount, idempotencyKey } = req.body;
+
+  // ── 1. Input validation ───────────────────────────────────────────────────
+  if (!walletId || !fromCurrency || !toCurrency || typeof amount === 'undefined') {
+    return res.status(400).json({ error: t('error_missing_fields', lang) });
+  }
+  if (!Number.isInteger(amount) || amount <= 0 || amount > 1_000_000_000) {
+    return res.status(400).json({ error: t('error_missing_fields', lang) });
+  }
+  if (fromCurrency === toCurrency) {
+    return res.status(400).json({ error: 'Cannot exchange a currency for itself' });
+  }
+
+  // ── 2. Idempotency check ──────────────────────────────────────────────────
+  const clientKey = idempotencyKey || req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
+  if (clientKey) {
+    const cached = idempotencyStore.get(clientKey);
+    if (cached && Date.now() - cached.timestamp < IDEMPOTENCY_EXPIRY) {
+      return res.status(200).json(cached.response);
+    }
+  }
+
+  // ── 3. Wallet ownership ───────────────────────────────────────────────────
+  const wallet = db.wallets.find(w => w.id === walletId && w.userId === req.user.userId);
+  if (!wallet) return res.status(404).json({ error: t('error_source_wallet_not_found', lang) });
+
+  // ── 4. Sufficient balance in source currency ──────────────────────────────
+  const fromBalance = wallet.balances.find(b => b.currency === fromCurrency);
+  if (!fromBalance || fromBalance.amount < amount) {
+    return res.status(400).json({ error: t('error_insufficient_funds', lang) });
+  }
+
+  // ── 5. KYC tier limits (exchange counts toward daily/weekly/monthly quotas) ─
+  const senderUser = db.users.find(u => u.id === req.user.userId);
+  if (!senderUser) return res.status(404).json({ error: t('error_sender_not_found', lang) });
+
+  const rates    = db.rates.values;
+  const fromRate = rates[fromCurrency];
+  const toRate   = rates[toCurrency];
+  if (!fromRate) return res.status(400).json({ error: `Unsupported currency: ${fromCurrency}` });
+  if (!toRate)   return res.status(400).json({ error: `Unsupported currency: ${toCurrency}` });
+
+  const amountMajorFrom = minorToMajor(amount, fromCurrency);
+  const amountUSD       = amountMajorFrom / fromRate;
+  const limitCheck      = checkKYCLimits(senderUser, amountUSD, db);
+  if (!limitCheck.allowed) {
+    return res.status(403).json({
+      code:                'LIMIT_EXCEEDED',
+      error:               limitCheck.message,
+      limitType:           limitCheck.limitType,
+      remainingDailyUSD:   limitCheck.remainingDailyUSD,
+      remainingWeeklyUSD:  limitCheck.remainingWeeklyUSD,
+      remainingMonthlyUSD: limitCheck.remainingMonthlyUSD,
+      tierLevel:           limitCheck.tierLevel,
+      nextTier:            limitCheck.nextTier,
+    });
+  }
+
+  // ── 6. FX conversion math (same formula as /fx-quote) ────────────────────
+  const amountMajorTo       = amountUSD * toRate;
+  const receivedAmountMinor = majorToMinor(amountMajorTo, toCurrency);
+
+  const fxGuard = fxSafetyCheck(receivedAmountMinor, toCurrency);
+  if (!fxGuard.safe) {
+    logger.error('[/exchange] FX safety check failed',
+      { fromCurrency, toCurrency, amount, receivedAmountMinor, reason: fxGuard.reason });
+    return res.status(500).json({ error: 'FX conversion error — please retry' });
+  }
+
+  const fxFeeCalc   = calcFxFee(receivedAmountMinor);
+  const netReceived = fxFeeCalc.netReceived;
+  const fxFeeAmount = fxFeeCalc.feeAmount;
+
+  // ── 7. Rollback snapshots (taken before any mutation) ────────────────────
+  const originalFromAmount = fromBalance.amount;
+  const toBalance          = wallet.balances.find(b => b.currency === toCurrency);
+  const originalToAmount   = toBalance ? toBalance.amount : null;
+
+  // ── 8. Apply balance changes ──────────────────────────────────────────────
+  fromBalance.amount -= amount;
+  if (toBalance) {
+    toBalance.amount += netReceived;
+  } else {
+    wallet.balances.push({ currency: toCurrency, amount: netReceived });
+  }
+
+  // ── 9. Build transaction record ───────────────────────────────────────────
+  const tx = {
+    id:               uuidv4(),
+    type:             'exchange',
+    fromWalletId:     walletId,
+    toWalletId:       walletId,
+    amount,
+    currency:         fromCurrency,
+    receivedAmount:   netReceived,
+    receivedCurrency: toCurrency,
+    wasConverted:     true,
+    fxFeeAmount,
+    sendFeeAmount:    0,
+    memo:             '',
+    status:           'completed',
+    timestamp:        Date.now(),
+  };
+  db.transactions.push(tx);
+
+  // ── 10. Update KYC limit tracking ────────────────────────────────────────
+  updateLimitTracking(senderUser, amountUSD);
+
+  // ── 11. Persist — rollback in-memory on failure ───────────────────────────
+  try {
+    saveDB(db);
+  } catch (saveErr) {
+    fromBalance.amount = originalFromAmount;
+    if (toBalance) {
+      toBalance.amount = originalToAmount;
+    } else {
+      wallet.balances = wallet.balances.filter(b => b.currency !== toCurrency);
+    }
+    db.transactions.pop();
+    logger.error('[/exchange] saveDB failed — rolled back in-memory state:', saveErr);
+    return res.status(500).json({ error: t('error_transaction_persist', lang) });
+  }
+
+  // ── 12. Notification ──────────────────────────────────────────────────────
+  createNotification(db, req.user.userId, 'exchange_completed',
+    'Exchange Completed',
+    `Exchanged ${minorToMajor(amount, fromCurrency).toFixed(decimalsFor(fromCurrency))} ${fromCurrency} \u2192 ${minorToMajor(netReceived, toCurrency).toFixed(decimalsFor(toCurrency))} ${toCurrency}`,
+    { transactionId: tx.id, amount, fromCurrency, toCurrency });
+  saveDB(db);
+
+  const responseBody = {
+    transaction: tx,
+    feeBreakdown: {
+      youSend:      amount,
+      fromCurrency,
+      rawConverted: receivedAmountMinor,
+      fxFee:        fxFeeAmount,
+      youReceive:   netReceived,
+      toCurrency,
+      rate:         toRate / fromRate,
+      rateDisplay:  `1 ${fromCurrency} = ${(toRate / fromRate).toFixed(6)} ${toCurrency}`,
+    },
+    limits: {
+      remainingDailyUSD:   limitCheck.remainingDailyUSD,
+      remainingWeeklyUSD:  limitCheck.remainingWeeklyUSD,
+      remainingMonthlyUSD: limitCheck.remainingMonthlyUSD,
+      tierLevel:           limitCheck.tierLevel,
+    },
+  };
+
+  if (clientKey) {
+    idempotencyStore.set(clientKey, { response: responseBody, timestamp: Date.now() });
+  }
+
+  res.json(responseBody);
+});
+
 // ==================== DEPOSIT / TOP-UP ENDPOINTS ====================
 
 // Fee-info endpoint — cheap call so DepositScreen can show the fee tier before the user confirms
