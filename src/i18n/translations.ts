@@ -344,6 +344,21 @@ const en: TranslationMap = {
   'txHistory.ref': 'Ref:',
   'txHistory.convertedTo': 'Converted to',
 
+  // Currency exchange
+  'exchange.screenTitle': 'Currency Exchange',
+  'exchange.btnLabel': 'Exchange',
+  'exchange.txTitle': 'Currency Exchange',
+  'exchange.youGive': 'You Give',
+  'exchange.youGet': 'You Get',
+  'exchange.rate': 'Rate',
+  'exchange.fee': 'Fee (1.15%)',
+  'exchange.confirm': 'Exchange Now',
+  'exchange.selectCurrency': 'Select currency',
+  'exchange.balance': 'Balance',
+  'exchange.enterAmount': 'Enter amount',
+  'exchange.success': 'Exchange completed!',
+  'exchange.insufficientBalance': 'Insufficient balance',
+
   // Employer dashboard
   'employer.registerTitle': 'REGISTER AS EMPLOYER',
   'employer.registerHelp': 'Set up your employer account to manage employees and run payroll.',
@@ -1359,6 +1374,21 @@ const fr: TranslationMap = {
   'txHistory.ref': 'Réf :',
   'txHistory.convertedTo': 'Converti en',
 
+  // Currency exchange
+  'exchange.screenTitle': 'Échange de devises',
+  'exchange.btnLabel': 'Échanger',
+  'exchange.txTitle': 'Échange de devises',
+  'exchange.youGive': 'Vous donnez',
+  'exchange.youGet': 'Vous recevez',
+  'exchange.rate': 'Taux',
+  'exchange.fee': 'Frais (1,15%)',
+  'exchange.confirm': 'Échanger maintenant',
+  'exchange.selectCurrency': 'Sélectionner la devise',
+  'exchange.balance': 'Solde',
+  'exchange.enterAmount': 'Saisir le montant',
+  'exchange.success': 'Échange effectué !',
+  'exchange.insufficientBalance': 'Solde insuffisant',
+
   // Employer dashboard
   'employer.registerTitle': "S'INSCRIRE COMME EMPLOYEUR",
   'employer.registerHelp': 'Configurez votre compte employeur pour gérer les employés et effectuer la paie.',
@@ -2334,6 +2364,21 @@ const es: TranslationMap = {
   'txHistory.noTransactions': 'No se encontraron transacciones.',
   'txHistory.ref': 'Ref:',
   'txHistory.convertedTo': 'Convertido a',
+
+  // Currency exchange
+  'exchange.screenTitle': 'Cambio de divisas',
+  'exchange.btnLabel': 'Cambiar',
+  'exchange.txTitle': 'Cambio de divisas',
+  'exchange.youGive': 'Tú das',
+  'exchange.youGet': 'Tú recibes',
+  'exchange.rate': 'Tasa',
+  'exchange.fee': 'Comisión (1,15%)',
+  'exchange.confirm': 'Cambiar ahora',
+  'exchange.selectCurrency': 'Seleccionar divisa',
+  'exchange.balance': 'Saldo',
+  'exchange.enterAmount': 'Ingresar monto',
+  'exchange.success': '¡Cambio completado!',
+  'exchange.insufficientBalance': 'Saldo insuficiente',
 
   // Employer dashboard
   'employer.registerTitle': 'REGISTRARSE COMO EMPLEADOR',
@@ -3312,6 +3357,21 @@ const pt: TranslationMap = {
   'txHistory.ref': 'Ref:',
   'txHistory.convertedTo': 'Convertido para',
 
+  // Currency exchange
+  'exchange.screenTitle': 'Câmbio de moedas',
+  'exchange.btnLabel': 'Trocar',
+  'exchange.txTitle': 'Câmbio de moedas',
+  'exchange.youGive': 'Você dá',
+  'exchange.youGet': 'Você recebe',
+  'exchange.rate': 'Taxa',
+  'exchange.fee': 'Taxa (1,15%)',
+  'exchange.confirm': 'Trocar agora',
+  'exchange.selectCurrency': 'Selecionar moeda',
+  'exchange.balance': 'Saldo',
+  'exchange.enterAmount': 'Inserir valor',
+  'exchange.success': 'Câmbio concluído!',
+  'exchange.insufficientBalance': 'Saldo insuficiente',
+
   // Employer dashboard
   'employer.registerTitle': 'REGISTRAR COMO EMPREGADOR',
   'employer.registerHelp': 'Configure sua conta de empregador para gerenciar funcionários e executar folha de pagamento.',
@@ -4288,6 +4348,21 @@ const ar: TranslationMap = {
   'txHistory.noTransactions': 'لم يتم العثور على معاملات.',
   'txHistory.ref': 'المرجع:',
   'txHistory.convertedTo': 'محول إلى',
+
+  // Currency exchange
+  'exchange.screenTitle': 'تحويل العملات',
+  'exchange.btnLabel': 'تحويل',
+  'exchange.txTitle': 'تحويل العملات',
+  'exchange.youGive': 'تعطي',
+  'exchange.youGet': 'تستلم',
+  'exchange.rate': 'السعر',
+  'exchange.fee': 'رسوم (1.15%)',
+  'exchange.confirm': 'تحويل الآن',
+  'exchange.selectCurrency': 'اختر العملة',
+  'exchange.balance': 'الرصيد',
+  'exchange.enterAmount': 'أدخل المبلغ',
+  'exchange.success': 'تم التحويل!',
+  'exchange.insufficientBalance': 'رصيد غير كافٍ',
 
   // Employer dashboard
   'employer.registerTitle': 'التسجيل كصاحب عمل',
@@ -5267,6 +5342,21 @@ const zh: TranslationMap = {
   'txHistory.ref': '参考：',
   'txHistory.convertedTo': '已转换为',
 
+  // Currency exchange
+  'exchange.screenTitle': '货币兑换',
+  'exchange.btnLabel': '兑换',
+  'exchange.txTitle': '货币兑换',
+  'exchange.youGive': '您兑出',
+  'exchange.youGet': '您兑入',
+  'exchange.rate': '汇率',
+  'exchange.fee': '手续费 (1.15%)',
+  'exchange.confirm': '立即兑换',
+  'exchange.selectCurrency': '选择货币',
+  'exchange.balance': '余额',
+  'exchange.enterAmount': '输入金额',
+  'exchange.success': '兑换成功！',
+  'exchange.insufficientBalance': '余额不足',
+
   // Employer dashboard
   'employer.registerTitle': '注册为雇主',
   'employer.registerHelp': '设置您的雇主账户以管理员工和运行工资单。',
@@ -6244,6 +6334,21 @@ const ja: TranslationMap = {
   'txHistory.noTransactions': '取引が見つかりません。',
   'txHistory.ref': '参照：',
   'txHistory.convertedTo': '...に変換',
+
+  // Currency exchange
+  'exchange.screenTitle': '通貨両替',
+  'exchange.btnLabel': '両替',
+  'exchange.txTitle': '通貨両替',
+  'exchange.youGive': '支払い通貨',
+  'exchange.youGet': '受取通貨',
+  'exchange.rate': 'レート',
+  'exchange.fee': '手数料 (1.15%)',
+  'exchange.confirm': '今すぐ両替',
+  'exchange.selectCurrency': '通貨を選択',
+  'exchange.balance': '残高',
+  'exchange.enterAmount': '金額を入力',
+  'exchange.success': '両替完了！',
+  'exchange.insufficientBalance': '残高不足',
 
   // Employer dashboard
   'employer.registerTitle': '雇用主として登録',

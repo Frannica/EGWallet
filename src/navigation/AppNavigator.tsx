@@ -28,7 +28,10 @@ import DepositScreen from '../screens/DepositScreen';
 import ReceiptScreen from '../screens/ReceiptScreen';
 import NotificationsScreen from '../screens/NotificationsScreen';
 import PayRequestScreen from '../screens/PayRequestScreen';
+import ExchangeScreen from '../screens/ExchangeScreen';
 import QRScannerScreen from '../screens/QRScannerScreen';
+import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
+import ResetPasswordScreen from '../screens/ResetPasswordScreen';
 import { ToastProvider } from '../utils/toast';
 import { LinkingOptions } from '@react-navigation/native';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -38,6 +41,7 @@ const linking: LinkingOptions<any> = {
   config: {
     screens: {
       PayRequest: 'pay/:requestId',
+      ResetPassword: 'reset-password',
     },
   },
 };
@@ -138,7 +142,11 @@ export default function AppNavigator() {
         <Stack.Navigator screenOptions={{ headerShown: true }}>
           {!auth.token ? (
             // ── Not authenticated ── show login/register
-            <Stack.Screen name="Auth" component={AuthScreen} options={{ headerShown: false }} />
+            <>
+              <Stack.Screen name="Auth" component={AuthScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} options={{ title: '' }} />
+              <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ title: '' }} />
+            </>
           ) : (
             // ── Authenticated ── show full app
             <>
@@ -160,6 +168,7 @@ export default function AppNavigator() {
               <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: t('screen.notifications') }} />
               <Stack.Screen name="PayRequest" component={PayRequestScreen} options={{ title: 'Pay Request' }} />
               <Stack.Screen name="QRScanner" component={QRScannerScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Exchange" component={ExchangeScreen} options={{ title: t('exchange.screenTitle') }} />
             </>
           )}
         </Stack.Navigator>

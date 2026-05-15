@@ -335,6 +335,7 @@ export default function TransactionHistory() {
           const isQrPayment = item.type === 'qr_payment';
           const isWithdrawal = item.type === 'withdrawal';
           const isPaymentRequest = item.type === 'payment_request';
+          const isExchange = item.type === 'exchange';
           const isIn = item.direction === 'in';
           const employerName = item.payrollMetadata?.employerName || 'Employer';
 
@@ -346,6 +347,8 @@ export default function TransactionHistory() {
             ? t('txHistory.paymentRequestSent')
             : isWithdrawal
             ? t('txHistory.withdrawal')
+            : isExchange
+            ? t('exchange.txTitle')
             : isIn
             ? t('txHistory.moneyReceived')
             : t('txHistory.moneySent');
@@ -358,6 +361,8 @@ export default function TransactionHistory() {
             ? 'time-outline'
             : isWithdrawal
             ? 'log-out'
+            : isExchange
+            ? 'swap-horizontal'
             : isIn
             ? 'arrow-down-circle'
             : 'arrow-up-circle';
@@ -370,6 +375,8 @@ export default function TransactionHistory() {
             ? '#F57C00'
             : isWithdrawal
             ? '#F57C00'
+            : isExchange
+            ? '#7C3AED'
             : isIn
             ? '#2E7D32'
             : '#D32F2F';
@@ -382,12 +389,14 @@ export default function TransactionHistory() {
             ? '#FFF3E0'
             : isWithdrawal
             ? '#FFF3E0'
+            : isExchange
+            ? '#F3E8FF'
             : isIn
             ? '#E8F5E9'
             : '#FFEBEE';
 
           const showPlus = isIn || isPayroll;
-          const accentColor = isPayroll ? '#1976D2' : isWithdrawal ? '#F57C00' : isPaymentRequest ? '#F57C00' : isIn ? '#22C55E' : '#1565C0';
+          const accentColor = isPayroll ? '#1976D2' : isWithdrawal ? '#F57C00' : isExchange ? '#7C3AED' : isPaymentRequest ? '#F57C00' : isIn ? '#22C55E' : '#1565C0';
           
           return (
             <View style={[styles.transactionCard, { borderLeftWidth: 3, borderLeftColor: accentColor }]}>

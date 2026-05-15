@@ -332,3 +332,43 @@ export async function deleteBudget(token: string, budgetId: string) {
 
   return res.json();
 }
+
+/** Submit a same-wallet currency exchange (POST /exchange). */
+export async function exchangeCurrency(
+  token: string,
+  walletId: string,
+  fromCurrency: string,
+  toCurrency: string,
+  amount: number,
+): Promise<any> {
+  const idempotencyKey = generateId();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/exchange`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        'Idempotency-Key': idempotencyKey,
+        'Accept-Language': getApiLanguage(),
+      },
+      body: JSON.stringify({ walletId, fromCurrency, toCurrency, amount, idempotencyKey }),
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') throw new Error('Request timed out. Please try again.');
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Exchange failed');
+  }
+
+  return res.json();
+}

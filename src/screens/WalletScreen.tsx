@@ -105,12 +105,14 @@ export default function WalletScreen() {
   // Poll unread notification count whenever screen is focused
   useFocusEffect(
     React.useCallback(() => {
+      let cancelled = false;
       if (auth.token) {
         fetch(`${API_BASE}/notifications`, { headers: { Authorization: `Bearer ${auth.token}` } })
           .then(r => r.ok ? r.json() : null)
-          .then(d => { if (d) setUnreadNotifCount(d.unreadCount ?? 0); })
+          .then(d => { if (d && !cancelled) setUnreadNotifCount(d.unreadCount ?? 0); })
           .catch(() => {});
       }
+      return () => { cancelled = true; };
     }, [auth.token])
   );
 
@@ -259,6 +261,7 @@ export default function WalletScreen() {
             { icon: 'add-circle' as const, label: t('wallet.addMoney'), bg: '#FEF9C3', color: '#A16207', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Add Money'); (navigation as any).navigate('Deposit', { walletId: wallets[0]?.id }); } },
             { icon: 'card' as const, label: t('nav.card'), bg: '#F3E8FF', color: '#7E22CE', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Card'); (navigation as any).navigate('Card'); } },
             { icon: 'sparkles' as const, label: t('wallet.aiSupport'), bg: '#EDE9FE', color: '#7C3AED', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: AI Support'); (navigation as any).navigate('AIChat'); } },
+            { icon: 'swap-horizontal' as const, label: t('exchange.btnLabel'), bg: '#FFF0F0', color: '#C62828', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Exchange'); (navigation as any).navigate('Exchange', { walletId: wallets[0]?.id }); } },
           ]).map(({ icon, label, bg, color, onPress }) => (
             <TouchableOpacity key={label} style={styles.quickActionBtn} onPress={onPress} activeOpacity={0.75}>
               <View style={[styles.quickActionIcon, { backgroundColor: bg }]}>
