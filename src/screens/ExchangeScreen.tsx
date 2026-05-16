@@ -188,8 +188,13 @@ export default function ExchangeScreen({ route, navigation }: any) {
           placeholder={t('exchange.enterAmount')}
           placeholderTextColor="#B0BEC5"
           keyboardType="decimal-pad"
-          value={amountStr}
-          onChangeText={v => { setAmountStr(v); setQuote(null); }}
+          value={formatAmountDisplay(amountStr)}
+          onChangeText={v => {
+            // Strip thousands-separator commas before storing raw value
+            const raw = v.replace(/,/g, '');
+            setAmountStr(raw);
+            setQuote(null);
+          }}
         />
       </View>
 
@@ -307,6 +312,13 @@ export default function ExchangeScreen({ route, navigation }: any) {
 
 // ── Sub-components ──────────────────────────────────────────────────────────
 
+function formatAmountDisplay(raw: string): string {
+  if (!raw) return '';
+  const parts = raw.split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return parts.join('.');
+}
+
 function QuoteRow({ label, value, bold = false }: { label: string; value: string; bold?: boolean }) {
   return (
     <View style={styles.quoteRow}>
@@ -360,6 +372,10 @@ function CurrencyPickerModal({
             data={filtered}
             keyExtractor={c => c}
             keyboardShouldPersistTaps="handled"
+            style={{ flex: 1 }}
+            ListEmptyComponent={
+              <Text style={styles.pickerEmpty}>No currencies found</Text>
+            }
             renderItem={({ item }) => (
               <TouchableOpacity
                 style={[styles.currencyItem, item === selected && styles.currencyItemSelected]}
@@ -551,7 +567,13 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 20,
-    maxHeight: '70%',
+    height: '70%',
+  },
+  pickerEmpty: {
+    textAlign: 'center',
+    color: '#9BAEC8',
+    fontSize: 14,
+    marginTop: 24,
   },
   modalTitle: {
     fontSize: 16,
