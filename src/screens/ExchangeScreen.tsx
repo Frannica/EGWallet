@@ -20,6 +20,8 @@ import {
   majorToMinor,
   formatMinorAmount,
   decimalsFor,
+  CURRENCY_INFO,
+  getCurrencyName,
 } from '../utils/currency';
 import { debitLocalBalance, creditLocalBalance } from '../utils/localBalance';
 
@@ -28,6 +30,15 @@ const POPULAR_CURRENCIES = [
   'KES', 'ZAR', 'CAD', 'JPY', 'CNY', 'SAR', 'AED', 'INR',
   'BRL', 'EGP', 'RWF', 'TND',
 ];
+
+const ALL_EXCHANGE_CURRENCIES = Object.keys(CURRENCY_INFO).sort((a, b) => {
+  const ai = POPULAR_CURRENCIES.indexOf(a);
+  const bi = POPULAR_CURRENCIES.indexOf(b);
+  if (ai !== -1 && bi !== -1) return ai - bi;
+  if (ai !== -1) return -1;
+  if (bi !== -1) return 1;
+  return a.localeCompare(b);
+});
 
 function rateAgeText(ts: number): string {
   const mins = Math.floor((Date.now() - ts) / 60000);
@@ -141,10 +152,7 @@ export default function ExchangeScreen({ route, navigation }: any) {
     }
   }
 
-  const toCurrencies = [...new Set([
-    ...POPULAR_CURRENCIES,
-    ...ownedBalances.map(b => b.currency),
-  ])].filter(c => c !== fromCurrency);
+  const toCurrencies = ALL_EXCHANGE_CURRENCIES.filter(c => c !== fromCurrency);
 
   const fromBal = ownedBalances.find(b => b.currency === fromCurrency);
   const netReceive = quote?.receivedAmountMinorAfterFee ?? quote?.receivedAmountMinor ?? 0;
@@ -314,22 +322,46 @@ function CurrencyPickerModal({
   onSelect: (c: string) => void;
   onClose: () => void;
 }) {
+  const [search, setSearch] = useState('');
+
+  useEffect(() => { if (!visible) setSearch(''); }, [visible]);
+
+  const filtered = search.trim()
+    ? currencies.filter(c =>
+        c.includes(search.toUpperCase().trim()) ||
+        (CURRENCY_INFO[c]?.name ?? '').toLowerCase().includes(search.toLowerCase().trim())
+      )
+    : currencies;
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <TouchableOpacity style={styles.modalOverlay} onPress={onClose} activeOpacity={1}>
         <View style={styles.modalSheet} onStartShouldSetResponder={() => true}>
           <Text style={styles.modalTitle}>{title}</Text>
+          <TextInput
+            style={styles.modalSearch}
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search currencies..."
+            placeholderTextColor="#9BAEC8"
+            autoCorrect={false}
+            autoCapitalize="characters"
+          />
           <FlatList
-            data={currencies}
+            data={filtered}
             keyExtractor={c => c}
+            keyboardShouldPersistTaps="handled"
             renderItem={({ item }) => (
               <TouchableOpacity
                 style={[styles.currencyItem, item === selected && styles.currencyItemSelected]}
-                onPress={() => onSelect(item)}
+                onPress={() => { onSelect(item); setSearch(''); }}
               >
-                <Text style={[styles.currencyItemText, item === selected && styles.currencyItemTextSelected]}>
-                  {item}
-                </Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.currencyItemText, item === selected && styles.currencyItemTextSelected]}>
+                    {item}
+                  </Text>
+                  <Text style={styles.currencyItemName}>{getCurrencyName(item)}</Text>
+                </View>
                 {item === selected && <Ionicons name="checkmark" size={18} color="#1565C0" />}
               </TouchableOpacity>
             )}
@@ -540,5 +572,21 @@ const styles = StyleSheet.create({
   currencyItemTextSelected: {
     color: '#1565C0',
     fontWeight: '700',
+  },
+  currencyItemName: {
+    fontSize: 12,
+    color: '#9BAEC8',
+    marginTop: 1,
+  },
+  modalSearch: {
+    borderWidth: 1,
+    borderColor: '#D1DFF0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: '#1A2B4A',
+    backgroundColor: '#F5F9FF',
+    marginBottom: 10,
   },
 });
