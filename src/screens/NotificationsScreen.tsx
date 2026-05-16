@@ -8,6 +8,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
 import { useLanguage } from '../i18n/LanguageContext';
+import { formatMinorAmount } from '../utils/currency';
 
 type Notif = {
   id: string;
@@ -20,15 +21,112 @@ type Notif = {
 };
 
 const TYPE_ICON: Record<string, { icon: string; color: string; bg: string }> = {
-  money_received: { icon: 'arrow-down-circle', color: '#15803D', bg: '#DCFCE7' },
-  money_sent:     { icon: 'arrow-up-circle',   color: '#1565C0', bg: '#DBEAFE' },
-  deposit:        { icon: 'add-circle',         color: '#A16207', bg: '#FEF9C3' },
-  withdrawal:     { icon: 'log-out',            color: '#F57C00', bg: '#FFF3E0' },
-  failed:         { icon: 'close-circle',       color: '#DC2626', bg: '#FEE2E2' },
+  money_received:  { icon: 'arrow-down-circle', color: '#15803D', bg: '#DCFCE7' },
+  money_sent:      { icon: 'arrow-up-circle',   color: '#1565C0', bg: '#DBEAFE' },
+  deposit:         { icon: 'add-circle',         color: '#A16207', bg: '#FEF9C3' },
+  withdrawal:      { icon: 'log-out',            color: '#F57C00', bg: '#FFF3E0' },
+  failed:          { icon: 'close-circle',       color: '#DC2626', bg: '#FEE2E2' },
+  payment_request: { icon: 'cash-outline',       color: '#7C3AED', bg: '#EDE9FE' },
 };
 
 function getIconMeta(type: string) {
   return TYPE_ICON[type] ?? { icon: 'notifications', color: '#1565C0', bg: '#DBEAFE' };
+}
+
+function fill(tpl: string, vars: Record<string, string>): string {
+  return Object.entries(vars).reduce((s, [k, v]) => s.split(`{{${k}}}`).join(v), tpl);
+}
+
+function getLocalizedTitle(type: string, t: (k: string) => string, fallback: string): string {
+  const key = `notif.type.${type}`;
+  const translated = t(key);
+  return translated !== key ? translated : fallback;
+}
+
+function getLocalizedBody(
+  type: string,
+  metadata: any,
+  body: string,
+  t: (k: string) => string
+): string {
+  try {
+    const m = metadata || {};
+    if (type === 'money_received') {
+      const fromIdx = body.lastIndexOf(' from ');
+      const senderName = fromIdx !== -1
+        ? body.substring(fromIdx + 6).replace(/ for "[^"]*"$/, '').trim()
+        : '—';
+      return fill(t('notif.body.money_received'), {
+        amount: formatMinorAmount(m.amount, m.currency),
+        currency: m.currency,
+        from: senderName,
+      });
+    }
+    if (type === 'money_sent') {
+      const arrowIdx = body.indexOf('\u2192');
+      if (arrowIdx !== -1) {
+        const parts = body.substring(arrowIdx + 2).trim().split(' ');
+        return fill(t('notif.body.money_sent_fx'), {
+          amount: formatMinorAmount(m.amount, m.currency),
+          currency: m.currency,
+          receivedAmount: parts[0] ?? '',
+          receivedCurrency: parts[1] ?? '',
+        });
+      }
+      const memoMatch = body.match(/for "(.+)"$/);
+      if (memoMatch) {
+        return fill(t('notif.body.money_sent_memo'), {
+          amount: formatMinorAmount(m.amount, m.currency),
+          currency: m.currency,
+          memo: memoMatch[1],
+        });
+      }
+      return fill(t('notif.body.money_sent'), {
+        amount: formatMinorAmount(m.amount, m.currency),
+        currency: m.currency,
+      });
+    }
+    if (type === 'deposit') {
+      if (m.feeAmount && m.feeAmount > 0) {
+        return fill(t('notif.body.deposit_fee'), {
+          amount: formatMinorAmount(m.netCredited, m.currency),
+          currency: m.currency,
+          fee: formatMinorAmount(m.feeAmount, m.currency),
+        });
+      }
+      return fill(t('notif.body.deposit'), {
+        amount: formatMinorAmount(m.netCredited, m.currency),
+        currency: m.currency,
+      });
+    }
+    if (type === 'withdrawal') {
+      return fill(t('notif.body.withdrawal'), {
+        amount: formatMinorAmount(m.amount, m.currency),
+        currency: m.currency,
+      });
+    }
+    if (type === 'payment_request') {
+      const nameMatch = body.match(/^(.+?) is requesting/);
+      return fill(t('notif.body.payment_request'), {
+        name: nameMatch ? nameMatch[1] : '—',
+        amount: formatMinorAmount(m.amount, m.currency),
+        currency: m.currency,
+      });
+    }
+    if (type === 'exchange_completed') {
+      const arrowIdx = body.indexOf('\u2192');
+      const parts = arrowIdx !== -1
+        ? body.substring(arrowIdx + 2).trim().split(' ')
+        : ['?', m.toCurrency ?? ''];
+      return fill(t('notif.body.exchange_completed'), {
+        amount: formatMinorAmount(m.amount, m.fromCurrency),
+        fromCurrency: m.fromCurrency ?? '',
+        receivedAmount: parts[0] ?? '?',
+        toCurrency: parts[1] ?? m.toCurrency ?? '',
+      });
+    }
+  } catch {}
+  return body;
 }
 
 function formatRelTime(ts: number, t: (key: string) => string) {
@@ -149,10 +247,16 @@ export default function NotificationsScreen() {
         }
         renderItem={({ item }) => {
           const { icon, color, bg } = getIconMeta(item.type);
+          const handleTap = async () => {
+            await markOneRead(item.id);
+            if (item.type === 'payment_request' && item.metadata?.requestId) {
+              (navigation as any).navigate('PayRequest', { requestId: item.metadata.requestId });
+            }
+          };
           return (
             <TouchableOpacity
               style={[styles.card, !item.read && styles.cardUnread]}
-              onPress={() => markOneRead(item.id)}
+              onPress={handleTap}
               activeOpacity={0.8}
             >
               <View style={[styles.iconWrap, { backgroundColor: bg }]}>
@@ -160,10 +264,10 @@ export default function NotificationsScreen() {
               </View>
               <View style={styles.textWrap}>
                 <View style={styles.titleRow}>
-                  <Text style={[styles.title, !item.read && styles.titleBold]}>{item.title}</Text>
+                  <Text style={[styles.title, !item.read && styles.titleBold]}>{getLocalizedTitle(item.type, t, item.title)}</Text>
                   {!item.read && <View style={styles.unreadDot} />}
                 </View>
-                <Text style={styles.body} numberOfLines={2}>{item.body}</Text>
+                <Text style={styles.body} numberOfLines={2}>{getLocalizedBody(item.type, item.metadata, item.body, t)}</Text>
                 <Text style={styles.time}>{formatRelTime(item.createdAt, t)}</Text>
               </View>
             </TouchableOpacity>
