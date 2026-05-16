@@ -1928,6 +1928,7 @@ function loadDB() {
           BWP: 14, ZWL: 360, MZN: 65, NAD: 19, LSL: 19,
           ERN: 15, AOA: 835, SOS: 570, SDG: 550, GMD: 65,
           MUR: 45, SCR: 13, ZMW: 25, MWK: 1700, GNF: 8600,
+          SLE: 22, CDF: 2800, CVE: 103, HTG: 132,
         },
         updatedAt: Date.now()
       }

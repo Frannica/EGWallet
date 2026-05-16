@@ -44,17 +44,16 @@ export async function fetchFxQuote(
   from: string,
   to: string,
   amountMinor: number
-): Promise<FxQuote | null> {
-  try {
-    const res = await fetch(
-      `${API_BASE}/fx-quote?from=${from}&to=${to}&amount=${amountMinor}`,
-      { headers: { Authorization: `Bearer ${token}`, 'Accept-Language': getApiLanguage() } }
-    );
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
+): Promise<FxQuote> {
+  const res = await fetch(
+    `${API_BASE}/fx-quote?from=${from}&to=${to}&amount=${amountMinor}`,
+    { headers: { Authorization: `Bearer ${token}`, 'Accept-Language': getApiLanguage() } }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Quote unavailable');
   }
+  return res.json();
 }
 
 export async function sendTransaction(

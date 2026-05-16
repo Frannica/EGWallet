@@ -62,6 +62,7 @@ export default function ExchangeScreen({ route, navigation }: any) {
   const [ownedBalances, setOwnedBalances] = useState<Balance[]>([]);
   const [quote, setQuote] = useState<FxQuote | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showFromPicker, setShowFromPicker] = useState(false);
   const [showToPicker, setShowToPicker] = useState(false);
@@ -85,15 +86,17 @@ export default function ExchangeScreen({ route, navigation }: any) {
   const doFetchQuote = useCallback(() => {
     if (!auth.token || !fromCurrency || !toCurrency || fromCurrency === toCurrency) {
       setQuote(null);
+      setQuoteError(null);
       return;
     }
     const num = parseFloat(amountStr.replace(',', '.'));
-    if (!num || num <= 0) { setQuote(null); return; }
+    if (!num || num <= 0) { setQuote(null); setQuoteError(null); return; }
     const amountMinor = majorToMinor(num, fromCurrency);
     setQuoteLoading(true);
+    setQuoteError(null);
     fetchFxQuote(auth.token, fromCurrency, toCurrency, amountMinor)
-      .then(q => setQuote(q))
-      .catch(() => setQuote(null))
+      .then(q => { setQuote(q); setQuoteError(null); })
+      .catch((err: any) => { setQuote(null); setQuoteError(err.message || 'Could not get exchange rate'); })
       .finally(() => setQuoteLoading(false));
   }, [auth.token, fromCurrency, toCurrency, amountStr]);
 
@@ -217,6 +220,12 @@ export default function ExchangeScreen({ route, navigation }: any) {
         )}
         {quoteLoading && (
           <ActivityIndicator size="small" color="#1565C0" style={{ marginTop: 10 }} />
+        )}
+        {quoteError && amountStr.trim() !== '' && (
+          <View style={styles.quoteErrorBox}>
+            <Ionicons name="alert-circle-outline" size={14} color="#D32F2F" />
+            <Text style={styles.quoteErrorText}>{quoteError}</Text>
+          </View>
         )}
       </View>
 
@@ -588,5 +597,19 @@ const styles = StyleSheet.create({
     color: '#1A2B4A',
     backgroundColor: '#F5F9FF',
     marginBottom: 10,
+  },
+  quoteErrorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEEBEE',
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 10,
+    gap: 6,
+  },
+  quoteErrorText: {
+    fontSize: 13,
+    color: '#D32F2F',
+    flex: 1,
   },
 });
