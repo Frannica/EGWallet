@@ -4,75 +4,75 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLanguage } from '../i18n/LanguageContext';
 
 interface FAQ {
-  question: string;
-  answer: string;
-  category: string;
+  categoryKey: string;
+  questionKey: string;
+  answerKey: string;
 }
 
 const FAQS: FAQ[] = [
   {
-    category: 'Getting Started',
-    question: 'How do I create a wallet?',
-    answer: 'Your wallet is automatically created when you register. You can view your wallet balance on the home screen.',
+    categoryKey: 'help.category.gettingStarted',
+    questionKey: 'help.question.createWallet',
+    answerKey: 'help.answer.createWallet',
   },
   {
-    category: 'Getting Started',
-    question: 'Is my money safe?',
-    answer: 'Yes! We use bank-level encryption and security. Your funds are protected with biometric authentication and all transactions are encrypted.',
+    categoryKey: 'help.category.gettingStarted',
+    questionKey: 'help.question.moneySafe',
+    answerKey: 'help.answer.moneySafe',
   },
   {
-    category: 'Sending Money',
-    question: 'How do I send money?',
-    answer: 'Tap the "Send" button on your wallet screen, enter the recipient\'s wallet ID or scan their QR code, enter the amount, and confirm.',
+    categoryKey: 'help.category.sendingMoney',
+    questionKey: 'help.question.sendMoney',
+    answerKey: 'help.answer.sendMoney',
   },
   {
-    category: 'Sending Money',
-    question: 'What are the sending limits?',
-    answer: 'You can send up to $5,000 USD per day. Your wallet can hold up to $250,000 USD equivalent.',
+    categoryKey: 'help.category.sendingMoney',
+    questionKey: 'help.question.sendingLimits',
+    answerKey: 'help.answer.sendingLimits',
   },
   {
-    category: 'Payment Requests',
-    question: 'How do payment requests work?',
-    answer: 'Create a payment request with an amount and share the link. When someone pays it, the money goes directly to your wallet.',
+    categoryKey: 'help.category.paymentRequests',
+    questionKey: 'help.question.paymentRequestsWork',
+    answerKey: 'help.answer.paymentRequestsWork',
   },
   {
-    category: 'Payment Requests',
-    question: 'Can I cancel a payment request?',
-    answer: 'Yes, you can cancel any pending payment request. Once paid, it cannot be cancelled.',
+    categoryKey: 'help.category.paymentRequests',
+    questionKey: 'help.question.cancelPaymentRequest',
+    answerKey: 'help.answer.cancelPaymentRequest',
   },
   {
-    category: 'Virtual Cards',
-    question: 'What are virtual cards?',
-    answer: 'Virtual cards are temporary card numbers you can use for online shopping. They help protect your main wallet from fraud.',
+    categoryKey: 'help.category.virtualCards',
+    questionKey: 'help.question.virtualCards',
+    answerKey: 'help.answer.virtualCards',
   },
   {
-    category: 'Virtual Cards',
-    question: 'Are virtual cards free?',
-    answer: 'Yes, virtual cards are free to create. You can use them for online purchases and digital subscriptions. Spending limits depend on your account tier.',
+    categoryKey: 'help.category.virtualCards',
+    questionKey: 'help.question.virtualCardsFree',
+    answerKey: 'help.answer.virtualCardsFree',
   },
   {
-    category: 'Budgets',
-    question: 'How do budgets help me?',
-    answer: 'Budgets help you track spending by category. Set monthly limits and get alerts when you\'re close to your limit.',
+    categoryKey: 'help.category.budgets',
+    questionKey: 'help.question.budgetsHelp',
+    answerKey: 'help.answer.budgetsHelp',
   },
   {
-    category: 'Currency',
-    question: 'Can I receive money in different currencies?',
-    answer: 'Yes! You can receive 30+ currencies. Enable auto-convert in settings to automatically convert to your preferred currency.',
+    categoryKey: 'help.category.currency',
+    questionKey: 'help.question.receiveDifferentCurrencies',
+    answerKey: 'help.answer.receiveDifferentCurrencies',
   },
   {
-    category: 'Security',
-    question: 'How do I enable biometric lock?',
-    answer: 'Go to Settings > Privacy & Security and toggle on Fingerprint/Face Lock. Your app will be locked when you leave it.',
+    categoryKey: 'help.category.security',
+    questionKey: 'help.question.enableBiometricLock',
+    answerKey: 'help.answer.enableBiometricLock',
   },
   {
-    category: 'Account',
-    question: 'How do I delete my account?',
-    answer: 'Go to Settings > Privacy & Security > Delete Account. You\'ll need to contact support to verify your identity.',
+    categoryKey: 'help.category.account',
+    questionKey: 'help.question.deleteAccount',
+    answerKey: 'help.answer.deleteAccount',
   },
 ];
 
-const CATEGORIES = Array.from(new Set(FAQS.map(f => f.category)));
+const CATEGORIES = Array.from(new Set(FAQS.map(f => f.categoryKey)));
 
 export default function HelpCenterScreen() {
   const { t } = useLanguage();
@@ -80,11 +80,11 @@ export default function HelpCenterScreen() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   const filteredFAQs = selectedCategory
-    ? FAQS.filter(f => f.category === selectedCategory)
+    ? FAQS.filter(f => f.categoryKey === selectedCategory)
     : FAQS;
 
   const handleContactSupport = () => {
-    Linking.openURL('mailto:support@egwallet.com?subject=Help Request');
+    Linking.openURL('mailto:SUPPORT@EGWALLETFINANCE.COM?subject=Help Request');
   };
 
   return (
@@ -113,8 +113,8 @@ export default function HelpCenterScreen() {
             style={[styles.categoryChip, !selectedCategory && styles.categoryChipActive]}
             onPress={() => setSelectedCategory(null)}
           >
-            <Text style={[styles.categoryChipText, !selectedCategory && styles.categoryChipTextActive]}>
-              {t('common.all')}
+            <Text style={[styles.categoryChipText, !selectedCategory && styles.categoryChipTextActive]} numberOfLines={1}>
+              {t('help.all')}
             </Text>
           </TouchableOpacity>
           {CATEGORIES.map((category) => (
@@ -123,8 +123,8 @@ export default function HelpCenterScreen() {
               style={[styles.categoryChip, selectedCategory === category && styles.categoryChipActive]}
               onPress={() => setSelectedCategory(category)}
             >
-              <Text style={[styles.categoryChipText, selectedCategory === category && styles.categoryChipTextActive]}>
-                {category}
+              <Text style={[styles.categoryChipText, selectedCategory === category && styles.categoryChipTextActive]} numberOfLines={1}>
+                {t(category)}
               </Text>
             </TouchableOpacity>
           ))}
@@ -141,8 +141,8 @@ export default function HelpCenterScreen() {
               style={styles.faqHeader}
             >
               <View style={styles.faqQuestionContainer}>
-                <Text style={styles.faqCategory}>{faq.category}</Text>
-                <Text style={styles.faqQuestion}>{faq.question}</Text>
+                <Text style={styles.faqCategory}>{t(faq.categoryKey)}</Text>
+                <Text style={styles.faqQuestion}>{t(faq.questionKey)}</Text>
               </View>
               <Ionicons
                 name={expandedIndex === index ? 'chevron-up' : 'chevron-down'}
@@ -152,7 +152,7 @@ export default function HelpCenterScreen() {
             </TouchableOpacity>
             {expandedIndex === index && (
               <View style={styles.faqAnswer}>
-                <Text style={styles.faqAnswerText}>{faq.answer}</Text>
+                <Text style={styles.faqAnswerText}>{t(faq.answerKey)}</Text>
               </View>
             )}
           </View>
@@ -231,6 +231,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
     borderWidth: 1,
     borderColor: '#E1E8ED',
+    maxWidth: 200,
   },
   categoryChipActive: {
     backgroundColor: '#007AFF',
@@ -307,3 +308,4 @@ const styles = StyleSheet.create({
     color: '#007AFF',
   },
 });
+
