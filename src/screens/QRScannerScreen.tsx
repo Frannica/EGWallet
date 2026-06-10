@@ -7,31 +7,11 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../auth/AuthContext';
-import { sendTransaction } from '../api/transactions';
+import { validateQr, payViaQr, ValidatedQr, generateId } from '../api/transactions';
 import { listWallets } from '../api/auth';
 import { majorToMinor, formatCurrency } from '../utils/currency';
 import { useLanguage } from '../i18n/LanguageContext';
 import { debitLocalBalance } from '../utils/localBalance';
-
-// ─── QR payload types ────────────────────────────────────────────────────────
-
-interface WalletAddressPayload {
-  type: 'wallet_address';
-  walletId: string;
-  version?: number;
-}
-
-interface PaymentRequestPayload {
-  type: 'payment_request';
-  walletId: string;
-  amount: number;        // minor units
-  currency: string;
-  memo?: string;
-  requestId?: string;
-  expiresAt?: number;
-}
-
-type QRPayload = WalletAddressPayload | PaymentRequestPayload;
 
 function formatAmountInput(text: string): string {
   const cleaned = text.replace(/[^0-9.]/g, '');
@@ -53,14 +33,21 @@ export default function QRScannerScreen() {
 
   // Confirmation modal
   const [showConfirm, setShowConfirm] = useState(false);
-  const [qrPayload, setQrPayload] = useState<QRPayload | null>(null);
+  // Validated QR details returned by /qr/validate
+  const [validatedQr, setValidatedQr] = useState<ValidatedQr | null>(null);
+  // Raw egwallet:// string — sent to /qr/pay unchanged
+  const [scannedQrString, setScannedQrString] = useState<string | null>(null);
 
-  // For wallet_address type: user types the amount
+  // For static QR type: payer types the amount
   const [manualAmount, setManualAmount] = useState('');
   const [manualCurrency, setManualCurrency] = useState('');
 
+  // Stable idempotency key — reused across retries; reset only after confirmed success
+  const qrPayIdempotencyKeyRef = useRef(generateId());
+
   // Payment state
   const [paying, setPaying] = useState(false);
+  const [validating, setValidating] = useState(false);
   const [myWalletId, setMyWalletId] = useState<string | null>(null);
 
   // Load sender wallet on mount
@@ -76,14 +63,13 @@ export default function QRScannerScreen() {
 
   // ── Barcode handler ─────────────────────────────────────────────────────
 
-  const handleBarcodeScanned = ({ data }: { data: string }) => {
+  const handleBarcodeScanned = async ({ data }: { data: string }) => {
     if (scanned) return;
     setScanned(true);
 
-    let payload: QRPayload;
-    try {
-      payload = JSON.parse(data);
-    } catch {
+    // Only accept server-issued signed QR strings. Plain JSON QRs are rejected
+    // because they carry no HMAC and can be forged by anyone to redirect payments.
+    if (!data.startsWith('egwallet://')) {
       Alert.alert(
         t('qrScan.invalidQrTitle'),
         t('qrScan.invalidQrMessage'),
@@ -92,34 +78,46 @@ export default function QRScannerScreen() {
       return;
     }
 
-    if (payload.type !== 'wallet_address' && payload.type !== 'payment_request') {
+    if (!auth.token) {
+      Alert.alert(t('common.error'), t('common.notAuthenticated'), [
+        { text: t('qrScan.scanAgain'), onPress: () => setScanned(false) },
+      ]);
+      return;
+    }
+
+    // Validate the QR server-side before showing any confirmation UI
+    setValidating(true);
+    let result: ValidatedQr;
+    try {
+      result = await validateQr(auth.token, data);
+    } catch {
+      setValidating(false);
       Alert.alert(
-        t('qrScan.unsupportedQrTitle'),
-        t('qrScan.unsupportedQrMessage'),
+        t('qrScan.invalidQrTitle'),
+        t('qrScan.invalidQrMessage'),
+        [{ text: t('qrScan.scanAgain'), onPress: () => setScanned(false) }],
+      );
+      return;
+    }
+    setValidating(false);
+
+    if (!result.valid) {
+      Alert.alert(
+        t('qrScan.invalidQrTitle'),
+        result.error || t('qrScan.invalidQrMessage'),
         [{ text: t('qrScan.scanAgain'), onPress: () => setScanned(false) }],
       );
       return;
     }
 
-    // Check expiry for payment_request
-    if (payload.type === 'payment_request' && payload.expiresAt) {
-      if (Date.now() > payload.expiresAt) {
-        Alert.alert(
-          t('qrScan.qrExpiredTitle'),
-          t('qrScan.qrExpiredMessage'),
-          [{ text: t('qrScan.scanAgain'), onPress: () => setScanned(false) }],
-        );
-        return;
-      }
-    }
-
-    // Pre-fill currency for wallet_address type from user's preferred currency
-    if (payload.type === 'wallet_address') {
+    // Pre-fill currency for static QR (payer supplies amount)
+    if (result.type === 'static') {
       setManualAmount('');
       setManualCurrency(auth.user?.preferredCurrency ?? 'XAF');
     }
 
-    setQrPayload(payload);
+    setScannedQrString(data);
+    setValidatedQr(result);
     setShowConfirm(true);
   };
 
@@ -131,33 +129,13 @@ export default function QRScannerScreen() {
       Alert.alert(t('common.error'), t('qrScan.walletLoadError'));
       return;
     }
-    if (!qrPayload) return;
+    if (!scannedQrString || !validatedQr) return;
 
-    let toWalletId: string;
-    let amountMinor: number;
-    let currency: string;
-    let memo: string | undefined;
+    let amountMinor: number | undefined;
+    let currency: string | undefined;
 
-    if (qrPayload.type === 'payment_request') {
-      // Validate embedded values before trusting them
-      if (!qrPayload.walletId || typeof qrPayload.walletId !== 'string' || !qrPayload.walletId.trim()) {
-        Alert.alert(t('common.invalidQr'), t('qrScan.missingWalletId'));
-        return;
-      }
-      if (typeof qrPayload.amount !== 'number' || !isFinite(qrPayload.amount) || qrPayload.amount <= 0) {
-        Alert.alert(t('common.invalidQr'), t('qrScan.invalidQrAmount'));
-        return;
-      }
-      if (!qrPayload.currency || typeof qrPayload.currency !== 'string' || !qrPayload.currency.trim()) {
-        Alert.alert(t('common.invalidQr'), t('qrScan.missingQrCurrency'));
-        return;
-      }
-      toWalletId = qrPayload.walletId.trim();
-      amountMinor = qrPayload.amount;
-      currency = qrPayload.currency.trim().toUpperCase();
-      memo = qrPayload.memo;
-    } else {
-      // wallet_address — user entered amount
+    if (validatedQr.type === 'static') {
+      // Payer-supplied amount for static (wallet-address) QRs
       const raw = parseFloat(manualAmount.replace(/,/g, ''));
       if (!manualAmount || isNaN(raw) || raw <= 0) {
         Alert.alert(t('common.invalidAmount'), t('qrScan.invalidAmount'));
@@ -167,38 +145,37 @@ export default function QRScannerScreen() {
         Alert.alert(t('common.missingCurrency'), t('qrScan.missingCurrency'));
         return;
       }
-      toWalletId = qrPayload.walletId;
       amountMinor = majorToMinor(raw, manualCurrency.toUpperCase());
       currency = manualCurrency.toUpperCase();
-      memo = t('qrScan.qrPaymentMemo');
     }
-
-    if (toWalletId === myWalletId) {
-      Alert.alert(t('common.error'), t('qrScan.cantPayYourself'));
-      return;
-    }
+    // For dynamic QRs the amount is server-side; /qr/pay reads it from the DB.
 
     setPaying(true);
     try {
-      const result = await sendTransaction(
+      const result = await payViaQr(
         auth.token,
+        scannedQrString,
         myWalletId,
-        toWalletId,
         amountMinor,
         currency,
-        memo,
+        qrPayIdempotencyKeyRef.current,
       );
+      // Reset key only after confirmed success so retries reuse the same key
+      qrPayIdempotencyKeyRef.current = generateId();
 
       const tx = result?.transaction ?? result;
+      const paidAmount = amountMinor ?? (validatedQr.amount ?? 0);
+      const paidCurrency = currency ?? (validatedQr.currency ?? 'XAF');
+
       setShowConfirm(false);
       setPaying(false);
 
       // Debit local cache immediately so WalletScreen shows the correct balance
-      await debitLocalBalance(currency, amountMinor);
+      await debitLocalBalance(paidCurrency, paidAmount);
 
-      const sentDisplay = formatCurrency(amountMinor, currency);
+      const sentDisplay = formatCurrency(paidAmount, paidCurrency);
       const receivedDisplay = tx?.receivedAmount != null
-        ? formatCurrency(tx.receivedAmount, tx.receivedCurrency ?? currency)
+        ? formatCurrency(tx.receivedAmount, tx.receivedCurrency ?? paidCurrency)
         : null;
 
       Alert.alert(
@@ -226,7 +203,8 @@ export default function QRScannerScreen() {
 
   const handleCloseConfirm = () => {
     setShowConfirm(false);
-    setQrPayload(null);
+    setValidatedQr(null);
+    setScannedQrString(null);
     setScanned(false);
     setPaying(false);
   };
@@ -318,8 +296,15 @@ export default function QRScannerScreen() {
         </Text>
       </View>
 
+      {/* Validating spinner (shown while /qr/validate is in-flight) */}
+      {validating && (
+        <View style={styles.scanAgainRow}>
+          <ActivityIndicator size="large" color="#fff" />
+        </View>
+      )}
+
       {/* Scan again button (shown after a failed scan) */}
-      {scanned && !showConfirm && (
+      {scanned && !showConfirm && !validating && (
         <View style={styles.scanAgainRow}>
           <TouchableOpacity style={styles.scanAgainBtn} onPress={() => setScanned(false)}>
             <Text style={styles.scanAgainText}>{t('qrScan.scanAgain')}</Text>
@@ -348,71 +333,62 @@ export default function QRScannerScreen() {
                   <Ionicons name="qr-code" size={26} color="#1565C0" />
                 </View>
                 <Text style={styles.sheetTitle}>
-                  {qrPayload?.type === 'payment_request' ? 'Confirm Payment' : t('qrScan.payViaQr')}
+                  {validatedQr?.type === 'dynamic' ? 'Confirm Payment' : t('qrScan.payViaQr')}
                 </Text>
               </View>
 
-              {qrPayload?.type === 'payment_request' && (
+              {/* Dynamic QR — server-verified amount */}
+              {validatedQr?.type === 'dynamic' && (
                 <>
-                  {/* Amount row */}
                   <View style={styles.amountCard}>
                     <Text style={styles.amountCardLabel}>{t('qrScan.amountToPay')}</Text>
                     <Text style={styles.amountCardValue}>
-                      {formatCurrency(qrPayload.amount, qrPayload.currency)}
+                      {formatCurrency(validatedQr.amount ?? 0, validatedQr.currency ?? '')}
                     </Text>
-                    <Text style={styles.amountCardCurrency}>{qrPayload.currency}</Text>
+                    <Text style={styles.amountCardCurrency}>{validatedQr.currency}</Text>
                   </View>
 
-                  {qrPayload.memo ? (
+                  {validatedQr.memo ? (
                     <View style={styles.detailRow}>
                       <Ionicons name="receipt-outline" size={16} color="#666" />
                       <Text style={styles.detailLabel}>{t('qrScan.for')}</Text>
-                      <Text style={styles.detailValue}>{qrPayload.memo}</Text>
+                      <Text style={styles.detailValue}>{validatedQr.memo}</Text>
                     </View>
                   ) : null}
 
-                  <View style={styles.detailRow}>
-                    <Ionicons name="wallet-outline" size={16} color="#666" />
-                    <Text style={styles.detailLabel}>{t('qrScan.toWallet')}</Text>
-                    <Text style={styles.detailValue} numberOfLines={1}>
-                      {qrPayload.walletId.length > 20
-                        ? `${qrPayload.walletId.slice(0, 10)}...${qrPayload.walletId.slice(-6)}`
-                        : qrPayload.walletId}
-                    </Text>
-                  </View>
-
-                  {qrPayload.expiresAt ? (
+                  {validatedQr.expiresAt ? (
                     <View style={styles.detailRow}>
                       <Ionicons name="time-outline" size={16} color="#666" />
                       <Text style={styles.detailLabel}>{t('qrScan.valid')}</Text>
                       <Text style={[
                         styles.detailValue,
-                        (Date.now() > (qrPayload.expiresAt - 5 * 60 * 1000)) && { color: '#D32F2F' },
+                        (Date.now() > ((validatedQr.expiresAt ?? 0) - 5 * 60 * 1000)) && { color: '#D32F2F' },
                       ]}>
-                        {getExpiryLabel(qrPayload.expiresAt)}
+                        {getExpiryLabel(validatedQr.expiresAt)}
                       </Text>
                     </View>
                   ) : null}
 
                   <Text style={styles.feeNote}>
-                    {qrPayload.currency === (auth.user?.preferredCurrency ?? qrPayload.currency)
+                    {validatedQr.currency === (auth.user?.preferredCurrency ?? validatedQr.currency)
                       ? t('qrScan.noConversionFee')
                       : t('qrScan.fxFee')}
                   </Text>
                 </>
               )}
 
-              {qrPayload?.type === 'wallet_address' && (
+              {/* Static QR — payer supplies amount */}
+              {validatedQr?.type === 'static' && (
                 <>
-                  <View style={styles.detailRow}>
-                    <Ionicons name="wallet-outline" size={16} color="#666" />
-                    <Text style={styles.detailLabel}>{t('qrScan.toWallet')}</Text>
-                    <Text style={styles.detailValue} numberOfLines={1}>
-                      {qrPayload.walletId.length > 20
-                        ? `${qrPayload.walletId.slice(0, 10)}...${qrPayload.walletId.slice(-6)}`
-                        : qrPayload.walletId}
-                    </Text>
-                  </View>
+                  {validatedQr.displayName ? (
+                    <View style={styles.detailRow}>
+                      <Ionicons name="person-outline" size={16} color="#666" />
+                      <Text style={styles.detailLabel}>{t('qrScan.toWallet')}</Text>
+                      <Text style={styles.detailValue} numberOfLines={1}>
+                        {validatedQr.displayName}
+                      </Text>
+                    </View>
+                  ) : null}
 
                   <Text style={styles.inputLabel}>{t('qrScan.amount')}</Text>
                   <TextInput
@@ -429,7 +405,7 @@ export default function QRScannerScreen() {
                   <TextInput
                     style={styles.input}
                     value={manualCurrency}
-                    onChangeText={t => setManualCurrency(t.toUpperCase())}
+                    onChangeText={v => setManualCurrency(v.toUpperCase())}
                     placeholder="XAF"
                     autoCapitalize="characters"
                     maxLength={5}
@@ -671,3 +647,4 @@ const styles = StyleSheet.create({
   cancelBtn: { marginTop: 10, alignItems: 'center', padding: 10 },
   cancelBtnText: { color: '#888', fontSize: 15 },
 });
+

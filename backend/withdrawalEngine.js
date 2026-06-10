@@ -9,6 +9,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
+const { encryptPII, maskAccountNumber } = require('./piiCipher');
 
 // ─── Allowed status transitions (state machine) ──────────────────────────────
 const VALID_TRANSITIONS = {
@@ -102,17 +103,39 @@ function createWithdrawal(db, userId, fields) {
     feeRate,
     netPayout,
 
-    // Routing details (stored exactly as submitted)
-    method,                                 // 'bank' | 'mobile' | 'debit'
+    // Routing details — defense-in-depth PAN enforcement.
+    // Even if a caller bypasses the route-level sanitization, this layer ensures
+    // a full card PAN is never written to db.json.
+    // PII fields (accountNumber, iban, swiftBic, accountHolderName, bankName) are
+    // AES-256-GCM encrypted at rest via piiCipher.js.  Safe display copies are kept
+    // in accountMask and bankNameDisplay so API responses never expose ciphertext.
+    method,                                 // 'bank' | 'mobile' | 'debit' | 'credit'
     isInternational: !!isInternational,
     country:          country          || null,
-    bankName:         bankName         || null,
-    accountNumber:    accountNumber    || null,
-    accountHolderName: accountHolderName || null,
     bankCode:         bankCode         || null,
     branchCode:       branchCode       || null,
-    iban:             iban             || null,
-    swiftBic:         swiftBic         || null,
+
+    // Plaintext display copies — non-sensitive, used only for memos and masked responses.
+    accountMask: (() => {
+      if (!accountNumber) return null;
+      const plain = (method === 'debit' || method === 'credit')
+        ? String(accountNumber).replace(/\D/g, '').slice(-4)
+        : accountNumber;
+      return maskAccountNumber(plain);
+    })(),
+    bankNameDisplay: bankName || null,
+
+    // Encrypted PII — decrypted only inside payoutProviders.js at disbursement time.
+    bankName: encryptPII(bankName || null),
+    // Card withdrawals: sanitize to last4 before encrypting so full PANs never touch db.
+    accountNumber: encryptPII(
+      (method === 'debit' || method === 'credit')
+        ? (accountNumber ? String(accountNumber).replace(/\D/g, '').slice(-4) || null : null)
+        : (accountNumber || null)
+    ),
+    accountHolderName: encryptPII(accountHolderName || null),
+    iban:              encryptPII(iban              || null),
+    swiftBic:          encryptPII(swiftBic          || null),
 
     // Status lifecycle
     status: 'pending_review',
@@ -186,6 +209,34 @@ function adminTransition(db, withdrawalId, newStatus, adminId, note) {
       { status: 409 }
     );
 
+  // ── Provider-reference guard ──────────────────────────────────────────────
+  // Block admin refund only when the provider was actually contacted.
+  //
+  // payoutDispatchRef — set to 'egw-<id>' in DB BEFORE the HTTP call to the provider.
+  //   If set, the provider was (or may have been) called; outcome unknown without
+  //   querying the provider. Refund must not be issued until status is confirmed.
+  //
+  // payoutReference   — provider returned a confirmed reference (accepted the disbursement).
+  //   Refund must never be issued; the provider already moved the funds.
+  //
+  // Intentionally NOT keying on payoutAttempts alone: that counter is incremented
+  // before the HTTP call too, but if the process crashed between saving payoutAttempts
+  // and persisting payoutDispatchRef (a tiny window), we'd wrongly block a safe refund.
+  // payoutDispatchRef is the authoritative "HTTP call was initiated" signal.
+  if ((newStatus === 'failed' || newStatus === 'reversed') &&
+      (w.payoutReference || w.payoutDispatchRef)) {
+    const detail = w.payoutReference
+      ? `(reference: ${w.payoutReference}, provider: ${w.payoutProvider})`
+      : `(dispatch ref: ${w.payoutDispatchRef} — provider outcome unknown)`;
+    throw Object.assign(
+      new Error(
+        `Cannot mark ${newStatus}: payout provider was already contacted for this withdrawal ${detail}. ` +
+        `Use POST /admin/withdrawals/${withdrawalId}/reconcile to verify provider status before refunding.`
+      ),
+      { status: 409 }
+    );
+  }
+
   const now = Date.now();
   recordStatusChange(w, newStatus, adminId);
   if (note) w.internalNote = note;
@@ -201,9 +252,39 @@ function adminTransition(db, withdrawalId, newStatus, adminId, note) {
   }
 
   if (newStatus === 'paid') {
+    // Guard: manual paid transition requires confirmed provider settlement.
+    // payoutSettled is set exclusively by markWithdrawalPaid(), which is called
+    // only by executePayout (after a positive provider API response) and by the
+    // /reconcile endpoint (after providerStatus === 'settled').
+    // A payoutReference alone is NOT sufficient — the provider may still be
+    // in_transit/processing when the reference is first written. Releasing
+    // holdBalance before the provider confirms success causes permanent fund loss
+    // if the payout later fails.
+    if (!w.payoutSettled) {
+      throw Object.assign(
+        new Error(
+          'Cannot mark paid: no provider settlement confirmation (payoutSettled is not set). ' +
+          'Paid status is set automatically once the payout engine or /reconcile receives a ' +
+          'confirmed success/paid/completed status from the provider. ' +
+          'Do not force this transition manually.'
+        ),
+        { status: 409 }
+      );
+    }
+
     // Guard: cannot mark paid more than once
     if (w.holdReleased)
       throw Object.assign(new Error('Payout already recorded for this withdrawal'), { status: 409 });
+
+    // Verify wallet exists before setting holdReleased — _releaseHoldOnly silently
+    // no-ops when the wallet row is missing, but holdReleased would already be set,
+    // permanently blocking any retry via the duplicate guard above and leaving
+    // holdBalance un-decremented.  Throw so the caller can retry with a fresh load.
+    const paidWallet = (db.wallets || []).find(x => x.id === w.walletId);
+    if (!paidWallet) throw Object.assign(
+      new Error(`adminTransition paid: wallet ${w.walletId} not found — cannot release hold`),
+      { status: 500 }
+    );
 
     w.paidAt = now;
     w.payoutAttempts += 1;
@@ -258,18 +339,31 @@ function _releaseHoldOnly(db, w) {
  * Guarded by refundIssued flag — runs exactly once per withdrawal.
  */
 function _issueRefund(db, w, by, ledgerType) {
-  if (w.refundIssued) return;   // ← idempotency guard: never refund twice
+  if (w.refundIssued) return;   // idempotency guard: never refund twice
+
+  // Resolve wallet BEFORE setting any flags.  If the wallet row is missing and we
+  // set refundIssued first, the idempotency guard above would permanently block any
+  // future retry — leaving the user's funds stranded with no credit ever issued.
+  // Throwing here lets the caller (markWithdrawalFailed, which has retry logic) retry
+  // with a fresh DB load where the wallet row may exist.
+  const wallet = (db.wallets || []).find(x => x.id === w.walletId);
+  if (!wallet) throw Object.assign(
+    new Error(`Refund failed: wallet ${w.walletId} not found`),
+    { status: 500 }
+  );
+
   w.refundIssued = true;
   w.holdReleased = true;
-
-  const wallet = (db.wallets || []).find(x => x.id === w.walletId);
-  if (!wallet) return;
 
   const balance = (wallet.balances || []).find(b => b.currency === w.currency);
   const balanceBefore = balance ? balance.amount : 0;
 
-  // Return to available balance
-  if (balance) balance.amount += w.amount;
+  // Return to available balance — create the row if it was missing (migration gap or corruption).
+  if (balance) {
+    balance.amount += w.amount;
+  } else {
+    wallet.balances.push({ currency: w.currency, amount: w.amount });
+  }
 
   // Remove from hold escrow
   wallet.holdBalance = wallet.holdBalance || {};
@@ -331,12 +425,27 @@ function advanceToProcessing(db, withdrawalId) {
   } catch (err) {
     try {
       if ((VALID_TRANSITIONS[w.status] || []).includes('failed')) {
+        // Attempt refund BEFORE recording the terminal 'failed' status.
+        // If _issueRefund throws (e.g. wallet missing), we must not persist
+        // 'failed' — VALID_TRANSITIONS['failed'] is empty so the withdrawal
+        // would be permanently stuck with no admin route to retry the refund.
+        // Leaving w in its current retryable status (e.g. 'approved') lets the
+        // admin drive it to terminal via POST /transition when the issue clears.
+        _issueRefund(db, w, 'system', 'withdrawal_failed_refund');
+        // Refund succeeded — now safe to record the terminal status.
         recordStatusChange(w, 'failed', 'system');
         w.failedAt     = Date.now();
         w.internalNote = `Advance error: ${err.message}`;
-        _issueRefund(db, w, 'system', 'withdrawal_failed_refund');
       }
-    } catch (_) { /* best-effort */ }
+    } catch (refundErr) {
+      // _issueRefund failed — do NOT advance to terminal 'failed'.
+      // Stamp reconcileRequired so the record is easy to find; current status
+      // is retryable so admin can manually trigger the refund via /transition.
+      w.reconcileRequired = true;
+      w.internalNote      =
+        `advanceToProcessing: advance error (${err.message}); ` +
+        `refund also failed (${refundErr.message}). Manual reconcile required.`;
+    }
   }
   return w;
 }
@@ -369,11 +478,22 @@ function markWithdrawalPaid(db, withdrawalId, providerRef, provider) {
       { status: 409 }
     );
 
+  // Verify the wallet exists before setting holdReleased.  _releaseHoldOnly silently
+  // no-ops when the wallet row is missing, but holdReleased would already be set —
+  // permanently blocking any future retry via the duplicate guard above, and leaving
+  // holdBalance un-decremented.  Throwing here lets the caller retry with a fresh load.
+  const wallet = (db.wallets || []).find(x => x.id === w.walletId);
+  if (!wallet) throw Object.assign(
+    new Error(`markWithdrawalPaid: wallet ${w.walletId} not found — cannot release hold`),
+    { status: 500 }
+  );
+
   const now = Date.now();
   recordStatusChange(w, 'paid', 'system');
   w.paidAt          = now;
   w.payoutAttempts += 1;
   w.holdReleased    = true;
+  w.payoutSettled   = true;   // proof that a trusted settlement path confirmed success
   w.payoutProvider  = provider;
   w.payoutReference = providerRef;
 

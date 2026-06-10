@@ -611,7 +611,7 @@ MAX_AUDIT_LOGS_MEMORY=5000
 
 **Security Issues**: security@egwallet.com  
 **GDPR Requests**: compliance@egwallet.com  
-**General Support**: support@egwallet.com
+**General Support**: SUPPORT@EGWALLETFINANCE.COM
 
 ---
 

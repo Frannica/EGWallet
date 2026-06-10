@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, Alert, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../auth/AuthContext';
 import { detectCountryCode } from '../config/regional';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -12,6 +13,7 @@ export default function AuthScreen() {
   const [loading, setLoading] = useState(false);
   const auth = useAuth();
   const { t } = useLanguage();
+  const navigation = useNavigation<any>();
 
   async function onSubmit() {
     if (!email.trim()) return Alert.alert(t('common.error'), t('auth.enterEmail'));
@@ -88,6 +90,15 @@ export default function AuthScreen() {
             </View>
             {isSignUp && (
               <Text style={styles.hint}>{t('auth.passwordHint')}</Text>
+            )}
+            {!isSignUp && (
+              <TouchableOpacity
+                style={styles.forgotPasswordLink}
+                onPress={() => navigation.navigate('ForgotPassword')}
+                disabled={loading}
+              >
+                <Text style={styles.forgotPasswordText}>{t('auth.forgotPassword')}</Text>
+              </TouchableOpacity>
             )}
           </View>
 
@@ -215,6 +226,16 @@ const styles = StyleSheet.create({
     color: '#657786',
     marginTop: 4,
   },
+  forgotPasswordLink: {
+    alignSelf: 'flex-end',
+    marginTop: 8,
+    padding: 4,
+  },
+  forgotPasswordText: {
+    fontSize: 13,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
   submitButton: {
     backgroundColor: '#007AFF',
     padding: 16,
@@ -264,3 +285,4 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 });
+

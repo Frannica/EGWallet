@@ -6,7 +6,7 @@ import { API_BASE } from '../api/client';
 import { formatCurrency } from '../utils/currency';
 import { useLanguage } from '../i18n/LanguageContext';
 
-const SUPPORT_EMAIL = 'support@egwalletfinance.com';
+const SUPPORT_EMAIL = 'SUPPORT@EGWALLETFINANCE.COM';
 
 type DisputeReason = 'unauthorized' | 'wrong_amount' | 'not_received' | 'duplicate' | 'other';
 
@@ -59,6 +59,7 @@ export default function DisputeTransactionScreen() {
       { id: 'TXN-005', type: 'receive', amount: 75000, currency: 'XAF', status: 'completed', timestamp: Date.now() - 20 * 86400000 },
     ];
     try {
+      if (!auth.token) { setTransactions(demoTxs); setLoading(false); return; }
       const res = await fetch(`${API_BASE}/transactions`, {
         headers: { 'Authorization': `Bearer ${auth.token}` },
       });
@@ -109,6 +110,12 @@ export default function DisputeTransactionScreen() {
 
     setSubmitting(true);
 
+    if (!auth.token) {
+      setSubmitting(false);
+      Alert.alert(t('common.error'), 'Please sign in to submit a dispute.');
+      return;
+    }
+
     const ticketNum = `EGW-${Math.floor(10000 + Math.random() * 90000)}`;
     const reasonLabel = disputeReasons.find(r => r.value === disputeReason)?.label ?? disputeReason;
     const txDate = new Date(selectedTransaction.timestamp ?? selectedTransaction.createdAt ?? 0).toLocaleDateString();
@@ -132,6 +139,7 @@ export default function DisputeTransactionScreen() {
       }
     } catch (_) {
       // Backend unavailable — email is the guaranteed delivery channel below
+      console.warn(`Dispute submission failed; proceeding with email fallback with ticket number ${finalTicket}`);
     } finally {
       setSubmitting(false);
     }
@@ -529,3 +537,4 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 });
+

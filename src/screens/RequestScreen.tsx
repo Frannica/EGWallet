@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity,
   Alert, ActivityIndicator, Share, Modal, FlatList,
@@ -9,9 +9,10 @@ import { useAuth } from '../auth/AuthContext';
 import { useLanguage } from '../i18n/LanguageContext';
 import { listWallets } from '../api/auth';
 import { API_BASE, getApiLanguage } from '../api/client';
+import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 import { getCurrencySymbol, majorToMinor, formatMajorAmount, formatCurrency, decimalsFor } from '../utils/currency';
 import { logLocalTransaction, debitLocalBalance } from '../utils/localBalance';
-import { sendTransaction } from '../api/transactions';
+import { sendTransaction, generateId } from '../api/transactions';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import QRCode from 'react-native-qrcode-svg';
 import { useToast } from '../utils/toast';
@@ -78,6 +79,9 @@ export default function RequestScreen() {
   const navigation = useNavigation();
 
   const [activeTab, setActiveTab] = useState<'contact' | 'employer' | 'qr'>('contact');
+
+  // Stable idempotency key for payroll send — reused across retries; reset only after success
+  const payrollIdempotencyKeyRef = useRef(generateId());
 
   // Single currency modal driven by which field opened it
   const [currencyModalFor, setCurrencyModalFor] = useState<'contact' | 'employer' | 'qr' | null>(null);
@@ -153,20 +157,28 @@ export default function RequestScreen() {
   const [dynamicQR, setDynamicQR] = useState<{ value: string; expiresAt: number } | null>(null);
   const [realWalletId, setRealWalletId] = useState<string>(DEMO_WALLET_ID);
 
-  // Fetch the real wallet ID then generate the static QR
+  // Fetch the server-signed static QR from GET /qr/static.
+  // This returns an HMAC-signed egwallet:// string that /qr/pay verifies.
+  // Plain JSON QRs are no longer generated here.
   useEffect(() => {
     if (!auth.token) {
-      setStaticQRValue(JSON.stringify({ type: 'wallet_address', walletId: DEMO_WALLET_ID, version: 1 }));
+      setStaticQRValue('');
       return;
     }
-    listWallets(auth.token)
-      .then(res => {
-        const wid = res.wallets?.[0]?.id || DEMO_WALLET_ID;
-        setRealWalletId(wid);
-        setStaticQRValue(JSON.stringify({ type: 'wallet_address', walletId: wid, version: 1 }));
+    fetchWithTokenRefresh(`${API_BASE}/qr/static`, {
+      headers: { 'Accept-Language': getApiLanguage() },
+    })
+      .then(res => (res.ok ? res.json() : Promise.reject()))
+      .then((data: any) => {
+        if (data?.qrCode) {
+          setStaticQRValue(data.qrCode);
+          if (data.payload?.walletId) setRealWalletId(data.payload.walletId);
+        } else {
+          setStaticQRValue('');
+        }
       })
       .catch(() => {
-        setStaticQRValue(JSON.stringify({ type: 'wallet_address', walletId: DEMO_WALLET_ID, version: 1 }));
+        setStaticQRValue('');
       });
   }, [auth.token]);
 
@@ -330,7 +342,10 @@ export default function RequestScreen() {
                 majorToMinor(amountNum, payrollCurrency),
                 payrollCurrency,
                 payrollNote.trim() || `Payroll payment to ${selectedEmployee.firstName} ${selectedEmployee.lastName}`,
+                payrollIdempotencyKeyRef.current,
               );
+              // Reset only after confirmed success — retries reuse the same key
+              payrollIdempotencyKeyRef.current = generateId();
               await debitLocalBalance(payrollCurrency, majorToMinor(amountNum, payrollCurrency));
               const req: LocalRequest = {
                 id: uid(),
@@ -391,24 +406,44 @@ export default function RequestScreen() {
 
   // ── Dynamic QR ────────────────────────────────────────────────────────────
 
-  const handleGenerateDynamicQR = () => {
+  const handleGenerateDynamicQR = async () => {
     if (__DEV__) console.log('[Request] Generate QR pressed');
     const amountNum = parseFloat(qrAmount.replace(/,/g, ''));
     if (!qrAmount || isNaN(amountNum) || amountNum <= 0) {
       return Alert.alert(t('common.invalidAmount'), t('request.invalidAmount'));
     }
-    setDynamicQR({
-      value: JSON.stringify({
-        type: 'payment_request',
-        walletId: realWalletId,
-        amount: majorToMinor(amountNum, qrCurrency),
-        currency: qrCurrency,
-        memo: qrMemo || qrPurpose || 'Payment',
-        requestId: `req-${Date.now()}`,
-        expiresAt: Date.now() + 30 * 60000,
-      }),
-      expiresAt: Date.now() + 30 * 60000,
-    });
+    if (!auth.token) {
+      return Alert.alert(t('common.error'), t('common.notAuthenticated'));
+    }
+
+    try {
+      const res = await fetchWithTokenRefresh(`${API_BASE}/qr/dynamic`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept-Language': getApiLanguage(),
+        },
+        body: JSON.stringify({
+          amount: majorToMinor(amountNum, qrCurrency),
+          currency: qrCurrency,
+          memo: qrMemo || qrPurpose || 'Payment',
+          expiryMinutes: 30,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to generate QR');
+      }
+
+      const data = await res.json();
+      setDynamicQR({
+        value: data.qrCode,
+        expiresAt: data.expiresAt,
+      });
+    } catch (err: any) {
+      Alert.alert(t('common.error'), err.message || t('request.invalidAmount'));
+    }
   };
 
   // ── Derived ───────────────────────────────────────────────────────────────
@@ -1135,3 +1170,4 @@ const styles = StyleSheet.create({
   modalClose: { marginTop: 16, padding: 14, alignItems: 'center', backgroundColor: '#F5F7FA', borderRadius: 10 },
   modalCloseText: { fontSize: 16, fontWeight: '600', color: '#657786' },
 });
+

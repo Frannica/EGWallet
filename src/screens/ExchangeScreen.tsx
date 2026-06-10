@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { useLanguage } from '../i18n/LanguageContext';
 import { listWallets } from '../api/auth';
-import { fetchFxQuote, exchangeCurrency, FxQuote } from '../api/transactions';
+import { fetchFxQuote, exchangeCurrency, FxQuote, generateId } from '../api/transactions';
 import {
   majorToMinor,
   formatMinorAmount,
@@ -67,6 +67,8 @@ export default function ExchangeScreen({ route, navigation }: any) {
   const [showFromPicker, setShowFromPicker] = useState(false);
   const [showToPicker, setShowToPicker] = useState(false);
   const quoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Stable idempotency key — reused across retries; reset only after confirmed success
+  const exchangeIdempotencyKeyRef = useRef(generateId());
 
   // Load wallet balances to populate FROM picker
   useEffect(() => {
@@ -142,7 +144,9 @@ export default function ExchangeScreen({ route, navigation }: any) {
     const amountMinor = majorToMinor(num, fromCurrency);
     const netReceive = quote.receivedAmountMinorAfterFee ?? quote.receivedAmountMinor ?? 0;
     try {
-      await exchangeCurrency(auth.token, walletId, fromCurrency, toCurrency, amountMinor);
+      await exchangeCurrency(auth.token, walletId, fromCurrency, toCurrency, amountMinor, exchangeIdempotencyKeyRef.current);
+      // Reset key only after confirmed success so retries reuse the same key
+      exchangeIdempotencyKeyRef.current = generateId();
       await debitLocalBalance(fromCurrency, amountMinor);
       await creditLocalBalance(toCurrency, netReceive);
       Alert.alert(t('common.success'), t('exchange.success'), [
@@ -635,3 +639,4 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
+

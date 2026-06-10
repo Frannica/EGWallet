@@ -178,16 +178,6 @@ export async function syncLocalBalancesFromBackend(
       const hasDebitRecord = !!debitTimes[b.currency];
       const localAmt = localBals[b.currency];
 
-      // Ephemeral-backend reset guard (e.g. Railway db.json wiped on restart):
-      // If the backend returns 0 but we have local funds AND there is no debit
-      // record, the server likely lost its state — keep local balance.
-      // If there IS a debit record the $0 is a legitimate confirmed debit, so
-      // fall through to the debit-record branch below (trust backend).
-      if (b.amount === 0 && localAmt !== undefined && localAmt > 0 && !hasDebitRecord) {
-        synced[b.currency] = localAmt;
-        continue;
-      }
-
       if (hasDebitRecord && localAmt !== undefined) {
         if (b.amount <= localAmt) {
           // Backend confirmed the debit (returned same or lower) — trust it
@@ -245,10 +235,9 @@ export function mergeWithLocalBalances(
     const existing: Record<string, number> = {};
     const mergedBalances = (wallet.balances || []).map((b: any) => {
       existing[b.currency] = 1;
-      // Prefer local balance when present — local is always updated immediately on deposit/withdrawal
-      // so it reflects the latest state even before backend re-fetch completes.
-      const amount = b.currency in localBalances ? localBalances[b.currency] : b.amount;
-      return { ...b, amount };
+      // Backend is the financial authority. Local balance only supplements currencies
+      // not present in the backend response (e.g. a deposit not yet reflected server-side).
+      return { ...b, amount: b.amount };
     });
     // Add currencies that exist locally but not in backend wallet
     Object.entries(localBalances).forEach(([cur, amt]) => {
@@ -259,3 +248,4 @@ export function mergeWithLocalBalances(
     return { ...wallet, balances: mergedBalances };
   });
 }
+

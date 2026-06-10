@@ -105,3 +105,4 @@ export function getDeviceType(): string {
   }
   return Platform.OS === 'ios' || Platform.OS === 'android' ? 'Mobile' : 'Unknown';
 }
+

@@ -38,3 +38,4 @@ export async function safeApiCall<T>(
   // network failure, etc.) rather than a generic null check fallback.
   throw lastError;
 }
+

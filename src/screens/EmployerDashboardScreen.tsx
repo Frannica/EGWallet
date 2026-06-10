@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, TextInput,
   Alert, ActivityIndicator, RefreshControl,
@@ -55,9 +55,21 @@ interface BatchResult {
 
 type ActiveTab = 'employees' | 'payroll' | 'history';
 
+/** Simple UUID-v4-like generator — no external dependency needed. */
+function generatePayrollId(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
 export default function EmployerDashboardScreen() {
   const auth = useAuth();
   const { t } = useLanguage();
+  // Stable idempotency key for the current payroll run.
+  // Reset after each successful batch so retries reuse the same key but
+  // the next distinct run gets a fresh one.
+  const payrollIdempotencyKeyRef = useRef(generatePayrollId());
 
   const [profile, setProfile] = useState<EmployerProfile | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -92,7 +104,7 @@ export default function EmployerDashboardScreen() {
 
   const buildHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${auth.token}`,
+    ...(auth.token ? { Authorization: `Bearer ${auth.token}` } : {}),
   }), [auth.token]);
 
   const loadProfile = useCallback(async () => {
@@ -170,6 +182,7 @@ export default function EmployerDashboardScreen() {
   };
 
   async function handleRegister() {
+    if (!auth.token || !auth.user) return;
     if (!companyName.trim() || !taxId.trim()) {
       Alert.alert(t('common.error'), t('employer.registerRequired'));
       return;
@@ -229,8 +242,7 @@ export default function EmployerDashboardScreen() {
       await loadProfile();
       Alert.alert(t('employer.walletFunded'), t('employer.walletFundedMsg'));
     } catch (e: any) {
-      // Backend unavailable — show demo success
-      Alert.alert(t('employer.walletFundedDemo'), t('employer.walletFundedMsg'));
+      Alert.alert(t('common.error'), e.message || t('common.somethingWentWrong'));
     } finally {
       setLoading(false);
     }
@@ -338,17 +350,25 @@ export default function EmployerDashboardScreen() {
                 memo: payrollMemo,
               }));
 
+              const idempotencyKey = payrollIdempotencyKeyRef.current;
               const res = await fetch(`${API_BASE}/employer/bulk-payment`, {
                 method: 'POST',
-                headers: buildHeaders(),
+                headers: {
+                  ...buildHeaders(),
+                  'Idempotency-Key': idempotencyKey,
+                },
                 body: JSON.stringify({
                   payrollItems,
                   payPeriod: new Date().toISOString().substring(0, 7),
                   notes: payrollMemo,
+                  idempotencyKey,
                 }),
               });
               const data = await res.json();
               if (!res.ok) throw new Error(data.error || 'Payroll failed');
+
+              // Reset key so the next distinct payroll run gets a fresh one
+              payrollIdempotencyKeyRef.current = generatePayrollId();
 
               setLastBatchResult(data);
               await loadProfile();
@@ -360,24 +380,10 @@ export default function EmployerDashboardScreen() {
                 `✅ ${data.successCount} paid successfully\n❌ ${data.failureCount} failed\n\nBatch ID: ${data.batchId}`
               );
             } catch (e: any) {
-              // Backend unavailable — simulate payroll batch success
-              const batchId = `BATCH-DEMO-${Date.now()}`;
-              const successCount = readyEmployees.length;
-              setLastBatchResult({
-                batchId,
-                successCount,
-                failureCount: 0,
-                status: 'completed',
-                results: readyEmployees.map(e => ({
-                  workerId: e.workerId,
-                  workerEmail: e.workerEmail,
-                  status: 'success' as const,
-                  amount: amountMinor,
-                  currency: payrollCurrency,
-                })),
-              });
-              setActiveTab('history');
-              Alert.alert(t('employer.payrollComplete'), t('employer.payrollSuccessMsg').replace('{count}', String(successCount)).replace('{batchId}', batchId));
+              Alert.alert(
+                t('employer.payrollError') || 'Payroll Failed',
+                e.message || 'An unexpected error occurred. Please try again.',
+              );
             } finally {
               setLoading(false);
             }
@@ -1174,3 +1180,4 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 });
+

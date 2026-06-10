@@ -17,17 +17,22 @@ export const currencyDecimals: Record<string, number> = {
   NGN: 2, // Nigerian Naira
   GHS: 2, // Ghanaian Cedi
   XOF: 0, // West African CFA Franc (no decimal places)
-  
+  GNF: 0, // Guinean Franc (no decimal places)
+
   // Central African currencies
-  XAF: 2, // Central African CFA Franc
-  
+  XAF: 0, // Central African CFA Franc (no decimal places)
+  CDF: 2, // Congolese Franc
+
   // East African currencies
   KES: 2, // Kenyan Shilling
   TZS: 2, // Tanzanian Shilling
   UGX: 0, // Ugandan Shilling (no decimal places)
   RWF: 0, // Rwandan Franc (no decimal places)
+  BIF: 0, // Burundian Franc (no decimal places)
+  KMF: 0, // Comorian Franc (no decimal places)
+  DJF: 0, // Djiboutian Franc (no decimal places)
   ETB: 2, // Ethiopian Birr
-  
+
   // Southern African currencies
   ZAR: 2, // South African Rand
   BWP: 2, // Botswana Pula
@@ -35,14 +40,17 @@ export const currencyDecimals: Record<string, number> = {
   MZN: 2, // Mozambican Metical
   NAD: 2, // Namibian Dollar
   LSL: 2, // Lesotho Loti
-  
-  // North African currencies
+  ZMW: 2, // Zambian Kwacha
+
+  // North/West African
   EGP: 2, // Egyptian Pound
   TND: 3, // Tunisian Dinar
   MAD: 2, // Moroccan Dirham
   LYD: 3, // Libyan Dinar
   DZD: 2, // Algerian Dinar
-  
+  MGA: 0, // Malagasy Ariary (no decimal places)
+  CVE: 2, // Cape Verdean Escudo
+
   // Other African currencies
   ERN: 2, // Eritrean Nakfa
   AOA: 2, // Angolan Kwanza
@@ -52,9 +60,27 @@ export const currencyDecimals: Record<string, number> = {
   MUR: 2, // Mauritian Rupee
   SCR: 2, // Seychellois Rupee
   SLE: 2, // Sierra Leonean Leone
-  CDF: 2, // Congolese Franc
-  CVE: 2, // Cape Verdean Escudo
   MWK: 2, // Malawian Kwacha
+
+  // Asian currencies — zero-decimal
+  KRW: 0, // South Korean Won
+  IDR: 0, // Indonesian Rupiah
+  VND: 0, // Vietnamese Dong
+
+  // Middle East — 3-decimal
+  KWD: 3, // Kuwaiti Dinar
+  BHD: 3, // Bahraini Dinar
+  OMR: 3, // Omani Rial
+  JOD: 3, // Jordanian Dinar
+  IQD: 3, // Iraqi Dinar
+
+  // European — zero-decimal
+  HUF: 0, // Hungarian Forint
+  ISK: 0, // Icelandic Króna
+
+  // Latin American — zero-decimal
+  CLP: 0, // Chilean Peso
+  PYG: 0, // Paraguayan Guaraní
 };
 
 // Currency symbols map
@@ -176,6 +202,22 @@ export function decimalsFor(currency: string) {
   return currencyDecimals[currency] ?? 2;
 }
 
+// Format an amount in major units (float) as a number string with proper decimals
+// and thousands separators — no currency symbol.
+export function formatMajorAmount(amountMajor: number, currency: string): string {
+  const dec = decimalsFor(currency);
+  const fixed = amountMajor.toFixed(dec);
+  const [intPart, decPart] = fixed.split('.');
+  const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return decPart !== undefined ? `${withCommas}.${decPart}` : withCommas;
+}
+
+// Format an amount in minor units (integer) as a number string with proper decimals
+// and thousands separators — no currency symbol.
+export function formatMinorAmount(amountMinor: number, currency: string): string {
+  return formatMajorAmount(minorToMajor(amountMinor, currency), currency);
+}
+
 export function getCurrencySymbol(currency: string): string {
   return CURRENCY_INFO[currency]?.symbol ?? currencySymbols[currency] ?? currency;
 }
@@ -232,3 +274,4 @@ export function convert(amountMinor: number, from: string, to: string, rates: Ra
   // Convert major to minor for target currency
   return majorToMinor(targetMajor, to);
 }
+

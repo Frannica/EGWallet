@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { createBudget, getBudgets, getBudgetAnalytics, deleteBudget } from '../api/transactions';
 import { listWallets } from '../api/auth';
-import { getCurrencySymbol } from '../utils/currency';
+import { getCurrencySymbol, formatCurrency, formatMajorAmount } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { useLanguage } from '../i18n/LanguageContext';
 import { BudgetCardSkeleton } from '../components/SkeletonLoader';
@@ -79,6 +79,10 @@ export default function BudgetScreen() {
   };
 
   const loadBudgets = async () => {
+    if (!auth.token) {
+      try { const raw = await AsyncStorage.getItem(BUDGETS_STORAGE_KEY); setBudgets(raw ? JSON.parse(raw) : []); } catch { setBudgets([]); }
+      return;
+    }
     try {
       setLoading(true);
       const data = await getBudgets(auth.token!);
@@ -107,6 +111,7 @@ export default function BudgetScreen() {
   };
 
   const loadAnalytics = async (budgetId: string) => {
+    if (!auth.token) return;
     try {
       setLoading(true);
       const data = await getBudgetAnalytics(auth.token!, budgetId);
@@ -132,7 +137,7 @@ export default function BudgetScreen() {
 
     Alert.alert(
       t('budget.createBudgetTitle'),
-      `Set monthly budget limit to ${getCurrencySymbol(currency)}${amountValue.toFixed(2)} ${currency}?`,
+      `Set monthly budget limit to ${getCurrencySymbol(currency)}${formatMajorAmount(amountValue, currency)} ${currency}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -290,19 +295,19 @@ export default function BudgetScreen() {
               <View>
                 <Text style={styles.amountLabel}>{t('budget.spent')}</Text>
                 <Text style={styles.amountValue}>
-                  {getCurrencySymbol(selectedBudget.currency)}{(analytics.totalSpent / 100).toFixed(2)}
+                  {formatCurrency(analytics.totalSpent, selectedBudget.currency)}
                 </Text>
               </View>
               <View>
                 <Text style={styles.amountLabel}>{t('budget.remaining')}</Text>
                 <Text style={[styles.amountValue, { color: percentColor }]}>
-                  {getCurrencySymbol(selectedBudget.currency)}{(analytics.remaining / 100).toFixed(2)}
+                  {formatCurrency(analytics.remaining, selectedBudget.currency)}
                 </Text>
               </View>
               <View>
                 <Text style={styles.amountLabel}>{t('budget.limit')}</Text>
                 <Text style={styles.amountValue}>
-                  {getCurrencySymbol(selectedBudget.currency)}{(analytics.monthlyLimit / 100).toFixed(2)}
+                  {formatCurrency(analytics.monthlyLimit, selectedBudget.currency)}
                 </Text>
               </View>
             </View>
@@ -373,7 +378,7 @@ export default function BudgetScreen() {
                 <View style={styles.budgetInfo}>
                   <Text style={styles.budgetCurrency}>{budget.currency}</Text>
                   <Text style={styles.budgetLimit}>
-                    {getCurrencySymbol(budget.currency)}{(budget.monthlyLimit / 100).toFixed(2)}{t('budget.perMonth')}
+                    {formatCurrency(budget.monthlyLimit, budget.currency)}{t('budget.perMonth')}
                   </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={20} color="#90B8DC" />
@@ -719,3 +724,4 @@ const styles = StyleSheet.create({
     color: '#d32f2f',
   },
 });
+

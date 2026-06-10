@@ -1,6 +1,7 @@
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { Alert } from 'react-native';
+import { formatMinorAmount } from './currency';
 
 export interface Transaction {
   id: string;
@@ -55,7 +56,7 @@ function generateReceiptHTML(transaction: Transaction, userEmail: string): strin
     minute: '2-digit',
   });
 
-  const amountDisplay = (transaction.amount / 100).toFixed(2);
+  const amountDisplay = formatMinorAmount(transaction.amount, transaction.currency);
   const statusColor = transaction.status === 'completed' ? '#2E7D32' : transaction.status === 'pending' ? '#F57C00' : '#D32F2F';
 
   return `
@@ -177,7 +178,7 @@ function generateReceiptHTML(transaction: Transaction, userEmail: string): strin
               <div class="section">
                 <div class="section-title">Conversion</div>
                 <div class="detail-value">
-                  Received ${(transaction.receivedAmount! / 100).toFixed(2)} ${transaction.receivedCurrency}
+                  Received ${formatMinorAmount(transaction.receivedAmount!, transaction.receivedCurrency!)} ${transaction.receivedCurrency}
                 </div>
               </div>
             ` : ''}
@@ -233,3 +234,4 @@ function generateReceiptHTML(transaction: Transaction, userEmail: string): strin
     </html>
   `;
 }
+

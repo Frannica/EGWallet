@@ -221,3 +221,4 @@ export function getCurrencyName(code: string): string {
   const currency = getCurrencyByCode(code);
   return currency?.currency || '';
 }
+

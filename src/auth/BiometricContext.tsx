@@ -174,3 +174,4 @@ export const BiometricProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     </BiometricContext.Provider>
   );
 };
+

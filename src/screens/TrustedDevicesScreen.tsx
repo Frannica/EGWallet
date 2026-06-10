@@ -45,6 +45,7 @@ export default function TrustedDevicesScreen() {
   }, []);
 
   async function loadDevices() {
+    if (!auth.token) { setDevices(DEMO_DEVICES); setLoading(false); return; }
     try {
       const res = await fetch(`${API_BASE}/devices`, {
         headers: {
@@ -396,3 +397,4 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 });
+

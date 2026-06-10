@@ -35,3 +35,4 @@ export async function fetchRates(): Promise<Rates> {
 let _apiLanguage = 'en';
 export function setApiLanguage(lang: string): void { _apiLanguage = lang; }
 export function getApiLanguage(): string { return _apiLanguage; }
+

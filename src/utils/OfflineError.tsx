@@ -80,3 +80,4 @@ export function handleNetworkError(error: any, context: string) {
 
   Alert.alert('Error', `${context}: ${message}`);
 }
+

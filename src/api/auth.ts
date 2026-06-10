@@ -1,6 +1,7 @@
 import { API_BASE, getApiLanguage } from './client';
 import { safeApiCall } from '../utils/networkGuard';
 import { getDeviceId } from '../utils/deviceInfo';
+import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 
 export type User = { id: string; email: string; region?: string };
 
@@ -53,8 +54,8 @@ export async function login(email: string, password: string, deviceInfo?: any) {
 export async function me(token: string) {
   const deviceId = await cachedDeviceId();
   const result = await safeApiCall(async () => {
-    const res = await fetch(`${API_BASE}/me`, {
-      headers: { Authorization: `Bearer ${token}`, 'x-device-id': deviceId, 'Accept-Language': getApiLanguage() }
+    const res = await fetchWithTokenRefresh(`${API_BASE}/me`, {
+      headers: { 'x-device-id': deviceId, 'Accept-Language': getApiLanguage() },
     });
     if (!res.ok) throw new Error('Fetch profile failed');
     return res.json();
@@ -67,8 +68,8 @@ export async function me(token: string) {
 export async function listWallets(token: string) {
   const deviceId = await cachedDeviceId();
   const result = await safeApiCall(async () => {
-    const res = await fetch(`${API_BASE}/wallets`, {
-      headers: { Authorization: `Bearer ${token}`, 'x-device-id': deviceId, 'Accept-Language': getApiLanguage() }
+    const res = await fetchWithTokenRefresh(`${API_BASE}/wallets`, {
+      headers: { 'x-device-id': deviceId, 'Accept-Language': getApiLanguage() },
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -80,3 +81,4 @@ export async function listWallets(token: string) {
   if (!result) throw new Error('Could not reach the server. Check that your computer and phone are on the same Wi-Fi.');
   return result;
 }
+

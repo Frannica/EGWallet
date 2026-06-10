@@ -228,7 +228,7 @@ export default function DepositScreen() {
     setAddCardType(null);
   }
 
-  function handleAddDepositMethod() {
+  async function handleAddDepositMethod() {
     if (addCardType === 'bank') {
       if (!bankAccountNum.trim() || !bankRoutingNum.trim() || !cardHolder.trim()) {
         Alert.alert(t('send.missingInfo'), t('deposit.missingBankFields'));
@@ -240,7 +240,7 @@ export default function DepositScreen() {
       setSelectedPaymentMethod(method);
       resetAddCardForm();
       setShowPaymentMethodModal(false);
-      handleDeposit();
+      await handleDeposit();
     } else {
       if (!cardNumber.trim() || !cardHolder.trim() || !cardExpiry.trim() || !cardCvc.trim()) {
         Alert.alert(t('send.missingInfo'), t('deposit.missingCardFields'));
@@ -257,7 +257,7 @@ export default function DepositScreen() {
       setSelectedPaymentMethod(method);
       resetAddCardForm();
       setShowPaymentMethodModal(false);
-      handleDeposit();
+      await handleDeposit();
     }
   }
 
@@ -312,6 +312,8 @@ export default function DepositScreen() {
   }
 
   async function handleDeposit() {
+    if (loading) return;
+    if (!auth.token) return;
     if (__DEV__) console.log('[Deposit] button pressed');
     const numAmount = parsedAmount();
     if (numAmount < 1) {
@@ -573,7 +575,7 @@ export default function DepositScreen() {
                         maxLength={5}
                         style={pmStyles.input}
                       />
-                      <Text style={pmStyles.fieldLabel}>{t('deposit.cvc')}</Text>
+                      <Text style={pmStyles.fieldLabel}>CVC / CVV</Text>
                       <TextInput
                         value={cardCvc}
                         onChangeText={v => setCardCvc(v.replace(/\D/g, '').slice(0, 4))}
@@ -1556,3 +1558,4 @@ const pmStyles = StyleSheet.create({
     marginTop: 4,
   },
 });
+

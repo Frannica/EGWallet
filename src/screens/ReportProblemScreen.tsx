@@ -41,21 +41,23 @@ export default function ReportProblemScreen() {
       const body = `Category: ${categories.find(c => c.value === category)?.label}\nUser: ${auth.user?.email}\n\n${description}`;
 
       let ticketId: string | null = null;
-      try {
-        const res = await fetch(`${API_BASE}/support/ticket`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${auth.token}`,
-          },
-          body: JSON.stringify({ subject, description: body, category }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          ticketId = data.ticket?.id ?? null;
+      if (auth.token) {
+        try {
+          const res = await fetch(`${API_BASE}/support/ticket`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${auth.token}`,
+            },
+            body: JSON.stringify({ subject, description: body, category }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            ticketId = data.ticket?.id ?? null;
+          }
+        } catch {
+          // Backend unavailable — still confirm to user
         }
-      } catch {
-        // Backend unavailable — still confirm to user
       }
 
       Alert.alert(
@@ -323,3 +325,4 @@ const styles = StyleSheet.create({
     color: '#007AFF',
   },
 });
+

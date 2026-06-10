@@ -30,6 +30,7 @@ export default function KYCVerificationScreen() {
   }, []);
 
   async function loadKYCStatus() {
+    if (!auth.token) { setLoading(false); return; }
     try {
       const res = await fetch(`${API_BASE}/kyc/status`, {
         headers: {
@@ -636,3 +637,4 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 });
+

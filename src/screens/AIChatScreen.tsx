@@ -7,6 +7,7 @@ import { API_BASE } from '../api/client';
 import { useNetworkStatus } from '../utils/OfflineError';
 import { useNavigation } from '@react-navigation/native';
 import { getLocalBalances, getPendingWithdrawals } from '../utils/localBalance';
+import { formatMinorAmount } from '../utils/currency';
 
 const SUPPORTED_LANGUAGES = ['en', 'es', 'fr', 'pt', 'zh', 'ja', 'ru', 'de'];
 
@@ -28,7 +29,7 @@ const UI: Record<string, Record<string, string>> = {
     fb_fee: 'EGWallet fees:\n\n• Add Money: FREE for first 6 top-ups, then 0.5%\n• Send / Receive: FREE\n• FX Conversion (cross-currency): 1.15%\n• Local Withdrawal: 1.28%\n• International Withdrawal: 1.75%\n\nAll fees are shown before you confirm.',
     fb_currency: 'EGWallet supports 50+ currencies including XAF, USD, EUR, GBP, NGN, GHS, ZAR, KES, INR, CNY, JPY, BRL. Set your preferred currency in **Settings**.',
     fb_report: 'To report a problem, go to **Transaction History** and tap **Dispute** next to the transaction, or use this chat to create a support ticket.',
-    fb_support: 'Our support team is available 24/7. Email us at **support@egwallet.com** or visit the Help Center in Settings.',
+    fb_support: 'Our support team is available 24/7. Email us at **SUPPORT@EGWALLETFINANCE.COM** or visit the Help Center in Settings.',
     fb_default: 'I\'m Felisa, your EGWallet assistant. I can help with sending money, managing cards, checking balances, and resolving issues.',
     fb_s_send: 'How do I receive money?', fb_s_receive: 'How do I send money?', fb_s_card: 'How do I freeze a card?',
     fb_s_balance: 'How do I add money?', fb_s_deposit: 'What are the deposit limits?', fb_s_kyc: 'What are the transaction limits?',
@@ -55,7 +56,7 @@ const UI: Record<string, Record<string, string>> = {
     fb_fee: 'Tarifas de EGWallet:\n\n• Agregar dinero: GRATIS las primeras 6 recargas, luego 0.5%\n• Enviar / Recibir: GRATIS\n• Conversión FX: 1.15%\n• Retiro local: 1.28%\n• Retiro internacional: 1.75%\n\nTodas las tarifas se muestran antes de confirmar.',
     fb_currency: 'EGWallet admite 50+ monedas: XAF, USD, EUR, GBP, NGN, GHS, ZAR, KES, INR y más. Configura tu moneda preferida en **Configuración**.',
     fb_report: 'Para reportar un problema, ve a **Historial de Transacciones** y toca **Disputar**, o usa este chat para crear un ticket de soporte.',
-    fb_support: 'Nuestro equipo de soporte está disponible 24/7. Envíanos un correo a **support@egwallet.com** o visita el Centro de Ayuda.',
+    fb_support: 'Nuestro equipo de soporte está disponible 24/7. Envíanos un correo a **SUPPORT@EGWALLETFINANCE.COM** o visita el Centro de Ayuda.',
     fb_default: 'Soy Felisa, tu asistente de EGWallet. Puedo ayudarte con envíos de dinero, tarjetas, saldos y resolución de problemas.',
     fb_s_send: '¿Cómo recibo dinero?', fb_s_receive: '¿Cómo envío dinero?', fb_s_card: '¿Cómo congelo una tarjeta?',
     fb_s_balance: '¿Cómo agrego dinero?', fb_s_deposit: '¿Cuáles son los límites de depósito?', fb_s_kyc: '¿Cuáles son los límites de transacción?',
@@ -82,7 +83,7 @@ const UI: Record<string, Record<string, string>> = {
     fb_fee: 'Frais EGWallet:\n\n• Ajout d\'argent: GRATUIT 6 premières recharges, puis 0,5%\n• Envoi/Réception: GRATUIT\n• Conversion FX: 1,15%\n• Retrait local: 1,28%\n• Retrait international: 1,75%',
     fb_currency: 'EGWallet prend en charge 50+ devises: XAF, USD, EUR, GBP, NGN, GHS, ZAR, KES et plus. Configurez dans **Paramètres**.',
     fb_report: 'Pour signaler un problème, allez dans l\'**Historique des transactions** et appuyez sur **Contester**.',
-    fb_support: 'Notre équipe de support est disponible 24/7. Écrivez-nous à **support@egwallet.com**.',
+    fb_support: 'Notre équipe de support est disponible 24/7. Écrivez-nous à **SUPPORT@EGWALLETFINANCE.COM**.',
     fb_default: 'Je suis Felisa, votre assistante EGWallet. Je peux vous aider avec les envois d\'argent, les cartes, les soldes et la résolution de problèmes.',
     fb_s_send: 'Comment recevoir de l\'argent ?', fb_s_receive: 'Comment envoyer de l\'argent ?', fb_s_card: 'Comment geler une carte ?',
     fb_s_balance: 'Comment ajouter de l\'argent ?', fb_s_deposit: 'Quelles sont les limites de dépôt ?', fb_s_kyc: 'Quelles sont les limites de transaction ?',
@@ -109,7 +110,7 @@ const UI: Record<string, Record<string, string>> = {
     fb_fee: 'Taxas do EGWallet:\n\n• Adicionar dinheiro: GRÁTIS 6 primeiras recargas, depois 0,5%\n• Enviar/Receber: GRÁTIS\n• Conversão FX: 1,15%\n• Saque local: 1,28%\n• Saque internacional: 1,75%',
     fb_currency: 'EGWallet suporta 50+ moedas: XAF, USD, EUR, GBP, NGN, GHS, ZAR, KES e mais. Configure em **Configurações**.',
     fb_report: 'Para reportar um problema, vá ao **Histórico de Transações** e toque em **Contestar**.',
-    fb_support: 'Nossa equipe de suporte está disponível 24/7. Envie um e-mail para **support@egwallet.com**.',
+    fb_support: 'Nossa equipe de suporte está disponível 24/7. Envie um e-mail para **SUPPORT@EGWALLETFINANCE.COM**.',
     fb_default: 'Sou a Felisa, sua assistente EGWallet. Posso te ajudar com envio de dinheiro, cartões, saldos e resolução de problemas.',
     fb_s_send: 'Como recebo dinheiro?', fb_s_receive: 'Como envio dinheiro?', fb_s_card: 'Como congelo um cartão?',
     fb_s_balance: 'Como adiciono dinheiro?', fb_s_deposit: 'Quais são os limites de depósito?', fb_s_kyc: 'Quais são os limites de transação?',
@@ -136,7 +137,7 @@ const UI: Record<string, Record<string, string>> = {
     fb_fee: 'EGWallet費率：\n\n• 充值：前6次免費，之後0.5%\n• 發送/接收：免費\n• 外匯轉換：1.15%\n• 本地提款：1.28%\n• 國際提款：1.75%',
     fb_currency: 'EGWallet支持50+种货币：XAF、USD、EUR、GBP、NGN、GHS、ZAR、KES等。在**设置**中配置您的首选货币。',
     fb_report: '要报告问题，请前往**交易历史**，点击交易旁边的**争议**，或在此聊天中创建支持工单。',
-    fb_support: '我们的支持团队全天候(24/7)提供服务。发送电子邮件至**support@egwallet.com**。',
+    fb_support: '我们的支持团队全天候(24/7)提供服务。发送电子邮件至**SUPPORT@EGWALLETFINANCE.COM**。',
     fb_default: '我是Felisa，您的EGWallet助手。我可以帮助您汇款、管理卡片、查询余额和解决问题。',
     fb_s_send: '如何接收资金？', fb_s_receive: '如何发送资金？', fb_s_card: '如何冻结卡片？',
     fb_s_balance: '如何充值？', fb_s_deposit: '存款限额是多少？', fb_s_kyc: '交易限额是多少？',
@@ -163,7 +164,7 @@ const UI: Record<string, Record<string, string>> = {
     fb_fee: 'EGWallet手数料：\n\n• 入金：最初の6回無料、以降0.5%\n• 送金/受け取り：無料\n• 外貨両替：1.15%\n• 国内出金：1.28%\n• 国際出金：1.75%',
     fb_currency: 'EGWalletはXAF、USD、EUR、GBP、NGN、GHS、ZAR、KESなど50以上の通貨をサポートしています。',
     fb_report: '問題を報告するには、**取引履歴**に移動して取引の横の**異議申し立て**をタップするか、このチャットでサポートチケットを作成してください。',
-    fb_support: 'サポートチームは24時間365日対応しています。**support@egwallet.com**にメールをお送りください。',
+    fb_support: 'サポートチームは24時間365日対応しています。**SUPPORT@EGWALLETFINANCE.COM**にメールをお送りください。',
     fb_default: '私はFelisa、あなたのEGWalletアシスタントです。送金、カード管理、残高確認、問題解決をお手伝いします。',
     fb_s_send: 'お金を受け取るには？', fb_s_receive: 'お金を送るには？', fb_s_card: 'カードを凍結するには？',
     fb_s_balance: 'お金を追加するには？', fb_s_deposit: '入金限度額は？', fb_s_kyc: '取引限度額は？',
@@ -190,7 +191,7 @@ const UI: Record<string, Record<string, string>> = {
     fb_fee: 'Комиссии EGWallet:\n\n• Пополнение: первые 6 — БЕСПЛАТНО, затем 0,5%\n• Отправка/Получение: БЕСПЛАТНО\n• Конвертация валют: 1,15%\n• Вывод внутри страны: 1,28%\n• Международный вывод: 1,75%',
     fb_currency: 'EGWallet поддерживает 50+ валют: XAF, USD, EUR, GBP, NGN, GHS, ZAR, KES и другие.',
     fb_report: 'Чтобы сообщить о проблеме, перейдите в **Историю транзакций** и нажмите **Спор** рядом с транзакцией.',
-    fb_support: 'Наша команда поддержки работает круглосуточно. Напишите нам на **support@egwallet.com**.',
+    fb_support: 'Наша команда поддержки работает круглосуточно. Напишите нам на **SUPPORT@EGWALLETFINANCE.COM**.',
     fb_default: 'Я Фелиса, ваш помощник EGWallet. Могу помочь с переводами, картами, балансами и решением проблем.',
     fb_s_send: 'Как получить деньги?', fb_s_receive: 'Как отправить деньги?', fb_s_card: 'Как заморозить карту?',
     fb_s_balance: 'Как добавить деньги?', fb_s_deposit: 'Каковы лимиты депозита?', fb_s_kyc: 'Каковы лимиты транзакций?',
@@ -217,7 +218,7 @@ const UI: Record<string, Record<string, string>> = {
     fb_fee: 'EGWallet-Gebühren:\n\n• Geld hinzufügen: Erste 6 KOSTENLOS, danach 0,5%\n• Senden/Empfangen: KOSTENLOS\n• FX-Umtausch: 1,15%\n• Inland-Auszahlung: 1,28%\n• Internationale Auszahlung: 1,75%',
     fb_currency: 'EGWallet unterstützt 50+ Währungen: XAF, USD, EUR, GBP, NGN, GHS, ZAR, KES und mehr.',
     fb_report: 'Um ein Problem zu melden, gehen Sie zum **Transaktionsverlauf** und tippen Sie auf **Dispute**, oder nutzen Sie diesen Chat.',
-    fb_support: 'Unser Support-Team ist 24/7 verfügbar. Schreiben Sie uns an **support@egwallet.com**.',
+    fb_support: 'Unser Support-Team ist 24/7 verfügbar. Schreiben Sie uns an **SUPPORT@EGWALLETFINANCE.COM**.',
     fb_default: 'Ich bin Felisa, Ihr EGWallet-Assistent. Ich kann Ihnen bei Überweisungen, Karten, Guthaben und der Problemlösung helfen.',
     fb_s_send: 'Wie empfange ich Geld?', fb_s_receive: 'Wie sende ich Geld?', fb_s_card: 'Wie friere ich eine Karte ein?',
     fb_s_balance: 'Wie füge ich Geld hinzu?', fb_s_deposit: 'Was sind die Einzahlungslimits?', fb_s_kyc: 'Was sind die Transaktionslimits?',
@@ -292,6 +293,7 @@ type Message = {
     id: string;
     fullId: string;
     amount: number;
+    currency?: string;
     type: string;
     status: string;
     timestamp: number;
@@ -411,7 +413,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
       try {
         resp = await fetch(`${API_BASE}/ai-assistant`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${auth.token}` },
+          headers: { 'Content-Type': 'application/json', ...(auth.token ? { 'Authorization': `Bearer ${auth.token}` } : {}) },
           body: JSON.stringify({ language, event, eventContext: params, userContext: userCtx }),
           signal: controller.signal,
         });
@@ -440,7 +442,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
 
     if (event === 'transaction_failed') {
       const reason = params.failureReason || '';
-      const amtStr = params.amount && params.currency ? `${params.currency} ${(Number(params.amount) / 100).toFixed(2)}` : '';
+      const amtStr = params.amount && params.currency ? `${params.currency} ${formatMinorAmount(Number(params.amount), params.currency)}` : '';
       text = L === 'fr'
         ? `Votre transaction${amtStr ? ` de ${amtStr}` : ''} a échoué${reason ? ` : ${reason}` : ''}. Vérifiez votre solde et réessayez.`
         : L === 'es'
@@ -453,7 +455,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
       ];
     } else if (event === 'withdrawal_pending') {
       const pending = userCtx?.pendingWithdrawals || {};
-      const pendingStr = Object.entries(pending).filter(([, v]) => v > 0).map(([c, v]) => `${c} ${(v / 100).toFixed(2)}`).join(', ');
+      const pendingStr = Object.entries(pending).filter(([, v]) => v > 0).map(([c, v]) => `${c} ${formatMinorAmount(v, c)}`).join(', ');
       text = L === 'fr'
         ? `Votre retrait${pendingStr ? ` de ${pendingStr}` : ''} est en cours. Les retraits prennent 3 à 5 jours ouvrés.`
         : L === 'es'
@@ -528,7 +530,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${auth.token}`,
+            ...(auth.token ? { 'Authorization': `Bearer ${auth.token}` } : {}),
           },
           body: JSON.stringify({
             message: text.trim(),
@@ -571,7 +573,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${auth.token}`,
+              ...(auth.token ? { 'Authorization': `Bearer ${auth.token}` } : {}),
             },
             body: JSON.stringify({
               message: text.trim(),
@@ -633,7 +635,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
         const topEntry = Object.entries(bals).find(([, v]) => v > 0);
         if (topEntry) {
           const [cur, minorAmt] = topEntry;
-          const readableAmt = (minorAmt / 100).toFixed(2);
+          const readableAmt = formatMinorAmount(minorAmt, cur);
           fallbackText = L === 'fr'
             ? `Votre solde disponible est de ${cur} ${readableAmt}.\n\n${uiStr(L, 'fb_balance')}`
             : L === 'es'
@@ -769,7 +771,8 @@ export default function AIChatScreen({ route }: { route?: any }) {
                   key={tx.fullId}
                   style={styles.transactionItem}
                   onPress={() => {
-                    sendMessage(`I want to report transaction ${tx.id} (${tx.type === 'send' ? '-' : '+'}$${Math.abs(tx.amount).toFixed(2)}) as unauthorized.`);
+                    const cur = tx.currency || 'USD';
+                    sendMessage(`I want to report transaction ${tx.id} (${tx.type === 'send' ? '-' : '+'}${formatMinorAmount(Math.abs(tx.amount), cur)} ${cur}) as unauthorized.`);
                   }}
                 >
                   <View style={styles.transactionRow}>
@@ -779,7 +782,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
                       color={tx.status === 'pending' ? '#FF9500' : tx.status === 'completed' ? '#34C759' : '#FF3B30'} 
                     />
                     <Text style={styles.transactionAmount}>
-                      {tx.type === 'send' ? '-' : '+'}${Math.abs(tx.amount).toFixed(2)}
+                      {tx.type === 'send' ? '-' : '+'}{formatMinorAmount(Math.abs(tx.amount), tx.currency || 'USD')} {tx.currency || 'USD'}
                     </Text>
                     <Text style={styles.transactionId}>{tx.id}</Text>
                   </View>
@@ -897,7 +900,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
                       method: 'POST',
                       headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${auth.token}`,
+                        ...(auth.token ? { 'Authorization': `Bearer ${auth.token}` } : {}),
                       },
                       body: JSON.stringify({ language: newLang }),
                     });
@@ -1468,3 +1471,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+

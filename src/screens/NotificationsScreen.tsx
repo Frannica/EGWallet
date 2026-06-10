@@ -337,3 +337,4 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 18, fontWeight: '700', color: '#0D1B2E' },
   emptySubtitle: { fontSize: 14, color: '#657786', textAlign: 'center', lineHeight: 20 },
 });
+

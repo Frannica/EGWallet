@@ -764,7 +764,7 @@ Authorization: Bearer <employer-token>
 
 **Technical Issues**: dev@egwallet.com  
 **Employer Verification**: compliance@egwallet.com  
-**General Support**: support@egwallet.com
+**General Support**: SUPPORT@EGWALLETFINANCE.COM
 
 ---
 

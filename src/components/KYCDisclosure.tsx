@@ -97,3 +97,4 @@ export function KYCDisclosure({ region }: KYCDisclosureProps) {
     </View>
   );
 }
+

@@ -5,6 +5,7 @@ import { login as apiLogin, register as apiRegister, me as apiMe, listWallets } 
 import { API_BASE } from '../api/client';
 import { getDeviceFingerprint, getDeviceDisplayName, getDeviceType } from '../utils/deviceInfo';
 import { clearLocalUserData } from '../utils/localBalance';
+import { refreshAccessToken } from '../utils/tokenRefresh';
 import { detectCountryCode, autoDetectRegion } from '../config/regional';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -54,21 +55,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   // Try to use the stored refresh token to get a new access token.
-  // Returns true if successful (sets token + user state), false otherwise.
+  // Delegates to the shared refreshAccessToken() from tokenRefresh.ts so that
+  // concurrent calls from here and fetchWithTokenRefresh share one in-flight
+  // promise — preventing the race where the loser wipes the winner's new tokens.
   async function tryRefreshToken(): Promise<boolean> {
     try {
-      const rt = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
-      if (!rt) return false;
-      const res = await fetch(`${API_BASE}/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken: rt }),
-      });
-      if (!res.ok) return false;
-      const data = await res.json();
-      const newToken = data.token;
+      const newToken = await refreshAccessToken();
       if (!newToken) return false;
-      await SecureStore.setItemAsync(TOKEN_KEY, newToken);
       setToken(newToken);
       try {
         const profile = await apiMe(newToken);
@@ -280,16 +273,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }
 
   async function signOut() {
-    // Revoke refresh token on backend
+    // Revoke refresh token on backend.
+    // Send the refresh token even when the access token is expired — the server
+    // verifies the refresh JWT itself and does not require an Authorization header.
     try {
       const rt = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
-      if (rt && token) {
+      if (rt) {
         await fetch(`${API_BASE}/auth/logout`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ refreshToken: rt }),
         });
       }
@@ -338,3 +330,4 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     </AuthContext.Provider>
   );
 };
+

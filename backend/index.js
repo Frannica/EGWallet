@@ -6,6 +6,34 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const { encryptPII, decryptPII, isEncrypted, maskAccountNumber } = require('./piiCipher');
+
+/**
+ * One-way hash for refresh token storage.
+ * Raw JWTs are never persisted — only the SHA-256 digest.
+ * Comparison: hashToken(incomingRaw) === storedRecord.tokenHash
+ */
+function hashToken(raw) {
+  return crypto.createHash('sha256').update(raw).digest('hex');
+}
+
+/**
+ * Evict oldest refresh-token records for a user beyond the session cap.
+ * Prevents an unbounded list of valid sessions accumulating over time.
+ * Caller is responsible for calling saveDB after this returns.
+ */
+function enforceSessionCap(db, userId, maxSessions = 5) {
+  if (!db.refreshTokens) return;
+  const userTokens = db.refreshTokens.filter(t => t.userId === userId);
+  if (userTokens.length <= maxSessions) return;
+  userTokens.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const toEvict = new Set(
+    userTokens.slice(maxSessions).map(t => t.tokenHash).filter(Boolean)
+  );
+  db.refreshTokens = db.refreshTokens.filter(
+    t => t.userId !== userId || !toEvict.has(t.tokenHash)
+  );
+}
 const { v4: uuidv4 } = require('uuid');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
@@ -14,9 +42,9 @@ const winston = require('winston');
 const { body, validationResult } = require('express-validator');
 const multer = require('multer');
 const { parse } = require('csv-parse/sync');
-const { createWithdrawal, advanceToProcessing } = require('./withdrawalEngine');
-const { router: adminWithdrawalsRouter, adminLoginHandler } = require('./adminWithdrawals');
-const { executePayout } = require('./payoutProviders');
+const { createWithdrawal, advanceToProcessing, markWithdrawalFailed, markWithdrawalPaid } = require('./withdrawalEngine');
+const { router: adminWithdrawalsRouter, adminLoginHandler, adminLogoutHandler } = require('./adminWithdrawals');
+const { executePayout, payoutRouter } = require('./payoutProviders');
 const nodemailer = require('nodemailer');
 
 // Stripe — only initialise when secret key is present
@@ -60,7 +88,11 @@ let firestore     = null;
 // Environment Configuration
 const DB_FILE = process.env.DB_FILE_PATH || path.join(__dirname, 'db.json');
 const DB_BACKUP = process.env.DB_BACKUP_PATH || path.join(__dirname, 'db.json.bak');
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
+if (!process.env.JWT_SECRET) {
+  console.error('❌ FATAL: JWT_SECRET is not set. All tokens would be forgeable. Set JWT_SECRET in your environment.');
+  process.exit(1);
+}
+const JWT_SECRET = process.env.JWT_SECRET;
 console.log('PORT from Railway:', process.env.PORT);
 const PORT = Number(process.env.PORT);
 if (!process.env.PORT || isNaN(PORT) || PORT <= 0) {
@@ -82,10 +114,72 @@ const FRAUD_TIME_WINDOW = parseInt(process.env.FRAUD_TIME_WINDOW_MS) || 3600000;
 
 // Validate critical environment variables
 if (NODE_ENV === 'production') {
-  if (!JWT_SECRET || JWT_SECRET === 'dev_secret_change_me') {
-    console.error('❌ WARNING: JWT_SECRET is not set or using default. Set JWT_SECRET in Railway environment variables.');
-    // Do NOT exit — the server can still run; tokens will work but rotate on restart
+  if (!JWT_SECRET || JWT_SECRET === 'dev_secret_change_me' || JWT_SECRET.length < 32) {
+    console.error('❌ FATAL: JWT_SECRET is missing, set to the default value, or shorter than 32 characters. All tokens would be forgeable. Set a strong secret in your Railway environment variables.');
+    process.exit(1);
   }
+
+  const _adminSecret = process.env.ADMIN_SECRET;
+  if (!_adminSecret || _adminSecret.length < 32) {
+    console.error(
+      '❌ FATAL: ADMIN_SECRET is missing or shorter than 32 characters. ' +
+      'Without a strong ADMIN_SECRET, admin login is impossible and any pending_review ' +
+      'withdrawals cannot be approved or refunded, permanently locking user funds. ' +
+      'Set a strong ADMIN_SECRET in your Railway environment variables.'
+    );
+    process.exit(1);
+  }
+
+  // PII encryption key guard — without it payout PII is stored plaintext.
+  if (!process.env.PII_ENCRYPTION_KEY) {
+    console.error(
+      '❌ FATAL: PII_ENCRYPTION_KEY is missing. Bank account numbers, IBANs, and holder ' +
+      'names would be stored in plaintext in db.json. Generate a 32-byte key (openssl rand -hex 32) ' +
+      'and set it in your Railway environment variables.'
+    );
+    process.exit(1);
+  }
+
+  // CORS wildcard guard — credentials: true + '*' allows any site to read API responses.
+  if (ALLOWED_ORIGINS.includes('*')) {
+    console.error(
+      '❌ FATAL: ALLOWED_ORIGINS must be an explicit allowlist in production. ' +
+      'Wildcard (*) combined with credentials: true lets any origin read wallet API responses. ' +
+      'Set ALLOWED_ORIGINS=https://app.egwallet.com (comma-separated) in your environment.'
+    );
+    process.exit(1);
+  }
+
+  // Smile Identity sandbox guard — prevents sandbox test IDs from auto-approving
+  // real production accounts, which would grant elevated KYC tier limits to attackers.
+  if (process.env.SMILE_PARTNER_ID && process.env.SMILE_API_KEY) {
+    const _smileBase = process.env.SMILE_API_BASE || '';
+    if (!_smileBase || _smileBase.includes('testapi')) {
+      console.error(
+        '❌ FATAL: SMILE_PARTNER_ID and SMILE_API_KEY are set but SMILE_API_BASE is missing ' +
+        'or still points to the Smile Identity sandbox (testapi.smileidentity.com). ' +
+        'Sandbox test IDs would be accepted as valid production KYC, granting elevated limits. ' +
+        'Set SMILE_API_BASE to the Smile production endpoint (e.g. https://api.smileidentity.com/v1) ' +
+        'in your Railway environment variables.'
+      );
+      process.exit(1);
+    }
+  }
+
+  // C6: Single-instance guard — db.json is not safe for concurrent multi-process writes.
+  // Set WEB_CONCURRENCY=1 and RAILWAY_REPLICAS=1 in your deployment environment.
+  const _webConcurrency   = parseInt(process.env.WEB_CONCURRENCY   || '1', 10);
+  const _railwayReplicas  = parseInt(process.env.RAILWAY_REPLICAS   || '1', 10);
+  if (_webConcurrency > 1 || _railwayReplicas > 1) {
+    console.error(
+      `❌ FATAL: Multi-instance deployment detected ` +
+      `(WEB_CONCURRENCY=${_webConcurrency}, RAILWAY_REPLICAS=${_railwayReplicas}). ` +
+      `EGWallet uses a single-file database (db.json) that is not safe for concurrent ` +
+      `writes across processes. Set WEB_CONCURRENCY=1 and RAILWAY_REPLICAS=1 before deploying.`
+    );
+    process.exit(1);
+  }
+
   if (!FRESHDESK_DOMAIN || !FRESHDESK_API_KEY) {
     console.warn('⚠️  WARNING: Freshdesk not configured. Tickets will be stored locally only.');
   }
@@ -165,9 +259,85 @@ const auditLogger = winston.createLogger({
 // Clean up keys older than 24 hours
 const idempotencyStore = new Map();
 const IDEMPOTENCY_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
-// In-flight guard: prevents two concurrent withdrawal requests for the same
-// user+currency from both passing the balance check before either commits.
-const withdrawalInFlight = new Set();
+
+// ── Durable idempotency helpers ───────────────────────────────────────────────
+// The in-memory Map is a fast-path cache. These helpers persist records to
+// db.json so that retries after a process restart cannot double-charge.
+// Both helpers must be called inside withBalanceMutex on a freshly-loaded db.
+
+/**
+ * Returns the cached response if a non-expired record exists AND was created by
+ * the same authenticated user.  userId binding prevents IDOR: a different user
+ * who happens to know the idempotency key cannot receive another user's response.
+ */
+function checkDurableIdempotency(db, clientKey, userId) {
+  if (!clientKey || !userId) return null;
+  const record = (db.idempotencyRecords || []).find(
+    r => r.key === clientKey
+      && r.userId === userId
+      && Date.now() - r.timestamp < IDEMPOTENCY_EXPIRY
+  );
+  return record ? record.response : null;
+}
+
+/**
+ * Persists the response for a completed financial operation, bound to the userId
+ * who made the request.  Call this BEFORE saveDB() so the record is written
+ * atomically with the balance mutation.  Also prunes expired records inline.
+ */
+function saveDurableIdempotency(db, clientKey, response, userId) {
+  if (!clientKey || !userId) return;
+  if (!db.idempotencyRecords) db.idempotencyRecords = [];
+  db.idempotencyRecords = db.idempotencyRecords.filter(
+    r => (r.key !== clientKey || r.userId !== userId) && Date.now() - r.timestamp < IDEMPOTENCY_EXPIRY
+  );
+  db.idempotencyRecords.push({ key: clientKey, userId, response, timestamp: Date.now() });
+}
+// Global write serializer — replaces the old per-wallet balanceInFlight and
+// withdrawalInFlight Sets.
+//
+// Promise-chain pattern: every call to withBalanceMutex() is appended to
+// _dbMutex so only one balance-mutating handler runs at a time inside this
+// process, regardless of whether the handler contains an await.
+// loadDB() is called INSIDE each callback so it always reads the freshest
+// committed state after the previous mutation has been flushed to disk.
+//
+// What this protects:
+//   ✓ Single-process async races (e.g. deposits/confirm awaiting Stripe)
+//   ✓ Single-process sync races (two rapid requests)
+//   ⚠ Multi-instance (two Railway pods) — detected and logged via _dbVersion;
+//     full prevention requires a distributed lock (Redis) when scaling to >1 pod.
+let _dbMutex = Promise.resolve();
+function withBalanceMutex(fn) {
+  const result = _dbMutex.then(() => fn());
+  // Errors must not break the chain — subsequent requests must still get a turn.
+  _dbMutex = result.catch(() => {});
+  return result;
+}
+
+// Per-user mutex for refresh-token rotation.
+// Serialises concurrent requests presenting the same refresh JWT so only the
+// first one passes findIndex(); the second reads the DB after the first write
+// and sees the token already consumed, returning 401 instead of issuing a
+// second valid session (classic TOCTOU / token-multiplication attack).
+const _refreshMutexMap = new Map();
+function withRefreshMutex(userId, fn) {
+  const prev = _refreshMutexMap.get(userId) || Promise.resolve();
+  const next = prev.then(() => fn());
+  // Errors must not break the per-user chain.
+  _refreshMutexMap.set(userId, next.catch(() => {}));
+  return next;
+}
+
+// Dedicated mutex for KYC verification — kept separate from withBalanceMutex so
+// the 30-second Smile Identity API call never blocks unrelated balance mutations.
+// Serialises the read-check-write cycle for kycIdHash reservation.
+let _kycMutex = Promise.resolve();
+function withKycMutex(fn) {
+  const result = _kycMutex.then(() => fn());
+  _kycMutex = result.catch(() => {});
+  return result;
+}
 
 // ==================== DEVICE BINDING ABUSE PROTECTION ====================
 // Persistent tracker: stored in db.device_signup_tracker (array of records)
@@ -322,6 +492,16 @@ function maskEmail(email) {
 function maskCardNumber(cardNumber) {
   if (!cardNumber || cardNumber.length < 4) return '****';
   return `****${cardNumber.slice(-4)}`;
+}
+
+function sanitizeCard(card) {
+  if (!card) return card;
+  // Strip full PAN/CVV. New cards never have these fields in the DB;
+  // legacy cards in db.json still have them and must be masked here.
+  const { cvv, cardNumber, ...rest } = card;
+  // Prefer stored last4; fall back to computing it from a legacy cardNumber
+  const last4 = rest.last4 || (cardNumber ? cardNumber.slice(-4) : '****');
+  return { ...rest, last4, maskedNumber: `****${last4}` };
 }
 
 function maskTransactionId(id) {
@@ -1872,6 +2052,36 @@ function fxSafetyCheck(receivedMinor, toCurrency) {
   return { safe: true };
 }
 
+// Sanitize withdrawal accountNumber for API responses.
+// Returns the pre-computed accountMask ("****1234") when present (new records).
+// For legacy records without accountMask: card methods return last4, bank returns as-is.
+// Never returns raw ciphertext — if the field is encrypted and no mask exists, returns null.
+function safeWithdrawalAccountNumber(w) {
+  if (w.accountMask) return w.accountMask;
+  if (!w.accountNumber) return null;
+  if (isEncrypted(w.accountNumber)) return null; // encrypted without mask — migration pending
+  if (w.method === 'debit' || w.method === 'credit') {
+    return String(w.accountNumber).replace(/\D/g, '').slice(-4) || null;
+  }
+  return w.accountNumber; // legacy plaintext bank account (migration will encrypt it)
+}
+
+/**
+ * Return a response-safe copy of a withdrawal record.
+ * PII fields are masked or omitted — ciphertext is never returned to API callers.
+ * bankNameDisplay and accountMask are the safe display copies set at creation time.
+ */
+function sanitizeWithdrawalForResponse(w) {
+  return {
+    ...w,
+    accountNumber:     safeWithdrawalAccountNumber(w),
+    bankName:          w.bankNameDisplay || null,  // plaintext display copy
+    accountHolderName: null,                        // personal name — not returned in responses
+    iban:              null,                        // encrypted — not returned in responses
+    swiftBic:          null,                        // encrypted — not returned in responses
+  };
+}
+
 function loadDB() {
   try {
     const raw = fs.readFileSync(DB_FILE, 'utf8');
@@ -1893,35 +2103,82 @@ function loadDB() {
     if (!db.demoIntents) db.demoIntents = [];
     if (!db.notifications) db.notifications = [];
     if (!db.passwordResetTokens) db.passwordResetTokens = [];
+    // Persistent KYC identity claims: { [kycIdHash]: { userId, status, claimedAt, updatedAt } }
+    // Authoritative dedup source — survives rejection/error without clearing hash.
+    if (!db.kycIdentityClaims) db.kycIdentityClaims = {};
+    // Advisory payout locks — TTL-keyed, cleaned on load and at startup sweep.
+    if (!db.payoutLocks) db.payoutLocks = [];
     return db;
   } catch (e) {
-    const initial = {
-      users: [],
-      wallets: [],
-      transactions: [],
-      paymentRequests: [],
-      virtualCards: [],
-      budgets: [],
-      devices: [], // Track trusted devices per user
+    // Never overwrite a potentially-recoverable corrupt file with an empty database.
+    // Quarantine it, attempt backup restore, and fail safely.
+    const corruptPath = DB_FILE + '.corrupt.' + Date.now();
+    try { fs.renameSync(DB_FILE, corruptPath); } catch (_) { /* rename failed — disk issue */ }
+    console.error('[loadDB] db.json failed to parse — quarantined to', corruptPath, e.message);
+
+    // Attempt to restore from the last known-good backup.
+    if (fs.existsSync(DB_BACKUP)) {
+      try {
+        const backupRaw = fs.readFileSync(DB_BACKUP, 'utf8');
+        const backupDb  = JSON.parse(backupRaw);
+        // Copy backup over so subsequent loadDB calls (and saveDB) use the restored file.
+        fs.copyFileSync(DB_BACKUP, DB_FILE);
+        console.warn('[loadDB] Restored db.json from backup');
+        // Apply the same migrations as the happy path above.
+        if (!backupDb.paymentRequests)   backupDb.paymentRequests   = [];
+        if (!backupDb.virtualCards)      backupDb.virtualCards      = [];
+        if (!backupDb.budgets)           backupDb.budgets           = [];
+        if (!backupDb.devices)           backupDb.devices           = [];
+        if (!backupDb.supportTickets)    backupDb.supportTickets    = [];
+        if (!backupDb.fraudAlerts)       backupDb.fraudAlerts       = [];
+        if (!backupDb.savedContacts)     backupDb.savedContacts     = [];
+        if (!backupDb.qrCodes)           backupDb.qrCodes           = [];
+        if (!backupDb.refreshTokens)     backupDb.refreshTokens     = [];
+        if (!backupDb.auditLog)          backupDb.auditLog          = [];
+        if (!backupDb.employers)         backupDb.employers         = [];
+        if (!backupDb.employerEmployees) backupDb.employerEmployees = [];
+        if (!backupDb.payrollBatches)    backupDb.payrollBatches    = [];
+        if (!backupDb.demoIntents)       backupDb.demoIntents       = [];
+        if (!backupDb.notifications)     backupDb.notifications     = [];
+        if (!backupDb.passwordResetTokens) backupDb.passwordResetTokens = [];
+        if (!backupDb.idempotencyRecords)  backupDb.idempotencyRecords  = [];
+        if (!backupDb.withdrawals)       backupDb.withdrawals       = [];
+        if (!backupDb.kycIdentityClaims) backupDb.kycIdentityClaims = {};
+        return backupDb;
+      } catch (backupErr) {
+        console.error('[loadDB] Backup restore also failed', backupErr.message);
+      }
+    }
+
+    // No recovery possible.
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[loadDB] FATAL: db.json is corrupt and backup restore failed. Refusing to continue with empty database.');
+      process.exit(1);
+    }
+
+    // Dev/staging only — return empty database in-memory without writing to disk.
+    // The file was quarantined above; let the operator decide what to restore.
+    console.warn('[loadDB] Dev mode: returning empty in-memory database (no disk write).');
+    return {
+      users: [], wallets: [], transactions: [], paymentRequests: [],
+      virtualCards: [], budgets: [], devices: [], supportTickets: [],
+      fraudAlerts: [], savedContacts: [], qrCodes: [], refreshTokens: [],
+      auditLog: [], employers: [], employerEmployees: [], payrollBatches: [],
+      demoIntents: [], notifications: [], passwordResetTokens: [],
+      idempotencyRecords: [], withdrawals: [], kycIdentityClaims: {},
       rates: {
         base: 'USD',
-        values: { 
-          // Major
+        values: {
           USD: 1, EUR: 0.93, GBP: 0.79, CHF: 0.90, CAD: 1.35,
           AUD: 1.52, NZD: 1.63,
-          // Asia-Pacific
           CNY: 7.25, JPY: 149, KRW: 1340, HKD: 7.82, SGD: 1.34,
           TWD: 31, THB: 34, MYR: 4.65, IDR: 15600, PHP: 56,
           VND: 24500, INR: 83, PKR: 278, BDT: 110, LKR: 320,
-          // Europe non-Euro
           SEK: 10.5, NOK: 10.7, DKK: 6.89, PLN: 3.95, CZK: 22.7,
           HUF: 360, RON: 4.62, RUB: 90, TRY: 32, UAH: 37,
-          // Middle East
           SAR: 3.75, AED: 3.67, QAR: 3.64, KWD: 0.31, BHD: 0.38,
           OMR: 0.38, ILS: 3.71,
-          // Americas
           BRL: 5.2, MXN: 17, ARS: 850, CLP: 910, COP: 3900, PEN: 3.7,
-          // Africa
           NGN: 1540, GHS: 12, XAF: 600, XOF: 600, ZAR: 19,
           KES: 130, TZS: 2650, UGX: 3800, RWF: 1300, ETB: 52,
           EGP: 50, TND: 3.1, MAD: 10, LYD: 4.8, DZD: 135,
@@ -1930,25 +2187,62 @@ function loadDB() {
           MUR: 45, SCR: 13, ZMW: 25, MWK: 1700, GNF: 8600,
           SLE: 22, CDF: 2800, CVE: 103, HTG: 132,
         },
-        updatedAt: Date.now()
-      }
+        updatedAt: Date.now(),
+      },
     };
-    fs.writeFileSync(DB_FILE, JSON.stringify(initial, null, 2));
-    return initial;
   }
 }
 
-function saveDB(db) {
-  // Create backup before saving
+function saveDB(db, { skipVersionCheck = false } = {}) {
+  // Create backup before saving.
+  // In production a backup failure is fatal — proceeding without it risks
+  // permanent data loss if the subsequent write fails or is interrupted.
   if (fs.existsSync(DB_FILE)) {
     try {
       fs.copyFileSync(DB_FILE, DB_BACKUP);
     } catch (err) {
-      logger.warn('Failed to create backup', { error: err.message });
+      if (NODE_ENV === 'production') {
+        logger.error('FATAL: db.json backup failed — aborting save to prevent unrecoverable data loss', {
+          error: err.message,
+        });
+        throw new Error('BACKUP_FAILED');
+      }
+      logger.warn('Failed to create backup (non-production — continuing)', { error: err.message });
     }
   }
-  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
-  logger.debug('Database saved', { timestamp: Date.now() });
+  // Multi-instance collision guard.
+  // Re-read _dbVersion from disk; if it has advanced since loadDB() was called,
+  // another process wrote to the file while we held our in-memory copy.
+  // We refuse to overwrite silently and throw so the route handler can return 503.
+  // Pass skipVersionCheck:true for async payout jobs that run outside the mutex.
+  if (!skipVersionCheck && fs.existsSync(DB_FILE)) {
+    try {
+      const onDisk = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+      if ((onDisk._dbVersion || 0) !== (db._dbVersion || 0)) {
+        logger.error('FATAL: db.json _dbVersion conflict — multi-instance write collision', {
+          expected: db._dbVersion, actual: onDisk._dbVersion,
+        });
+        throw new Error('DB_VERSION_CONFLICT');
+      }
+    } catch (e) {
+      if (e.message === 'DB_VERSION_CONFLICT') throw e;
+      // I/O error or JSON parse failure — we cannot confirm the on-disk version is safe
+      // to overwrite.  Fail closed: throw so the caller gets a retryable error rather
+      // than silently clobbering a potentially newer version written by another process.
+      logger.error('saveDB: version check unverifiable — aborting write to prevent data loss', {
+        error: e.message,
+      });
+      throw new Error(`DB_VERSION_UNVERIFIABLE: ${e.message}`);
+    }
+  }
+  db._dbVersion = (db._dbVersion || 0) + 1;
+  // Atomic write: write to a temp file then rename so a mid-write crash cannot
+  // corrupt the live db.json. fs.renameSync on the same filesystem is an atomic
+  // directory-entry swap on both Linux and Windows (NTFS MoveFileEx w/ replace).
+  const DB_TMP = DB_FILE + '.tmp';
+  fs.writeFileSync(DB_TMP, JSON.stringify(db, null, 2), 'utf8');
+  fs.renameSync(DB_TMP, DB_FILE);
+  logger.debug('Database saved', { timestamp: Date.now(), version: db._dbVersion });
 }
 
 // ==================== LIVE FX RATE REFRESH ====================
@@ -2030,12 +2324,137 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+
+// ── Provider webhook endpoints ─────────────────────────────────────────────────
+// MUST be registered BEFORE app.use(express.json(...)) so Stripe's raw-body
+// signature verification runs before the global JSON parser consumes the stream.
+
+// ─── POST /webhooks/stripe ──────────────────────────────────────────────────
+// Receives signed Stripe payout events (payout.paid / payout.failed / payout.canceled).
+// STRIPE_WEBHOOK_SECRET must be set to the secret from your Stripe dashboard.
+app.post('/webhooks/stripe',
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (!webhookSecret || !stripeClient) {
+      logger.warn('[webhook/stripe] STRIPE_WEBHOOK_SECRET or stripeClient not configured — ignoring event');
+      return res.json({ received: true });
+    }
+    const sig = req.headers['stripe-signature'];
+    let event;
+    try {
+      event = stripeClient.webhooks.constructEvent(req.body, sig, webhookSecret);
+    } catch (err) {
+      logger.warn('[webhook/stripe] Signature verification failed', { error: err.message });
+      return res.status(400).json({ error: 'Webhook signature verification failed' });
+    }
+
+    const STRIPE_PAYOUT_EVENTS = new Set(['payout.paid', 'payout.failed', 'payout.canceled']);
+    if (!STRIPE_PAYOUT_EVENTS.has(event.type)) return res.json({ received: true });
+
+    const payout       = event.data.object;
+    const withdrawalId = payout.metadata?.withdrawalId;
+    if (!withdrawalId) {
+      logger.warn('[webhook/stripe] Payout event missing withdrawalId metadata', { payoutId: payout.id });
+      return res.json({ received: true });
+    }
+
+    try {
+      await withBalanceMutex(async () => {
+        const db = loadDB();
+        const w  = (db.withdrawals || []).find(x => x.id === withdrawalId);
+        if (!w || w.status !== 'processing') return; // already resolved — idempotent
+        if (event.type === 'payout.paid') {
+          markWithdrawalPaid(db, withdrawalId, payout.id, 'stripe');
+          logger.info('[webhook/stripe] Marked paid', { withdrawalId, payoutId: payout.id });
+        } else {
+          markWithdrawalFailed(db, withdrawalId,
+            `Stripe webhook: payout ${payout.status} (${payout.id})`);
+          logger.info('[webhook/stripe] Marked failed', { withdrawalId, payoutId: payout.id, status: payout.status });
+        }
+        saveDB(db);
+      });
+      res.json({ received: true });
+    } catch (err) {
+      logger.error('[webhook/stripe] Processing error', { withdrawalId, error: err.message });
+      res.status(500).json({ error: 'Processing failed' });
+    }
+  }
+);
+
+// ─── POST /webhooks/kora ────────────────────────────────────────────────────
+// Receives signed Kora disbursement events.
+// KORA_WEBHOOK_SECRET must be set to the HMAC-SHA256 secret from Kora dashboard.
+// Kora signs with: x-korapay-signature = HMAC-SHA256(secret, JSON.stringify(body))
+app.post('/webhooks/kora',
+  express.json({ limit: '100kb' }),
+  async (req, res) => {
+    const webhookSecret = process.env.KORA_WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      logger.warn('[webhook/kora] KORA_WEBHOOK_SECRET not configured — ignoring event');
+      return res.json({ received: true });
+    }
+    const sig = req.headers['x-korapay-signature'];
+    const expected = crypto.createHmac('sha256', webhookSecret)
+      .update(JSON.stringify(req.body))
+      .digest('hex');
+    let valid = false;
+    try {
+      valid = crypto.timingSafeEqual(
+        Buffer.from(sig || '', 'hex'),
+        Buffer.from(expected,    'hex')
+      );
+    } catch (_) { /* length mismatch → not equal */ }
+    if (!valid) {
+      logger.warn('[webhook/kora] Signature verification failed');
+      return res.status(400).json({ error: 'Webhook signature verification failed' });
+    }
+
+    const data      = req.body?.data || {};
+    const reference = data.reference || data.transaction_reference;
+    if (!reference || !reference.startsWith('egw-')) return res.json({ received: true });
+
+    const withdrawalId  = reference.replace(/^egw-/, '');
+    const status        = (data.status || '').toLowerCase();
+    const KORA_SETTLED  = new Set(['success', 'completed']);
+    const KORA_FAILED   = new Set(['failed', 'reversed', 'cancelled']);
+    if (!KORA_SETTLED.has(status) && !KORA_FAILED.has(status)) {
+      // Pending/processing — not terminal, nothing to persist yet.
+      return res.json({ received: true });
+    }
+
+    const koraRef = data.transaction_reference || reference;
+    try {
+      await withBalanceMutex(async () => {
+        const db = loadDB();
+        const w  = (db.withdrawals || []).find(x => x.id === withdrawalId);
+        if (!w || w.status !== 'processing') return; // already resolved — idempotent
+        if (KORA_SETTLED.has(status)) {
+          markWithdrawalPaid(db, withdrawalId, koraRef, 'kora');
+          logger.info('[webhook/kora] Marked paid', { withdrawalId, koraRef, status });
+        } else {
+          markWithdrawalFailed(db, withdrawalId,
+            `Kora webhook: status=${status} ref=${koraRef}`);
+          logger.info('[webhook/kora] Marked failed', { withdrawalId, koraRef, status });
+        }
+        saveDB(db);
+      });
+      res.json({ received: true });
+    } catch (err) {
+      logger.error('[webhook/kora] Processing error', { withdrawalId, error: err.message });
+      res.status(500).json({ error: 'Processing failed' });
+    }
+  }
+);
+
 app.use(express.json({ limit: '100kb' }));
 
 // Expose shared utilities to routers (adminWithdrawals.js uses these)
 app.locals.loadDB = loadDB;
 app.locals.saveDB = saveDB;
 app.locals.logger = logger;
+app.locals.withBalanceMutex = withBalanceMutex;
+app.locals.executePayout = executePayout;
 
 // IP tracking middleware
 app.use((req, res, next) => {
@@ -2088,7 +2507,7 @@ const generalLimiter = rateLimit({
   }
 });
 
-// Auth endpoints rate limit (stricter)
+// Auth endpoints rate limit (stricter) — for login/refresh: only failed attempts count
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: parseInt(process.env.AUTH_RATE_LIMIT) || 5,
@@ -2102,6 +2521,24 @@ const authLimiter = rateLimit({
       retryAfter: 900
     });
   }
+});
+
+// Registration rate limit — every successful registration counts so Sybil
+// account creation cannot inflate per-account KYC tier quotas.
+// skipSuccessfulRequests is intentionally false here.
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,                              // 1-hour sliding window
+  max: parseInt(process.env.REGISTER_RATE_LIMIT) || 5,   // 5 new accounts per IP per hour
+  skipSuccessfulRequests: false,                          // successful registrations must count
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    logger.warn('Registration rate limit exceeded', { ip: req.clientIP });
+    res.status(429).json({
+      error: 'Too many accounts created from this device or network. Please try again later.',
+      retryAfter: 3600,
+    });
+  },
 });
 
 // AI Chat rate limit (prevent abuse)
@@ -2201,6 +2638,23 @@ function authMiddleware(req, res, next) {
   const token = auth.slice(7);
   try {
     const payload = jwt.verify(token, JWT_SECRET);
+    if (payload.type !== 'access') {
+      logger.warn('Non-access token used as bearer', { type: payload.type, ip: req.clientIP, path: req.path });
+      return res.status(401).json({ error: t('error_invalid_token', req.headers['accept-language'] || 'en') });
+    }
+
+    // C2: Reject deleted accounts. C3: Reject tokens superseded by password reset.
+    const db = loadDB();
+    const authedUser = db.users.find(u => u.id === payload.userId);
+    if (!authedUser || authedUser.status === 'deleted') {
+      logger.warn('Auth rejected — account deleted', { userId: payload.userId, ip: req.clientIP, path: req.path });
+      return res.status(401).json({ error: t('error_invalid_token', req.headers['accept-language'] || 'en') });
+    }
+    if ((authedUser.tokenVersion || 0) !== (payload.tokenVersion || 0)) {
+      logger.warn('Auth rejected — tokenVersion mismatch (post-reset)', { userId: payload.userId, ip: req.clientIP, path: req.path });
+      return res.status(401).json({ error: t('error_invalid_token', req.headers['accept-language'] || 'en') });
+    }
+
     req.user = payload;
     next();
   } catch (e) {
@@ -2209,21 +2663,34 @@ function authMiddleware(req, res, next) {
   }
 }
 
+// Admin-only middleware — must be chained after authMiddleware
+function adminMiddleware(req, res, next) {
+  const db = loadDB();
+  const user = db.users.find(u => u.id === req.user.userId);
+  if (!user || user.role !== 'admin') {
+    logger.warn('Admin access denied', { userId: req.user.userId, path: req.path, ip: req.clientIP });
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+}
+
+// Fields whose submitted values must never appear in logs or API responses.
+const SENSITIVE_FIELDS = new Set([
+  'password', 'passwordConfirm', 'currentPassword', 'newPassword',
+]);
+const redactValidationErrors = errs =>
+  errs.map(e => SENSITIVE_FIELDS.has(e.path) ? { ...e, value: '[REDACTED]' } : e);
+
 // Input validation middleware
 function validateInput(validations) {
   return async (req, res, next) => {
     await Promise.all(validations.map(validation => validation.run(req)));
-    
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      logger.warn('Input validation failed', { 
-        errors: errors.array(), 
-        ip: req.clientIP 
-      });
-      return res.status(400).json({ 
-        error: 'Validation failed', 
-        details: errors.array() 
-      });
+      const safeErrors = redactValidationErrors(errors.array());
+      logger.warn('Input validation failed', { errors: safeErrors, ip: req.clientIP });
+      return res.status(400).json({ error: 'Validation failed', details: safeErrors });
     }
     next();
   };
@@ -2233,7 +2700,7 @@ function validateInput(validations) {
 
 // Auth
 app.post('/auth/register', 
-  authLimiter,
+  registerLimiter,
   validateInput([
     body('email').isEmail().normalizeEmail(),
     body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
@@ -2242,6 +2709,15 @@ app.post('/auth/register',
   const db = loadDB();
   const { email, password, region, deviceInfo, username } = req.body;
   const lang = req.lang || 'en';
+
+  // Require a non-empty x-device-id header.
+  // Without it, the per-device signup tracker (below) is skipped and an attacker
+  // can create unlimited accounts from a single device, bypassing KYC tier limits.
+  const rawDeviceId = req.headers['x-device-id'];
+  if (!rawDeviceId || typeof rawDeviceId !== 'string' || !rawDeviceId.trim()) {
+    return res.status(400).json({ error: 'x-device-id header is required for registration' });
+  }
+
   if (!email || !password) return res.status(400).json({ error: t('error_missing_fields', lang) });
   if (findUserByEmail(db, email)) return res.status(400).json({ error: t('error_user_exists', lang) });
 
@@ -2344,7 +2820,8 @@ app.post('/auth/register',
       weekKey:  getWeekKey(),
       monthKey: new Date().toISOString().slice(0, 7),
     },
-    linkedEmployers: []
+    linkedEmployers: [],
+    tokenVersion: 0,
   };
   db.users.push({ ...user, passwordHash });
 
@@ -2369,12 +2846,13 @@ app.post('/auth/register',
 
   saveDB(db);
 
-  const token = jwt.sign({ userId: id, email, type: 'access' }, JWT_SECRET, { expiresIn: '7d' });
-  const refreshToken = jwt.sign({ userId: id, email, type: 'refresh' }, JWT_SECRET, { expiresIn: '30d' });
-  
-  // Store refresh token in db
+  const token = jwt.sign({ userId: id, email, type: 'access', tokenVersion: 0 }, JWT_SECRET, { expiresIn: process.env.JWT_EXPIRY || '15m' });
+  const refreshToken = jwt.sign({ userId: id, email, type: 'refresh', tokenVersion: 0 }, JWT_SECRET, { expiresIn: '30d' });
+
+  // Store token hash only — never the raw JWT. Evict oldest sessions beyond cap.
   if (!db.refreshTokens) db.refreshTokens = [];
-  db.refreshTokens.push({ token: refreshToken, userId: id, createdAt: Date.now() });
+  db.refreshTokens.push({ tokenHash: hashToken(refreshToken), userId: id, createdAt: Date.now() });
+  enforceSessionCap(db, id);
   saveDB(db);
   
   res.json({ token, refreshToken, user: user, walletId: wallet.id, newDevice: false });
@@ -2434,14 +2912,15 @@ app.post('/auth/login',
     }
   }
 
-  const token = jwt.sign({ userId: u.id, email: u.email, type: 'access' }, JWT_SECRET, { expiresIn: process.env.JWT_EXPIRY || '7d' });
-  const refreshToken = jwt.sign({ userId: u.id, email: u.email, type: 'refresh' }, JWT_SECRET, { expiresIn: process.env.REFRESH_TOKEN_EXPIRY || '30d' });
+  const token = jwt.sign({ userId: u.id, email: u.email, type: 'access', tokenVersion: u.tokenVersion || 0 }, JWT_SECRET, { expiresIn: process.env.JWT_EXPIRY || '15m' });
+  const refreshToken = jwt.sign({ userId: u.id, email: u.email, type: 'refresh', tokenVersion: u.tokenVersion || 0 }, JWT_SECRET, { expiresIn: process.env.REFRESH_TOKEN_EXPIRY || '30d' });
   
   logger.info('User logged in', { userId: u.id, newDevice: isNewDevice, ip: req.clientIP });
   
-  // Store refresh token
+  // Store token hash only — never the raw JWT. Evict oldest sessions beyond cap.
   if (!db.refreshTokens) db.refreshTokens = [];
-  db.refreshTokens.push({ token: refreshToken, userId: u.id, createdAt: Date.now() });
+  db.refreshTokens.push({ tokenHash: hashToken(refreshToken), userId: u.id, createdAt: Date.now() });
+  enforceSessionCap(db, u.id);
   saveDB(db);
   
   res.json({ 
@@ -2486,32 +2965,105 @@ app.put('/auth/username', authMiddleware, (req, res) => {
   res.json({ username: normalized });
 });
 
-// Refresh token endpoint
-app.post('/auth/refresh', (req, res) => {
-  const db = loadDB();
+// Refresh-token rate limiter — mobile apps refresh frequently; 20/15 min allows
+// normal background refresh while blocking brute-force token-grinding.
+const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: parseInt(process.env.REFRESH_RATE_LIMIT) || 20,
+  skipSuccessfulRequests: false,
+  handler: (req, res) => {
+    logger.warn('Refresh rate limit exceeded', { ip: req.clientIP });
+    res.status(429).json({ error: 'Too many token refresh requests', retryAfter: 900 });
+  },
+});
+
+// Refresh token endpoint — issues a new access token AND rotates the refresh token.
+// The old refresh token is invalidated atomically with the new one being stored.
+// Rate-limited + serialised per user to prevent concurrent token multiplication.
+app.post('/auth/refresh', refreshLimiter, (req, res) => {
   const { refreshToken } = req.body;
   if (!refreshToken) return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
-  
-  // Verify refresh token
+
+  // Verify JWT outside the mutex — cheap, stateless, and avoids holding the lock
+  // for an unnecessary extra tick.
+  let payload;
   try {
-    const payload = jwt.verify(refreshToken, JWT_SECRET);
+    payload = jwt.verify(refreshToken, JWT_SECRET);
     if (payload.type !== 'refresh') {
       return res.status(401).json({ error: t('error_invalid_refresh_token', req.lang || 'en') });
     }
-    
-    // Check if refresh token exists in db
-    if (!db.refreshTokens) db.refreshTokens = [];
-    const tokenRecord = db.refreshTokens.find(t => t.token === refreshToken && t.userId === payload.userId);
-    if (!tokenRecord) {
-      return res.status(401).json({ error: t('error_invalid_refresh_token', req.lang || 'en') });
-    }
-    
-    // Issue new access token
-    const newToken = jwt.sign({ userId: payload.userId, email: payload.email, type: 'access' }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token: newToken });
   } catch (e) {
     return res.status(401).json({ error: t('error_invalid_refresh_token', req.lang || 'en') });
   }
+
+  // Per-user mutex: serialises concurrent rotation requests for the same userId.
+  // The second concurrent request will re-read the DB after the first write and
+  // find the original token already consumed, returning 401 instead of issuing a
+  // duplicate session.
+  withRefreshMutex(payload.userId, () => {
+    try {
+      const db = loadDB();
+      if (!db.refreshTokens) db.refreshTokens = [];
+
+      // Find the stored record by hash (legacy plaintext tokens migrated at startup).
+      const incomingHash = hashToken(refreshToken);
+      const tokenIdx = db.refreshTokens.findIndex(r =>
+        r.userId === payload.userId && r.tokenHash === incomingHash
+      );
+      if (tokenIdx === -1) {
+        res.status(401).json({ error: t('error_invalid_refresh_token', req.lang || 'en') });
+        return;
+      }
+
+      // Reject tokens issued before a password reset or account deletion.
+      const refreshUser = db.users.find(u => u.id === payload.userId);
+      if (!refreshUser || refreshUser.status === 'deleted') {
+        res.status(401).json({ error: t('error_invalid_refresh_token', req.lang || 'en') });
+        return;
+      }
+      if ((refreshUser.tokenVersion || 0) !== (payload.tokenVersion || 0)) {
+        res.status(401).json({ error: t('error_invalid_refresh_token', req.lang || 'en') });
+        return;
+      }
+
+      // Issue new access token and rotated refresh token.
+      const newToken = jwt.sign(
+        { userId: payload.userId, email: payload.email, type: 'access', tokenVersion: refreshUser.tokenVersion || 0 },
+        JWT_SECRET, { expiresIn: process.env.JWT_EXPIRY || '15m' }
+      );
+      const newRefreshToken = jwt.sign(
+        { userId: payload.userId, email: payload.email, type: 'refresh', tokenVersion: refreshUser.tokenVersion || 0 },
+        JWT_SECRET, { expiresIn: process.env.REFRESH_TOKEN_EXPIRY || '30d' }
+      );
+
+      // Remove old token, add new hash, enforce session cap, and persist atomically.
+      // If saveDB throws, the old token remains on disk — client retries with it.
+      db.refreshTokens.splice(tokenIdx, 1);
+      db.refreshTokens.push({ tokenHash: hashToken(newRefreshToken), userId: payload.userId, createdAt: Date.now() });
+      enforceSessionCap(db, payload.userId);
+      saveDB(db);
+
+      res.json({ token: newToken, refreshToken: newRefreshToken });
+    } catch (e) {
+      if (!res.headersSent) {
+        res.status(401).json({ error: t('error_invalid_refresh_token', req.lang || 'en') });
+      }
+    }
+  }).catch(() => {
+    if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
+  });
+});
+
+// Admin login rate limiter — guards the single shared ADMIN_SECRET; 5 failed
+// attempts per 15 min per IP to block online brute-force while allowing ops use.
+const adminLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  skipSuccessfulRequests: true,
+  handler: (req, res) => {
+    logger.warn('Admin login rate limit exceeded', { ip: req.clientIP });
+    res.status(429).json({ error: 'Too many admin login attempts', retryAfter: 900 });
+  },
 });
 
 // Forgot-password rate limiter (stricter: 3 per 15 min per IP)
@@ -2527,14 +3079,38 @@ const forgotPasswordLimiter = rateLimit({
 });
 
 // Logout endpoint (revoke refresh token)
-app.post('/auth/logout', authMiddleware, (req, res) => {
-  const db = loadDB();
+// Logout — revokes the caller's refresh token.
+// Does NOT require authMiddleware: the refresh JWT itself authenticates the request,
+// allowing revocation even when the access token has already expired (common on mobile).
+// Rate-limited via refreshLimiter to prevent token-grinding.
+app.post('/auth/logout', refreshLimiter, (req, res) => {
   const { refreshToken } = req.body;
-  
+
+  // No refresh token supplied — nothing to revoke; treat as success (idempotent).
+  if (!refreshToken) return res.json({ success: true });
+
+  const db = loadDB();
   if (!db.refreshTokens) db.refreshTokens = [];
-  db.refreshTokens = db.refreshTokens.filter(t => t.token !== refreshToken || t.userId !== req.user.userId);
-  saveDB(db);
-  
+
+  try {
+    // Verify the token to extract userId — prevents cross-user revocation.
+    const payload = jwt.verify(refreshToken, JWT_SECRET);
+    if (payload.type !== 'refresh') {
+      return res.status(400).json({ error: 'Invalid token type' });
+    }
+    const logoutHash = hashToken(refreshToken);
+    db.refreshTokens = db.refreshTokens.filter(t => {
+      const sameUser = t.userId === payload.userId;
+      const sameToken = t.tokenHash === logoutHash;
+      return !(sameUser && sameToken);
+    });
+    saveDB(db);
+  } catch (e) {
+    // Expired or malformed refresh token — already unusable; still return success
+    // so the client can clear local storage without an error loop.
+    logger.info('Logout called with expired/invalid refresh token', { ip: req.clientIP });
+  }
+
   res.json({ success: true });
 });
 
@@ -2676,8 +3252,7 @@ app.post('/auth/forgot-password', forgotPasswordLimiter, async (req, res) => {
         }
       } else {
         // No SMTP configured — log reset token so it can be tested via Railway logs
-        logger.warn('[Email] SMTP not configured (SMTP_HOST missing). Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM on Railway to enable email delivery.');
-        logger.warn('[Email][DEV] Reset token for manual testing:', { rawToken, userId: user.id, resetLink });
+        logger.warn('[Email] SMTP not configured — token saved to DB but not delivered. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM to enable email delivery.', { userId: user.id });
       }
     }
 
@@ -2716,6 +3291,9 @@ app.post('/auth/reset-password', forgotPasswordLimiter, async (req, res) => {
 
     // Update password
     user.passwordHash = bcrypt.hashSync(newPassword, 12);
+
+    // Bump tokenVersion — invalidates all outstanding access JWTs immediately
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
 
     // Remove used token and all other tokens for this user
     db.passwordResetTokens = db.passwordResetTokens.filter(tok => tok.userId !== user.id);
@@ -2814,12 +3392,12 @@ app.get('/wallets/:id/transactions', authMiddleware, (req, res) => {
       feeAmount: w.feeAmount,
       netPayout: w.netPayout,
       method: w.method,
-      bankName: w.bankName,
-      accountNumber: w.accountNumber,
-      accountHolderName: w.accountHolderName,
+      bankName: w.bankNameDisplay || null,
+      accountNumber: safeWithdrawalAccountNumber(w),
+      accountHolderName: null,
       status: w.status,
       timestamp: w.createdAt,
-      memo: `Withdrawal to ${w.bankName || w.method || 'account'}`,
+      memo: `Withdrawal to ${w.bankNameDisplay || w.method || 'account'}`,
     }));
   const combined = [...txs, ...withdrawalTxs].sort((a, b) => b.timestamp - a.timestamp);
   res.json({ transactions: combined });
@@ -2850,12 +3428,12 @@ app.get('/transactions', authMiddleware, (req, res) => {
       feeAmount: w.feeAmount,
       netPayout: w.netPayout,
       method: w.method,
-      bankName: w.bankName,
-      accountNumber: w.accountNumber,
-      accountHolderName: w.accountHolderName,
+      bankName: w.bankNameDisplay || null,
+      accountNumber: safeWithdrawalAccountNumber(w),
+      accountHolderName: null,
       status: w.status,
       timestamp: w.createdAt,
-      memo: `Withdrawal to ${w.bankName || w.method || 'account'}`,
+      memo: `Withdrawal to ${w.bankNameDisplay || w.method || 'account'}`,
     }));
   const combined = [...txs, ...withdrawalTxs].sort((a, b) => b.timestamp - a.timestamp);
   res.json(combined);
@@ -2901,8 +3479,7 @@ function resolveRecipient(db, input) {
 }
 
 // Send money (simple internal transfer between wallets by walletId or @username)
-app.post('/transactions', authMiddleware, (req, res) => {
-  const db = loadDB();
+app.post('/transactions', authMiddleware, async (req, res) => {
   const lang = req.lang || 'en';
   const { fromWalletId, toWalletId: rawToId, amount, currency, memo, idempotencyKey } = req.body; // amount is expected in minor units (integer)
   if (!fromWalletId || !rawToId || typeof amount === 'undefined' || !currency) return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
@@ -2910,10 +3487,21 @@ app.post('/transactions', authMiddleware, (req, res) => {
 
   // ── Idempotency check ──────────────────────────────────────────────────────
   const clientKey = idempotencyKey || req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
+  if (!clientKey) return res.status(400).json({ error: 'Idempotency-Key header is required' });
+  const cached0 = idempotencyStore.get(clientKey);
+  if (cached0 && cached0.userId === req.user.userId && Date.now() - cached0.timestamp < IDEMPOTENCY_EXPIRY) {
+    return res.status(200).json(cached0.response);
+  }
+
+  return withBalanceMutex(async () => {
+  const db = loadDB();
+
+  // Durable idempotency — survives restart (check DB after acquiring mutex)
   if (clientKey) {
-    const cached = idempotencyStore.get(clientKey);
-    if (cached && Date.now() - cached.timestamp < IDEMPOTENCY_EXPIRY) {
-      return res.status(200).json(cached.response);
+    const durableHit = checkDurableIdempotency(db, clientKey, req.user.userId);
+    if (durableHit) {
+      idempotencyStore.set(clientKey, { userId: req.user.userId, response: durableHit, timestamp: Date.now() });
+      return res.status(200).json(durableHit);
     }
   }
 
@@ -2986,6 +3574,22 @@ app.post('/transactions', authMiddleware, (req, res) => {
     ? (toUser?.preferredCurrency || receiverCurrencyByRegion || receiverWalletCurrency || currency)
     : currency;
   
+  // Block cross-currency sends in production when FX rates are stale — before any
+  // balance mutation so no rollback is needed.
+  if (shouldAutoConvert && receiverCurrency !== currency && NODE_ENV === 'production') {
+    const txRatesAgeMs = Date.now() - (db.rates?.updatedAt || 0);
+    if (txRatesAgeMs > FX_STALE_THRESHOLD_MS) {
+      logger.error('[/transactions] Stale FX rates — blocking cross-currency send in production', {
+        ageHours: (txRatesAgeMs / 3600000).toFixed(1),
+        fromCurrency: currency,
+        receiverCurrency,
+      });
+      return res.status(503).json({
+        error: 'FX rates are outdated. Cross-currency transfers are temporarily unavailable. Please try again shortly.',
+      });
+    }
+  }
+
   // Deduct from sender in original currency (send is FREE — only FX fee on conversion)
   // Save original amounts for rollback if saveDB fails
   const originalFromAmount = fromBalance.amount;
@@ -3039,31 +3643,9 @@ app.post('/transactions', authMiddleware, (req, res) => {
   updateLimitTracking(senderUser, toAmountInUSD);
   // senderUser is a reference to the object already in db.users — saveDB below persists it
 
-  try {
-    saveDB(db);
-  } catch (saveErr) {
-    // Rollback in-memory changes so state stays consistent before rethrowing
-    fromBalance.amount = originalFromAmount;
-    if (destBalance) destBalance.amount = originalDestAmount;
-    else toWallet.balances = toWallet.balances.filter(b => b.currency !== receivedCurrency);
-    db.transactions.pop();
-    console.error('[/transactions] saveDB failed — rolled back in-memory state:', saveErr);
-    return res.status(500).json({ error: t('error_transaction_persist', lang) });
-  }
-
-  // Notify sender
-  createNotification(db, req.user.userId, 'money_sent',
-    'Payment Sent',
-    `You sent ${minorToMajor(amount, currency).toFixed(decimalsFor(currency))} ${currency}${wasConverted ? ` → ${minorToMajor(receivedAmount, receivedCurrency).toFixed(decimalsFor(receivedCurrency))} ${receivedCurrency}` : ''}`,
-    { transactionId: tx.id, amount, currency });
-
-  // Notify receiver
-  createNotification(db, toWallet.userId, 'money_received',
-    'Payment Received',
-    `You received ${minorToMajor(receivedAmount, receivedCurrency).toFixed(decimalsFor(receivedCurrency))} ${receivedCurrency} from ${senderUser.fullName || senderUser.username || senderUser.email || 'someone'}`,
-    { transactionId: tx.id, amount: receivedAmount, currency: receivedCurrency });
-  saveDB(db);
-
+  // Build response before the first saveDB so the idempotency record is committed
+  // in the same atomic write as the financial mutation. A crash after saveDB always
+  // leaves a valid replay record; a crash before saveDB leaves nothing (safe: retry allowed).
   const responseBody = {
     transaction: tx,
     feeBreakdown: {
@@ -3082,21 +3664,47 @@ app.post('/transactions', authMiddleware, (req, res) => {
       tierLevel:           limitCheck.tierLevel,
     },
   };
+  if (clientKey) saveDurableIdempotency(db, clientKey, responseBody, req.user.userId);
 
-  // Store in idempotency cache so retries return the same response
-  if (clientKey) {
-    idempotencyStore.set(clientKey, { response: responseBody, timestamp: Date.now() });
+  try {
+    saveDB(db); // commits balances + tx + limit tracking + idempotency atomically
+  } catch (saveErr) {
+    // Rollback in-memory changes so state stays consistent before rethrowing
+    fromBalance.amount = originalFromAmount;
+    if (destBalance) destBalance.amount = originalDestAmount;
+    else toWallet.balances = toWallet.balances.filter(b => b.currency !== receivedCurrency);
+    db.transactions.pop();
+    if (clientKey && db.idempotencyRecords?.length) db.idempotencyRecords.pop();
+    console.error('[/transactions] saveDB failed — rolled back in-memory state:', saveErr);
+    return res.status(500).json({ error: t('error_transaction_persist', lang) });
   }
 
+  if (clientKey) idempotencyStore.set(clientKey, { userId: req.user.userId, response: responseBody, timestamp: Date.now() });
+
+  // Notify sender
+  createNotification(db, req.user.userId, 'money_sent',
+    'Payment Sent',
+    `You sent ${minorToMajor(amount, currency).toFixed(decimalsFor(currency))} ${currency}${wasConverted ? ` → ${minorToMajor(receivedAmount, receivedCurrency).toFixed(decimalsFor(receivedCurrency))} ${receivedCurrency}` : ''}`,
+    { transactionId: tx.id, amount, currency });
+
+  // Notify receiver
+  createNotification(db, toWallet.userId, 'money_received',
+    'Payment Received',
+    `You received ${minorToMajor(receivedAmount, receivedCurrency).toFixed(decimalsFor(receivedCurrency))} ${receivedCurrency} from ${senderUser.fullName || senderUser.username || senderUser.email || 'someone'}`,
+    { transactionId: tx.id, amount: receivedAmount, currency: receivedCurrency });
+  saveDB(db);
+
   res.json(responseBody);
+  }); // withBalanceMutex
 });
 
 // ==================== ADMIN ROUTES ====================
-app.post('/admin/login', adminLoginHandler);
+app.post('/admin/login',  adminLoginLimiter, adminLoginHandler);
+app.post('/admin/logout', adminLoginLimiter, adminLogoutHandler);
 app.use('/admin/withdrawals', adminWithdrawalsRouter);
 
 // Withdrawals to bank/mobile money
-app.post('/withdrawals', authMiddleware, (req, res) => {
+app.post('/withdrawals', authMiddleware, async (req, res) => {
   const {
     fromWalletId, amount, currency, method, isInternational,
     country, bankName, accountNumber, accountHolderName,
@@ -3123,21 +3731,83 @@ app.post('/withdrawals', authMiddleware, (req, res) => {
       return res.status(400).json({ error: `${field} exceeds maximum allowed length` });
   }
 
-  // ── Client-supplied idempotency key (optional header) ──────────────────────
-  const clientKey = req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
-  if (clientKey) {
-    const cached = idempotencyStore.get(clientKey);
-    if (cached && Date.now() - cached.timestamp < IDEMPOTENCY_EXPIRY)
-      return res.status(200).json(cached.response);
+  // ── Card PAN server-side sanitization ────────────────────────────────────
+  // Clients are untrusted. When method is debit/credit, strip everything but
+  // the last 4 digits here — before the value ever reaches createWithdrawal
+  // or db.json. Full PANs must never be persisted or returned via any API.
+  let sanitizedAccountNumber = accountNumber || null;
+  if ((method === 'debit' || method === 'credit') && sanitizedAccountNumber) {
+    sanitizedAccountNumber = String(sanitizedAccountNumber).replace(/\D/g, '').slice(-4) || null;
   }
 
-  // ── Per-user/currency mutex — blocks concurrent in-flight withdrawals ───────
-  const inflightKey = `${req.user.userId}:${currency}`;
-  if (withdrawalInFlight.has(inflightKey))
-    return res.status(409).json({ error: t('error_withdrawal_in_progress', req.lang || 'en') });
-  withdrawalInFlight.add(inflightKey);
+  // ── Block in production when no payout provider is configured ────────────
+  // Prevents funds entering holdBalance with no path to release them.
+  // Stripe requires BOTH an API key AND a configured Connect destination account
+  // (STRIPE_CONNECT_READY=true).  Without Connect, stripePayout() always throws
+  // in production, leaving funds permanently locked in holdBalance.
+  if (process.env.NODE_ENV === 'production') {
+    const resolvedProvider = payoutRouter(country || '');
+    const stripeReady = !!process.env.STRIPE_SECRET_KEY && !!process.env.STRIPE_CONNECT_READY;
+    const koraReady   = !!process.env.KORA_API_KEY;
+    const providerReady = (resolvedProvider === 'stripe' && stripeReady) ||
+                          (resolvedProvider === 'kora'   && koraReady);
+    if (!providerReady) {
+      logger.error('POST /withdrawals blocked — no payout provider configured for region', {
+        userId: req.user.userId, country, resolvedProvider,
+      });
+      return res.status(503).json({
+        error: 'Withdrawals are temporarily unavailable. Please contact support.',
+      });
+    }
+  }
 
+  // ── Client-supplied idempotency key (required) ────────────────────────────
+  const clientKey = req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
+  if (!clientKey) return res.status(400).json({ error: 'Idempotency-Key header is required' });
+  const cached0 = idempotencyStore.get(clientKey);
+  if (cached0 && cached0.userId === req.user.userId && Date.now() - cached0.timestamp < IDEMPOTENCY_EXPIRY)
+    return res.status(200).json(cached0.response);
+
+  let _capturedWithdrawalId;
+
+  await withBalanceMutex(async () => {
   const db = loadDB();
+
+  // Durable idempotency — survives restart
+  if (clientKey) {
+    const durableHit = checkDurableIdempotency(db, clientKey, req.user.userId);
+    if (durableHit) {
+      // Sanitize PII from cached response — strips encrypted fields, returns safe masks.
+      if (durableHit.withdrawal) {
+        durableHit.withdrawal = sanitizeWithdrawalForResponse(durableHit.withdrawal);
+      }
+      idempotencyStore.set(clientKey, { userId: req.user.userId, response: durableHit, timestamp: Date.now() });
+      _capturedWithdrawalId = durableHit.withdrawal?.id;
+      return res.status(200).json(durableHit);
+    }
+  }
+
+  // KYC tier limits — same enforcement as POST /transactions and POST /exchange.
+  // Checked before createWithdrawal so funds are never held if the limit is exceeded.
+  const withdrawUser = db.users.find(u => u.id === req.user.userId);
+  if (!withdrawUser) return res.status(404).json({ error: t('error_sender_not_found', req.lang || 'en') });
+  const wRates       = db.rates?.values || {};
+  const withdrawMajor = minorToMajor(amount, currency);
+  const withdrawUSD   = withdrawMajor / (wRates[currency] || 1);
+  const wLimitCheck   = checkKYCLimits(withdrawUser, withdrawUSD, db);
+  if (!wLimitCheck.allowed) {
+    return res.status(403).json({
+      code:                'LIMIT_EXCEEDED',
+      error:               wLimitCheck.message,
+      limitType:           wLimitCheck.limitType,
+      remainingDailyUSD:   wLimitCheck.remainingDailyUSD,
+      remainingWeeklyUSD:  wLimitCheck.remainingWeeklyUSD,
+      remainingMonthlyUSD: wLimitCheck.remainingMonthlyUSD,
+      tierLevel:           wLimitCheck.tierLevel,
+      nextTier:            wLimitCheck.nextTier,
+    });
+  }
+
   const feeCalc = calcWithdrawFee(amount, !!isInternational);
 
   let withdrawal;
@@ -3150,7 +3820,7 @@ app.post('/withdrawals', authMiddleware, (req, res) => {
       isInternational,
       country:           country           || null,
       bankName:          bankName          || null,
-      accountNumber:     accountNumber     || null,
+      accountNumber:     sanitizedAccountNumber,
       accountHolderName: accountHolderName || null,
       bankCode:          bankCode          || null,
       branchCode:        branchCode        || null,
@@ -3161,24 +3831,25 @@ app.post('/withdrawals', authMiddleware, (req, res) => {
       netPayout:  feeCalc.netPayout,
     });
   } catch (err) {
-    withdrawalInFlight.delete(inflightKey);
     return res.status(err.status || 500).json({ error: err.message });
   }
 
-  // Advance synchronously to "processing" state, then respond to client
-  advanceToProcessing(db, withdrawal.id);
-  saveDB(db);
+  // In production withdrawals stay pending_review for admin approval before any funds move.
+  // In dev/staging advance immediately so end-to-end payout flows can be tested.
+  if (NODE_ENV !== 'production') {
+    advanceToProcessing(db, withdrawal.id);
+  }
 
-  // Notify user
-  const db2 = loadDB();
-  createNotification(db2, req.user.userId, 'withdrawal',
-    'Withdrawal Submitted',
-    `${minorToMajor(feeCalc.netPayout, currency).toFixed(decimalsFor(currency))} ${currency} is being sent to your ${isInternational ? 'international' : 'local'} account`,
-    { withdrawalId: withdrawal.id, amount, currency });
-  saveDB(db2);
+  // Increment KYC limit tracking — withdrawUser is a reference inside db.users,
+  // persisted atomically with the hold deduction by saveDB below.
+  updateLimitTracking(withdrawUser, withdrawUSD);
 
+  // Build response before saveDB so idempotency is committed atomically with the
+  // financial mutation — a crash after saveDB always leaves a replay-safe record.
+  // sanitizeWithdrawalForResponse strips encrypted PII from the response and cache;
+  // the db.json record keeps the ciphertext for the payout provider to decrypt.
   const responseBody = {
-    withdrawal,
+    withdrawal: sanitizeWithdrawalForResponse(withdrawal),
     feeBreakdown: {
       youSend:      amount,
       fee:          feeCalc.feeAmount,
@@ -3188,11 +3859,19 @@ app.post('/withdrawals', authMiddleware, (req, res) => {
       isInternational: !!isInternational,
     },
   };
+  if (clientKey) saveDurableIdempotency(db, clientKey, responseBody, req.user.userId);
 
-  // Cache response under client key for 24 h
-  if (clientKey) {
-    idempotencyStore.set(clientKey, { response: responseBody, timestamp: Date.now() });
-  }
+  saveDB(db); // commits hold deduction + KYC limits + idempotency atomically
+
+  if (clientKey) idempotencyStore.set(clientKey, { userId: req.user.userId, response: responseBody, timestamp: Date.now() });
+
+  // Notify user — fresh db load so the notification saveDB has the current version.
+  const db2 = loadDB();
+  createNotification(db2, req.user.userId, 'withdrawal',
+    'Withdrawal Submitted',
+    `${minorToMajor(feeCalc.netPayout, currency).toFixed(decimalsFor(currency))} ${currency} is being sent to your ${isInternational ? 'international' : 'local'} account`,
+    { withdrawalId: withdrawal.id, amount, currency });
+  saveDB(db2);
 
   logger.info('Withdrawal created', {
     userId:       req.user.userId,
@@ -3205,15 +3884,50 @@ app.post('/withdrawals', authMiddleware, (req, res) => {
     isInternational: !!isInternational,
   });
 
+  _capturedWithdrawalId = withdrawal.id;
   res.json(responseBody);
+  }); // withBalanceMutex
 
-  // Release the in-flight lock now that the DB has been saved and response sent.
-  withdrawalInFlight.delete(inflightKey);
+  // Only fire automatic payout dispatch in dev/staging.
+  // In production, withdrawals stay pending_review and require admin approval before processing.
+  if (_capturedWithdrawalId && NODE_ENV !== 'production') {
+    setImmediate(() => executePayout(_capturedWithdrawalId, loadDB, saveDB, logger, withBalanceMutex));
+  }
+});
 
-  // Fire the real payout asynchronously — AFTER the HTTP response is sent.
-  // executePayout loads a fresh DB, calls Stripe or Kora, then marks paid or failed.
-  const capturedId = withdrawal.id;
-  setImmediate(() => executePayout(capturedId, loadDB, saveDB, logger));
+// Cancel a pending_review withdrawal — returns held funds to available balance.
+// Only the owning user can cancel, and only while the withdrawal has not yet been approved.
+app.post('/withdrawals/:id/cancel', authMiddleware, async (req, res) => {
+  await withBalanceMutex(async () => {
+    const db = loadDB();
+
+    const w = (db.withdrawals || []).find(
+      x => x.id === req.params.id && x.userId === req.user.userId
+    );
+    if (!w) return res.status(404).json({ error: 'Withdrawal not found' });
+
+    if (w.status !== 'pending_review') {
+      return res.status(400).json({
+        error: 'Only withdrawals in pending_review status can be cancelled. ' +
+               'Once approved or processing, please contact support.',
+      });
+    }
+
+    try {
+      markWithdrawalFailed(db, w.id, 'Cancelled by user');
+      saveDB(db);
+      logger.info('Withdrawal cancelled by user', {
+        userId: req.user.userId,
+        withdrawalId: w.id,
+        amount: w.amount,
+        currency: w.currency,
+      });
+      res.json({ success: true, message: 'Withdrawal cancelled and funds returned to your wallet.' });
+    } catch (err) {
+      logger.error('Error cancelling withdrawal', { error: err.message, withdrawalId: req.params.id });
+      return res.status(err.status || 500).json({ error: err.message });
+    }
+  });
 });
 
 // Rates
@@ -3355,8 +4069,7 @@ app.get('/wallets/:id/currency', authMiddleware, (req, res) => {
 //
 // POST /exchange  { walletId, fromCurrency, toCurrency, amount, idempotencyKey }
 //   amount : integer, minor units of fromCurrency  (e.g. 60000 for 60,000 XAF; 10000 for $100 USD)
-app.post('/exchange', authMiddleware, (req, res) => {
-  const db   = loadDB();
+app.post('/exchange', authMiddleware, async (req, res) => {
   const lang = req.lang || 'en';
   const { walletId, fromCurrency, toCurrency, amount, idempotencyKey } = req.body;
 
@@ -3373,10 +4086,21 @@ app.post('/exchange', authMiddleware, (req, res) => {
 
   // ── 2. Idempotency check ──────────────────────────────────────────────────
   const clientKey = idempotencyKey || req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
+  if (!clientKey) return res.status(400).json({ error: 'Idempotency-Key header is required' });
+  const cached0 = idempotencyStore.get(clientKey);
+  if (cached0 && cached0.userId === req.user.userId && Date.now() - cached0.timestamp < IDEMPOTENCY_EXPIRY) {
+    return res.status(200).json(cached0.response);
+  }
+
+  return withBalanceMutex(async () => {
+  const db = loadDB();
+
+  // Durable idempotency — survives restart
   if (clientKey) {
-    const cached = idempotencyStore.get(clientKey);
-    if (cached && Date.now() - cached.timestamp < IDEMPOTENCY_EXPIRY) {
-      return res.status(200).json(cached.response);
+    const durableHit = checkDurableIdempotency(db, clientKey, req.user.userId);
+    if (durableHit) {
+      idempotencyStore.set(clientKey, { userId: req.user.userId, response: durableHit, timestamp: Date.now() });
+      return res.status(200).json(durableHit);
     }
   }
 
@@ -3403,7 +4127,17 @@ app.post('/exchange', authMiddleware, (req, res) => {
   const ratesAgeMs = Date.now() - (db.rates.updatedAt || 0);
   const ratesStale = ratesAgeMs > FX_STALE_THRESHOLD_MS;
   if (ratesStale) {
-    logger.warn('[/exchange] Using stale FX rates', {
+    if (NODE_ENV === 'production') {
+      logger.error('[/exchange] Stale FX rates — blocking exchange in production', {
+        ageHours: (ratesAgeMs / 3600000).toFixed(1),
+        updatedAt: db.rates.updatedAt,
+      });
+      return res.status(503).json({
+        error: 'FX rates are outdated. Exchange is temporarily unavailable. Please try again shortly.',
+        ratesUpdatedAt: db.rates.updatedAt,
+      });
+    }
+    logger.warn('[/exchange] Using stale FX rates (dev/staging only)', {
       ageHours: (ratesAgeMs / 3600000).toFixed(1),
       updatedAt: db.rates.updatedAt,
     });
@@ -3475,28 +4209,9 @@ app.post('/exchange', authMiddleware, (req, res) => {
   // ── 10. Update KYC limit tracking ────────────────────────────────────────
   updateLimitTracking(senderUser, amountUSD);
 
-  // ── 11. Persist — rollback in-memory on failure ───────────────────────────
-  try {
-    saveDB(db);
-  } catch (saveErr) {
-    fromBalance.amount = originalFromAmount;
-    if (toBalance) {
-      toBalance.amount = originalToAmount;
-    } else {
-      wallet.balances = wallet.balances.filter(b => b.currency !== toCurrency);
-    }
-    db.transactions.pop();
-    logger.error('[/exchange] saveDB failed — rolled back in-memory state:', saveErr);
-    return res.status(500).json({ error: t('error_transaction_persist', lang) });
-  }
-
-  // ── 12. Notification ──────────────────────────────────────────────────────
-  createNotification(db, req.user.userId, 'exchange_completed',
-    'Exchange Completed',
-    `Exchanged ${minorToMajor(amount, fromCurrency).toFixed(decimalsFor(fromCurrency))} ${fromCurrency} \u2192 ${minorToMajor(netReceived, toCurrency).toFixed(decimalsFor(toCurrency))} ${toCurrency}`,
-    { transactionId: tx.id, amount, fromCurrency, toCurrency });
-  saveDB(db);
-
+  // ── 11. Build response, then persist — rollback in-memory on failure ────────
+  // responseBody is built before saveDB so the idempotency record is committed
+  // atomically with the financial mutation.
   const responseBody = {
     transaction: tx,
     feeBreakdown: {
@@ -3518,12 +4233,34 @@ app.post('/exchange', authMiddleware, (req, res) => {
     ratesUpdatedAt: db.rates.updatedAt,
     ratesStale,
   };
+  if (clientKey) saveDurableIdempotency(db, clientKey, responseBody, req.user.userId);
 
-  if (clientKey) {
-    idempotencyStore.set(clientKey, { response: responseBody, timestamp: Date.now() });
+  try {
+    saveDB(db); // commits balances + tx + limit tracking + idempotency atomically
+  } catch (saveErr) {
+    fromBalance.amount = originalFromAmount;
+    if (toBalance) {
+      toBalance.amount = originalToAmount;
+    } else {
+      wallet.balances = wallet.balances.filter(b => b.currency !== toCurrency);
+    }
+    db.transactions.pop();
+    if (clientKey && db.idempotencyRecords?.length) db.idempotencyRecords.pop();
+    logger.error('[/exchange] saveDB failed — rolled back in-memory state:', saveErr);
+    return res.status(500).json({ error: t('error_transaction_persist', lang) });
   }
 
+  if (clientKey) idempotencyStore.set(clientKey, { userId: req.user.userId, response: responseBody, timestamp: Date.now() });
+
+  // ── 12. Notification ──────────────────────────────────────────────────────
+  createNotification(db, req.user.userId, 'exchange_completed',
+    'Exchange Completed',
+    `Exchanged ${minorToMajor(amount, fromCurrency).toFixed(decimalsFor(fromCurrency))} ${fromCurrency} \u2192 ${minorToMajor(netReceived, toCurrency).toFixed(decimalsFor(toCurrency))} ${toCurrency}`,
+    { transactionId: tx.id, amount, fromCurrency, toCurrency });
+  saveDB(db);
+
   res.json(responseBody);
+  }); // withBalanceMutex
 });
 
 // GET /fx-rates/status — rate freshness info (safe: no balances or user data)
@@ -3622,6 +4359,10 @@ app.post('/deposits/create-intent', authMiddleware,
     }
 
     // Demo / test mode — no Stripe key configured
+    if (NODE_ENV === 'production') {
+      logger.error('Deposit attempted in production without Stripe configuration', { userId: req.user.userId });
+      return res.status(503).json({ error: 'Deposits require Stripe configuration in production. Contact support.' });
+    }
     const demoIntentId = `demo_intent_${uuidv4()}`;
     if (!db.demoIntents) db.demoIntents = [];
     db.demoIntents.push({
@@ -3664,8 +4405,10 @@ app.post('/deposits/confirm', authMiddleware,
     body('walletId').isString(),
   ]),
   async (req, res) => {
-    const db = loadDB();
     const { intentId, walletId } = req.body;
+
+    return withBalanceMutex(async () => {
+    const db = loadDB();
     const user = db.users.find(u => u.id === req.user.userId);
     if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
     const wallet = db.wallets.find(w => w.id === walletId && w.userId === req.user.userId);
@@ -3689,10 +4432,27 @@ app.post('/deposits/confirm', authMiddleware,
         feeRate     = Number(intent.metadata.feeRate)     || 0;
         amount      = netCredited; // use net credited as the canonical "deposit amount"
         currency    = intent.currency.toUpperCase();
+
+        // C1: Idempotency — block replay of an already-credited Stripe intent.
+        // Reload DB inside the wallet lock so the check reflects any concurrent save.
+        const freshDb = loadDB();
+        const alreadyDeposited = (freshDb.transactions || []).some(
+          tx => tx.stripeIntentId === intentId
+        );
+        if (alreadyDeposited) {
+          const existing = freshDb.transactions.find(tx => tx.stripeIntentId === intentId);
+          logger.warn('Stripe deposit replay blocked — intent already credited', { intentId, userId: req.user.userId });
+          return res.json({ success: true, transaction: existing, currency, alreadyProcessed: true });
+        }
       } catch (err) {
         return res.status(500).json({ error: t('error_internal', req.lang || 'en'), message: err.message });
       }
     } else {
+      // Demo mode — blocked in production
+      if (NODE_ENV === 'production') {
+        logger.error('Demo deposit confirm attempted in production', { userId: req.user.userId, intentId });
+        return res.status(503).json({ error: 'Demo deposits are not permitted in production.' });
+      }
       // Demo mode — look up pending intent
       if (!db.demoIntents) return res.status(400).json({ error: t('error_not_found', req.lang || 'en') });
       const demo = db.demoIntents.find(d => d.id === intentId && d.userId === req.user.userId && d.walletId === walletId);
@@ -3758,6 +4518,8 @@ app.post('/deposits/confirm', authMiddleware,
         feeRate,
       },
     });
+
+    }); // withBalanceMutex
   }
 );
 
@@ -3810,11 +4572,14 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
   if (!walletId || typeof amount === 'undefined' || !currency) {
     return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   }
-  
+  if (!Number.isInteger(amount) || amount <= 0 || amount > 1_000_000_000) {
+    return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
+  }
+
   // Check idempotency
   if (idempotencyKey) {
     const cached = idempotencyStore.get(idempotencyKey);
-    if (cached) {
+    if (cached && cached.userId === req.user.userId) {
       console.log(`Returning cached response for idempotency key: ${idempotencyKey}`);
       return res.json(cached.response);
     }
@@ -4059,7 +4824,7 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
   
   // Store idempotency key
   if (idempotencyKey) {
-    idempotencyStore.set(idempotencyKey, { response, timestamp: Date.now() });
+    idempotencyStore.set(idempotencyKey, { userId: req.user.userId, response, timestamp: Date.now() });
   }
   
   res.json(response);
@@ -4167,11 +4932,29 @@ app.post('/payment-requests/:id/preview', authMiddleware, (req, res) => {
 });
 
 // Pay a payment request
-app.post('/payment-requests/:id/pay', authMiddleware, (req, res) => {
-  const db = loadDB();
+app.post('/payment-requests/:id/pay', authMiddleware, async (req, res) => {
   const { fromWalletId } = req.body;
   if (!fromWalletId) return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
-  
+
+  // Idempotency — prevents double-charge on timeout + client retry.
+  const prClientKey = req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
+  if (!prClientKey) return res.status(400).json({ error: 'Idempotency-Key header is required' });
+  const prCached0 = idempotencyStore.get(prClientKey);
+  if (prCached0 && prCached0.userId === req.user.userId && Date.now() - prCached0.timestamp < IDEMPOTENCY_EXPIRY)
+    return res.status(200).json(prCached0.response);
+
+  return withBalanceMutex(async () => {
+  const db = loadDB();
+
+  // Durable idempotency — survives restart (check DB after acquiring mutex).
+  if (prClientKey) {
+    const prDurableHit = checkDurableIdempotency(db, prClientKey, req.user.userId);
+    if (prDurableHit) {
+      idempotencyStore.set(prClientKey, { userId: req.user.userId, response: prDurableHit, timestamp: Date.now() });
+      return res.status(200).json(prDurableHit);
+    }
+  }
+
   const request = db.paymentRequests.find(r => r.id === req.params.id);
   if (!request) return res.status(404).json({ error: t('error_request_not_found', req.lang || 'en') });
   if (request.status !== 'pending') return res.status(400).json({ error: t('error_request_processed', req.lang || 'en') });
@@ -4238,6 +5021,41 @@ app.post('/payment-requests/:id/pay', authMiddleware, (req, res) => {
     return res.status(400).json({ error: t('error_insufficient_funds', req.lang || 'en') });
   }
 
+  // Block cross-currency pay in production when FX rates are stale — before any balance mutation
+  if (wasConverted && NODE_ENV === 'production') {
+    const prRatesAgeMs = Date.now() - (db.rates?.updatedAt || 0);
+    if (prRatesAgeMs > FX_STALE_THRESHOLD_MS) {
+      logger.error('[/payment-requests/pay] Stale FX rates — blocking cross-currency pay in production', {
+        ageHours: (prRatesAgeMs / 3600000).toFixed(1),
+        reqCurrency,
+        debitCurrency,
+      });
+      return res.status(503).json({
+        error: 'FX rates are outdated. Cross-currency payment is temporarily unavailable. Please try again shortly.',
+      });
+    }
+  }
+
+  // KYC tier limits — same enforcement as POST /transactions and POST /exchange.
+  // Uses debitAmount (the full cost to the payer in their currency, including any FX fee).
+  const prPayerUser = db.users.find(u => u.id === req.user.userId);
+  if (!prPayerUser) return res.status(404).json({ error: t('error_sender_not_found', req.lang || 'en') });
+  const prDebitMajor = minorToMajor(debitAmount, debitCurrency);
+  const prDebitUSD   = prDebitMajor / ((rates[debitCurrency]) || 1);
+  const prLimitCheck = checkKYCLimits(prPayerUser, prDebitUSD, db);
+  if (!prLimitCheck.allowed) {
+    return res.status(403).json({
+      code:                'LIMIT_EXCEEDED',
+      error:               prLimitCheck.message,
+      limitType:           prLimitCheck.limitType,
+      remainingDailyUSD:   prLimitCheck.remainingDailyUSD,
+      remainingWeeklyUSD:  prLimitCheck.remainingWeeklyUSD,
+      remainingMonthlyUSD: prLimitCheck.remainingMonthlyUSD,
+      tierLevel:           prLimitCheck.tierLevel,
+      nextTier:            prLimitCheck.nextTier,
+    });
+  }
+
   // Deduct from payer (in their currency, including FX fee if converted)
   payFromBalance.amount -= debitAmount;
 
@@ -4283,14 +5101,25 @@ app.post('/payment-requests/:id/pay', authMiddleware, (req, res) => {
   }
   
   db.transactions.push(tx);
-  
+
   // Update request
   request.status = 'paid';
   request.paidAt = Date.now();
   request.paidBy = req.user.userId;
   request.transactionId = tx.id;
-  
-  saveDB(db);
+
+  // Increment KYC limit tracking — prPayerUser is a reference inside db.users,
+  // so saveDB below persists the updated counters atomically with the balance change.
+  updateLimitTracking(prPayerUser, prDebitUSD);
+
+  // Build response and save idempotency record atomically with the balance mutation.
+  // A crash after saveDB leaves a durable record — replay returns cached response.
+  const prResponseBody = { request, transaction: tx };
+  if (prClientKey) saveDurableIdempotency(db, prClientKey, prResponseBody, req.user.userId);
+
+  saveDB(db); // commits balances + transaction + request.status + idempotency atomically
+
+  if (prClientKey) idempotencyStore.set(prClientKey, { userId: req.user.userId, response: prResponseBody, timestamp: Date.now() });
 
   // Notify payer
   const payerUser = db.users.find(u => u.id === req.user.userId);
@@ -4308,7 +5137,8 @@ app.post('/payment-requests/:id/pay', authMiddleware, (req, res) => {
 
   saveDB(db);
 
-  res.json({ request, transaction: tx });
+  res.json(prResponseBody);
+  }); // withBalanceMutex
 });
 
 // Cancel a payment request
@@ -4334,7 +5164,7 @@ app.post('/virtual-cards', authMiddleware, (req, res) => {
   // Check idempotency
   if (idempotencyKey) {
     const cached = idempotencyStore.get(idempotencyKey);
-    if (cached) {
+    if (cached && cached.userId === req.user.userId) {
       console.log(`Returning cached response for idempotency key: ${idempotencyKey}`);
       return res.json(cached.response);
     }
@@ -4347,19 +5177,20 @@ app.post('/virtual-cards', authMiddleware, (req, res) => {
   const userCards = (db.virtualCards || []).filter(c => c.userId === req.user.userId && c.status !== 'deleted');
   if (userCards.length >= 5) return res.status(400).json({ error: t('error_max_cards', req.lang || 'en') });
   
-  // Generate card details
+  // Generate card details — full PAN/CVV are NEVER written to db.json
   const cardNumber = '4' + Math.floor(Math.random() * 1e15).toString().padStart(15, '0');
   const cvv = Math.floor(Math.random() * 900 + 100).toString();
+  const last4 = cardNumber.slice(-4);
   const now = new Date();
   const expiryMonth = (now.getMonth() + 1).toString().padStart(2, '0');
   const expiryYear = (now.getFullYear() + 3).toString().slice(-2);
   
+  // Persist only non-sensitive fields — last4 is sufficient for display
   const card = {
     id: uuidv4(),
     userId: req.user.userId,
     walletId,
-    cardNumber,
-    cvv,
+    last4,
     expiryMonth,
     expiryYear,
     currency,
@@ -4374,13 +5205,14 @@ app.post('/virtual-cards', authMiddleware, (req, res) => {
   db.virtualCards.push(card);
   saveDB(db);
   
-  const response = { card };
-  
+  // Return full PAN/CVV exactly once in the creation response — they cannot be retrieved later
+  const response = { card: { ...card, cardNumber, cvv } };
+
   // Store idempotency key
   if (idempotencyKey) {
-    idempotencyStore.set(idempotencyKey, { response, timestamp: Date.now() });
+    idempotencyStore.set(idempotencyKey, { userId: req.user.userId, response, timestamp: Date.now() });
   }
-  
+
   res.json(response);
 });
 
@@ -4390,7 +5222,7 @@ app.get('/virtual-cards', authMiddleware, (req, res) => {
   const cards = (db.virtualCards || [])
     .filter(c => c.userId === req.user.userId && c.status !== 'deleted')
     .sort((a, b) => b.createdAt - a.createdAt);
-  res.json({ cards });
+  res.json({ cards: cards.map(sanitizeCard) });
 });
 
 // Get single card
@@ -4398,7 +5230,7 @@ app.get('/virtual-cards/:id', authMiddleware, (req, res) => {
   const db = loadDB();
   const card = (db.virtualCards || []).find(c => c.id === req.params.id && c.userId === req.user.userId);
   if (!card) return res.status(404).json({ error: t('error_card_not_found', req.lang || 'en') });
-  res.json({ card });
+  res.json({ card: sanitizeCard(card) });
 });
 
 // Freeze/unfreeze card
@@ -4409,7 +5241,7 @@ app.post('/virtual-cards/:id/toggle-freeze', authMiddleware, (req, res) => {
   // Check idempotency
   if (idempotencyKey) {
     const cached = idempotencyStore.get(idempotencyKey);
-    if (cached) {
+    if (cached && cached.userId === req.user.userId) {
       console.log(`Returning cached response for idempotency key: ${idempotencyKey}`);
       return res.json(cached.response);
     }
@@ -4421,14 +5253,14 @@ app.post('/virtual-cards/:id/toggle-freeze', authMiddleware, (req, res) => {
   
   card.status = card.status === 'active' ? 'frozen' : 'active';
   saveDB(db);
-  
-  const response = { card };
-  
+
+  const response = { card: sanitizeCard(card) };
+
   // Store idempotency key
   if (idempotencyKey) {
-    idempotencyStore.set(idempotencyKey, { response, timestamp: Date.now() });
+    idempotencyStore.set(idempotencyKey, { userId: req.user.userId, response, timestamp: Date.now() });
   }
-  
+
   res.json(response);
 });
 
@@ -4463,8 +5295,13 @@ app.get('/qr/static', authMiddleware, (req, res) => {
     timestamp: Date.now()
   };
   
-  // Generate simple QR string (in production, would be signed)
-  const qrString = `egwallet://pay/${req.user.userId}`;
+  // HMAC-sign the static QR so /qr/pay can verify the userId was issued by this server
+  const sig = crypto
+    .createHmac('sha256', JWT_SECRET)
+    .update(`static-qr:${req.user.userId}`)
+    .digest('hex')
+    .slice(0, 32);
+  const qrString = `egwallet://pay/${req.user.userId}?sig=${sig}`;
   
   res.json({
     qrCode: qrString,
@@ -4481,7 +5318,10 @@ app.post('/qr/dynamic', authMiddleware, (req, res) => {
   if (!amount || !currency) {
     return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   }
-  
+  if (!Number.isInteger(amount) || amount <= 0 || amount > 1_000_000_000) {
+    return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
+  }
+
   const user = db.users.find(u => u.id === req.user.userId);
   if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
   
@@ -4668,32 +5508,74 @@ app.post('/qr/validate', authMiddleware, (req, res) => {
 });
 
 // Pay via QR code
-app.post('/qr/pay', authMiddleware, (req, res) => {
-  const db = loadDB();
-  const { qrString, fromWalletId, amount, currency } = req.body;
-  
+app.post('/qr/pay', authMiddleware, async (req, res) => {
+  const { qrString, fromWalletId, amount, currency, idempotencyKey } = req.body;
+
   if (!qrString || !fromWalletId) {
     return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   }
-  
+
+  // ── Idempotency check (same pattern as POST /transactions) ─────────────
+  const clientKey = idempotencyKey ||
+    req.headers['idempotency-key'] ||
+    req.headers['x-idempotency-key'];
+  if (!clientKey) return res.status(400).json({ error: 'Idempotency-Key header is required' });
+  const cached0 = idempotencyStore.get(clientKey);
+  if (cached0 && cached0.userId === req.user.userId && Date.now() - cached0.timestamp < IDEMPOTENCY_EXPIRY) {
+    return res.status(200).json(cached0.response);
+  }
+
+  return withBalanceMutex(async () => {
+  const db = loadDB();
+
+  // Durable idempotency — survives restart
+  if (clientKey) {
+    const durableHit = checkDurableIdempotency(db, clientKey, req.user.userId);
+    if (durableHit) {
+      idempotencyStore.set(clientKey, { userId: req.user.userId, response: durableHit, timestamp: Date.now() });
+      return res.status(200).json(durableHit);
+    }
+  }
+
   // Validate QR first
   let targetUserId, targetWalletId, paymentAmount, paymentCurrency, requestId, memo;
   
   if (qrString.startsWith('egwallet://pay/')) {
-    // Static QR - requires amount from payer
+    // Static QR — requires amount from payer and server-issued HMAC signature
     if (!amount || !currency) {
       return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
     }
-    
-    targetUserId = qrString.replace('egwallet://pay/', '');
+    if (!Number.isInteger(amount) || amount <= 0 || amount > 1_000_000_000) {
+      return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
+    }
+
+    const sepIdx = qrString.indexOf('?');
+    targetUserId = qrString.slice('egwallet://pay/'.length, sepIdx === -1 ? undefined : sepIdx);
+    const sigParam = sepIdx !== -1 ? new URLSearchParams(qrString.slice(sepIdx + 1)).get('sig') : null;
+
+    // Verify HMAC — unsigned or tampered QR strings are rejected
+    const expectedSig = crypto
+      .createHmac('sha256', JWT_SECRET)
+      .update(`static-qr:${targetUserId}`)
+      .digest('hex')
+      .slice(0, 32);
+    const sigBuf = Buffer.from(sigParam || '');
+    const expBuf = Buffer.from(expectedSig);
+    const sigValid = sigBuf.length === expBuf.length &&
+      crypto.timingSafeEqual(sigBuf, expBuf);
+    if (!sigValid) {
+      logger.warn('Static QR signature invalid or missing', { userId: req.user.userId, targetUserId });
+      return res.status(400).json({ error: 'Invalid or unsigned QR code. Ask the recipient to re-generate their QR from the app.' });
+    }
+
     const targetUser = db.users.find(u => u.id === targetUserId);
     if (!targetUser) return res.status(404).json({ error: t('error_recipient_not_found', req.lang || 'en') });
-    
+
     targetWalletId = db.wallets.find(w => w.userId === targetUserId)?.id;
     paymentAmount = amount;
     paymentCurrency = currency;
     memo = 'QR Payment';
-    
+
   } else {
     // Dynamic QR - amount embedded
     const url = new URL(qrString);
@@ -4732,7 +5614,25 @@ app.post('/qr/pay', authMiddleware, (req, res) => {
   if (fromBalance.amount < paymentAmount) {
     return res.status(400).json({ error: t('error_insufficient_funds', req.lang || 'en') });
   }
-  
+
+  // KYC tier limits — same enforcement as POST /transactions and POST /exchange
+  const qrPayingUser = db.users.find(u => u.id === req.user.userId);
+  if (!qrPayingUser) return res.status(404).json({ error: t('error_sender_not_found', req.lang || 'en') });
+  const qrAmountMajor = minorToMajor(paymentAmount, paymentCurrency);
+  const qrAmountUSD = qrAmountMajor / ((db.rates?.values || {})[paymentCurrency] || 1);
+  const qrLimitCheck = checkKYCLimits(qrPayingUser, qrAmountUSD, db);
+  if (!qrLimitCheck.allowed) {
+    return res.status(403).json({
+      code: 'LIMIT_EXCEEDED',
+      error: qrLimitCheck.message,
+      limitType: qrLimitCheck.limitType,
+      remainingDailyUSD: qrLimitCheck.remainingDailyUSD,
+      remainingWeeklyUSD: qrLimitCheck.remainingWeeklyUSD,
+      remainingMonthlyUSD: qrLimitCheck.remainingMonthlyUSD,
+      tierLevel: qrLimitCheck.tierLevel,
+    });
+  }
+
   // Process payment
   fromBalance.amount -= paymentAmount;
   
@@ -4766,7 +5666,7 @@ app.post('/qr/pay', authMiddleware, (req, res) => {
   if (requestId) {
     const qrCode = db.qrCodes.find(qr => qr.id === requestId);
     if (qrCode) qrCode.used = true;
-    
+
     const request = db.paymentRequests.find(r => r.id === requestId);
     if (request) {
       request.status = 'paid';
@@ -4775,7 +5675,11 @@ app.post('/qr/pay', authMiddleware, (req, res) => {
       request.transactionId = tx.id;
     }
   }
-  
+
+  // Increment KYC limit tracking — qrPayingUser is a reference inside db.users,
+  // persisted atomically with the balance change by saveDB below.
+  updateLimitTracking(qrPayingUser, qrAmountUSD);
+
   // Notify payer
   const displayAmt = minorToMajor(paymentAmount, paymentCurrency).toFixed(decimalsFor(paymentCurrency));
   createNotification(db, req.user.userId, 'money_sent',
@@ -4795,8 +5699,18 @@ app.post('/qr/pay', authMiddleware, (req, res) => {
     { transactionId: tx.id, amount: paymentAmount, currency: paymentCurrency }
   );
 
-  saveDB(db);
-  
+  // Build response before saveDB so idempotency is committed with the financial mutation.
+  const responseBody = {
+    success: true,
+    transaction: tx,
+    message: 'Payment successful',
+  };
+  if (clientKey) saveDurableIdempotency(db, clientKey, responseBody, req.user.userId);
+
+  saveDB(db); // commits balances + tx + QR state + limit tracking + idempotency atomically
+
+  if (clientKey) idempotencyStore.set(clientKey, { userId: req.user.userId, response: responseBody, timestamp: Date.now() });
+
   logger.info('QR payment completed', {
     transactionId: tx.id,
     fromUserId: req.user.userId,
@@ -4805,12 +5719,9 @@ app.post('/qr/pay', authMiddleware, (req, res) => {
     currency: paymentCurrency,
     qrType: requestId ? 'dynamic' : 'static'
   });
-  
-  res.json({
-    success: true,
-    transaction: tx,
-    message: 'Payment successful'
-  });
+
+  res.json(responseBody);
+  }); // withBalanceMutex
 });
 
 // ==================== BUDGETS ====================
@@ -4825,7 +5736,7 @@ app.post('/budgets', authMiddleware, (req, res) => {
   // Check idempotency
   if (idempotencyKey) {
     const cached = idempotencyStore.get(idempotencyKey);
-    if (cached) {
+    if (cached && cached.userId === req.user.userId) {
       console.log(`Returning cached response for idempotency key: ${idempotencyKey}`);
       return res.json(cached.response);
     }
@@ -4865,7 +5776,7 @@ app.post('/budgets', authMiddleware, (req, res) => {
   
   // Store idempotency key
   if (idempotencyKey) {
-    idempotencyStore.set(idempotencyKey, { response, timestamp: Date.now() });
+    idempotencyStore.set(idempotencyKey, { userId: req.user.userId, response, timestamp: Date.now() });
   }
   
   res.json(response);
@@ -5063,22 +5974,89 @@ app.post('/kyc/verify',
     body('country').trim().isLength({ min: 2, max: 3 }),
   ]),
   async (req, res) => {
-    const db = loadDB();
-    const user = db.users.find(u => u.id === req.user.userId);
-    if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
-
     const { idType, idNumber, country, firstName, lastName } = req.body;
     const jobId = uuidv4();
 
-    // ---- Graceful fallback when credentials not configured ----
-    if (!SMILE_PARTNER_ID || !SMILE_API_KEY) {
-      user.kycStatus = 'under_review';
+    // Compute the canonical identity hash up front — shared across all three phases.
+    // Raw ID numbers are never stored; only this one-way hash is persisted.
+    const kycIdHash = crypto
+      .createHash('sha256')
+      .update(`${country.toUpperCase()}:${idType.toUpperCase()}:${idNumber.trim()}`)
+      .digest('hex');
+
+    // ── Phase 1 (inside kycMutex): check + atomically reserve the identity hash ─
+    // Serialises the read-check-write so no two concurrent requests can both pass
+    // the dedup check before either writes the reservation (TOCTOU prevention).
+    let p1Err = null;
+    await withKycMutex(async () => {
+      const db = loadDB();
+      const user = db.users.find(u => u.id === req.user.userId);
+      if (!user) {
+        p1Err = { status: 404, body: { error: t('error_user_not_found', req.lang || 'en') } };
+        return;
+      }
+
+      if (user.kycDeviceBlocked) {
+        logger.warn('KYC verify blocked — kycDeviceBlocked flag set', { userId: user.id, ip: req.clientIP });
+        p1Err = {
+          status: 403,
+          body: {
+            error: 'Automated KYC verification is not available for this account. Please contact support for manual review.',
+            code: 'KYC_DEVICE_BLOCKED',
+          },
+        };
+        return;
+      }
+
+      // Cross-account identity dedup using the persistent kycIdentityClaims table.
+      // This is authoritative: it survives rejection/error without clearing the hash,
+      // preventing Account B from claiming an ID that Account A has ever submitted.
+      if (!db.kycIdentityClaims) db.kycIdentityClaims = {};
+      const existingClaim = db.kycIdentityClaims[kycIdHash];
+      if (existingClaim && existingClaim.userId !== req.user.userId) {
+        logger.warn('KYC identity already claimed by another account', {
+          userId: req.user.userId, kycIdHash, claimedBy: existingClaim.userId, claimStatus: existingClaim.status,
+        });
+        p1Err = {
+          status: 409,
+          body: { error: 'This identity document is already linked to another account.', code: 'KYC_IDENTITY_CLAIMED' },
+        };
+        return;
+      }
+
+      // Upsert the claim — same-account retries update the existing entry.
+      // Status 'pending' blocks concurrent requests for other users immediately.
+      const now = Date.now();
+      db.kycIdentityClaims[kycIdHash] = {
+        userId:    req.user.userId,
+        status:    'pending',
+        claimedAt: existingClaim?.claimedAt || now,
+        updatedAt: now,
+      };
+
+      // Write reservation on the user record too (for direct per-user lookups).
+      user.kycIdHash = kycIdHash;
+      user.kycStatus = 'pending_verification';
       user.kycUpdatedAt = Date.now();
-      if (!user.kycDocuments) user.kycDocuments = {};
-      user.kycDocuments.pendingVerification = { idType, country, submittedAt: Date.now(), jobId };
       saveDB(db);
+    });
+
+    if (p1Err) return res.status(p1Err.status).json(p1Err.body);
+
+    // ── Manual review fallback (no Smile credentials) ─────────────────────────
+    if (!SMILE_PARTNER_ID || !SMILE_API_KEY) {
+      await withKycMutex(async () => {
+        const db = loadDB();
+        const user = db.users.find(u => u.id === req.user.userId);
+        if (!user) return;
+        user.kycStatus = 'under_review';
+        user.kycUpdatedAt = Date.now();
+        if (!user.kycDocuments) user.kycDocuments = {};
+        user.kycDocuments.pendingVerification = { idType, country, submittedAt: Date.now(), jobId };
+        saveDB(db);
+      });
       logger.warn('Smile Identity not configured — KYC queued for manual review', {
-        userId: user.id, jobId, idType, country,
+        userId: req.user.userId, jobId, idType, country,
       });
       return res.json({
         status: 'under_review',
@@ -5088,19 +6066,17 @@ app.post('/kyc/verify',
       });
     }
 
-    // ---- Call Smile Identity API ----
+    // ── Phase 2: Call Smile Identity API — mutex NOT held ────────────────────
+    // The kycMutex is intentionally released before this await so unrelated KYC
+    // requests are not blocked for the full 30-second Smile timeout.
+    // The reservation written in Phase 1 is already durable in db.json.
     const timestamp = new Date().toISOString();
     const signature = computeSmileSignature(timestamp, SMILE_PARTNER_ID, SMILE_API_KEY);
-
     const smilePayload = {
       source_sdk: 'rest_api',
       source_sdk_version: '1.0.0',
-      smile_client_id: user.id,
-      partner_params: {
-        job_id: jobId,
-        user_id: user.id,
-        job_type: 5, // Basic KYC — ID number verification without selfie
-      },
+      smile_client_id: req.user.userId,
+      partner_params: { job_id: jobId, user_id: req.user.userId, job_type: 5 },
       id_info: {
         first_name:  (firstName  || '').toUpperCase(),
         last_name:   (lastName   || '').toUpperCase(),
@@ -5114,58 +6090,85 @@ app.post('/kyc/verify',
       signature,
     };
 
+    let smileData = null;
+    let smileErr  = null;
     try {
       const smileRes = await axios.post(
         `${SMILE_API_BASE}/id_verification`,
         smilePayload,
         { timeout: 30000, headers: { 'Content-Type': 'application/json' } }
       );
+      smileData = smileRes.data;
+    } catch (err) {
+      smileErr = err;
+    }
 
-      const result    = smileRes.data?.result || {};
+    // ── Phase 3 (inside kycMutex): finalise result with a fresh DB load ──────
+    let finalStatus, finalTier, finalResultCode;
+    await withKycMutex(async () => {
+      const db = loadDB();
+      const user = db.users.find(u => u.id === req.user.userId);
+      if (!user) return;
+
+      if (!db.kycIdentityClaims) db.kycIdentityClaims = {};
+
+      if (smileErr || !smileData) {
+        // Smile call failed — mark claim as 'error' and queue for manual review.
+        // kycIdHash is intentionally NOT cleared: keeping the claim in the table
+        // prevents Account B from immediately claiming the same ID after A's Smile error.
+        logger.error('Smile Identity API error', {
+          userId: user.id,
+          jobId,
+          httpStatus: smileErr?.response?.status,
+          errorCode: smileErr?.response?.data?.Code,
+          error: smileErr?.message,
+          // responseData intentionally omitted — may contain government ID / PII
+        });
+        user.kycStatus    = 'under_review';
+        user.kycSmileJobId = jobId;
+        user.kycUpdatedAt  = Date.now();
+        // Update claim status — other accounts are still blocked
+        if (db.kycIdentityClaims[kycIdHash]?.userId === req.user.userId) {
+          db.kycIdentityClaims[kycIdHash].status    = 'error';
+          db.kycIdentityClaims[kycIdHash].updatedAt = Date.now();
+        }
+        saveDB(db);
+        finalStatus = 'under_review';
+        return;
+      }
+
+      const result     = smileData?.result || {};
       const resultCode = result.ResultCode || '';
-      const actions   = result.Actions || {};
-      const kycStatus = smileResultToStatus(resultCode);
-      const newTier   = kycStatus === 'approved' ? Math.max(user.kycTier || 0, 1) : (user.kycTier || 0);
+      const actions    = result.Actions    || {};
+      const kycStatus  = smileResultToStatus(resultCode);
+      const newTier    = kycStatus === 'approved' ? Math.max(user.kycTier || 0, 1) : (user.kycTier || 0);
 
-      // Persist result
       user.kycStatus    = kycStatus;
       user.kycTier      = newTier;
       user.kycSmileJobId = jobId;
       user.kycUpdatedAt  = Date.now();
+      // kycIdHash stays on the user in all outcomes. The claim table is authoritative
+      // and blocks other accounts regardless of whether this result is approved or rejected.
       if (!user.kycDocuments) user.kycDocuments = {};
       user.kycDocuments.smileResult = {
         resultCode, actions, country, idType, verifiedAt: Date.now(), jobId,
       };
+      // Update claim table to reflect the final outcome
+      if (db.kycIdentityClaims[kycIdHash]?.userId === req.user.userId) {
+        db.kycIdentityClaims[kycIdHash].status    = kycStatus; // 'approved' | 'rejected' | 'under_review'
+        db.kycIdentityClaims[kycIdHash].updatedAt = Date.now();
+      }
       saveDB(db);
 
       logger.info('Smile Identity KYC completed', {
         userId: user.id, kycStatus, resultCode, kycTier: newTier, jobId,
       });
+      finalStatus     = kycStatus;
+      finalTier       = newTier;
+      finalResultCode = resultCode;
+    });
 
-      return res.json({
-        status:     kycStatus,
-        resultCode,
-        kycTier:    newTier,
-        jobId,
-        message: kycStatus === 'approved'
-          ? 'Identity verified successfully.'
-          : kycStatus === 'rejected'
-            ? 'We could not verify your identity. Please check your details and try again.'
-            : 'Verification submitted and under review.',
-      });
-
-    } catch (err) {
-      logger.error('Smile Identity API error', {
-        userId: user.id, error: err.message, jobId,
-        responseData: err.response?.data,
-      });
-
-      // Non-fatal fallback — queue for manual review
-      user.kycStatus    = 'under_review';
-      user.kycSmileJobId = jobId;
-      user.kycUpdatedAt  = Date.now();
-      saveDB(db);
-
+    if (smileErr) {
       return res.json({
         status:   'under_review',
         jobId,
@@ -5173,6 +6176,18 @@ app.post('/kyc/verify',
         provider: 'manual_fallback',
       });
     }
+
+    return res.json({
+      status:     finalStatus,
+      resultCode: finalResultCode,
+      kycTier:    finalTier,
+      jobId,
+      message: finalStatus === 'approved'
+        ? 'Identity verified successfully.'
+        : finalStatus === 'rejected'
+          ? 'We could not verify your identity. Please check your details and try again.'
+          : 'Verification submitted and under review.',
+    });
   }
 );
 
@@ -6465,7 +7480,7 @@ app.get('/gdpr/export', authMiddleware, (req, res) => {
     user: db.users.find(u => u.id === userId),
     wallets: (db.wallets || []).filter(w => w.userId === userId),
     transactions: (db.transactions || []).filter(t => t.userId === userId),
-    virtualCards: (db.virtualCards || []).filter(c => c.userId === userId),
+    virtualCards: (db.virtualCards || []).filter(c => c.userId === userId).map(sanitizeCard),
     paymentRequests: (db.paymentRequests || []).filter(pr => pr.from === userId || pr.to === userId),
     kyc: (db.kyc || []).find(k => k.userId === userId),
     supportTickets: (db.supportTickets || []).filter(t => t.userId === userId),
@@ -6504,6 +7519,18 @@ app.delete('/gdpr/delete-account', authMiddleware, async (req, res) => {
     return res.status(400).json({ error: t('error_password_confirm_invalid', req.lang || 'en') });
   }
   
+  // Block deletion if the user still holds funds — prevent permanent balance loss
+  const userWallets = (db.wallets || []).filter(w => w.userId === userId);
+  const hasFunds = userWallets.some(
+    w => (w.balances || []).some(b => (b.amount || 0) > 0) ||
+         Object.values(w.holdBalance || {}).some(amt => (amt || 0) > 0)
+  );
+  if (hasFunds) {
+    return res.status(400).json({
+      error: 'Account cannot be deleted while wallet balance or pending holds are above zero. Please withdraw all funds first.',
+    });
+  }
+
   logger.warn('Account deletion requested', { userId, email: maskEmail(user.email), ip: req.clientIP });
   
   // Anonymize instead of hard delete (for compliance)
@@ -6512,6 +7539,12 @@ app.delete('/gdpr/delete-account', authMiddleware, async (req, res) => {
   user.status = 'deleted';
   user.deletedAt = Date.now();
   user.deletionIP = req.clientIP;
+  // Invalidate all JWTs immediately (C2: deleted user cannot keep valid access)
+  user.tokenVersion = (user.tokenVersion || 0) + 1;
+
+  // Remove all refresh tokens so re-issuance is impossible
+  if (!db.refreshTokens) db.refreshTokens = [];
+  db.refreshTokens = db.refreshTokens.filter(t => t.userId !== userId);
   
   // Anonymize personal data in KYC
   const kyc = (db.kyc || []).find(k => k.userId === userId);
@@ -6592,9 +7625,8 @@ app.post('/gdpr/consent', authMiddleware, (req, res) => {
 
 // ==================== ADMIN/MONITORING ENDPOINTS ====================
 
-// Get audit logs (admin only - add proper auth in production)
-app.get('/admin/audit-logs', authMiddleware, (req, res) => {
-  // TODO: Add admin role check
+// Get audit logs (admin only)
+app.get('/admin/audit-logs', authMiddleware, adminMiddleware, (req, res) => {
   const { limit = 100, userId, action } = req.query;
   
   let logs = [...aiAuditLogs];
@@ -6617,8 +7649,8 @@ app.get('/admin/audit-logs', authMiddleware, (req, res) => {
   });
 });
 
-// System health check (detailed)
-app.get('/admin/health/detailed', authMiddleware, (req, res) => {
+// System health check (detailed, admin only)
+app.get('/admin/health/detailed', authMiddleware, adminMiddleware, (req, res) => {
   const db = loadDB();
   
   const health = {
@@ -6653,9 +7685,8 @@ app.get('/admin/health/detailed', authMiddleware, (req, res) => {
   res.json(health);
 });
 
-// Fraud velocity status (admin)
-app.get('/admin/fraud-velocity', authMiddleware, (req, res) => {
-  // TODO: Add admin role check
+// Fraud velocity status (admin only)
+app.get('/admin/fraud-velocity', authMiddleware, adminMiddleware, (req, res) => {
   const velocityStats = [];
   
   for (const [userId, timestamps] of fraudVelocityTracker.entries()) {
@@ -7175,13 +8206,17 @@ app.post('/employer/upload-payroll',
           continue;
         }
         
+        // CSV amounts are in major units (e.g. 1000 NGN = 1,000 NGN).
+        // Wallet balances and all downstream operations use minor units,
+        // so convert here — after both amount and currency have been validated.
+        const amountMinor = majorToMinor(amount, currency);
         payrollItems.push({
           rowNum,
           workerId: workerUser.id,
           workerEmail: workerUser.email,
           workerName: row.name || workerUser.email,
           walletId: workerWallet.id,
-          amount,
+          amount: amountMinor,
           currency,
           memo
         });
@@ -7196,7 +8231,8 @@ app.post('/employer/upload-payroll',
         errorDetails: errors,
         preview: payrollItems.slice(0, 10), // First 10 items
         totalAmount: payrollItems.reduce((sum, item) => {
-          const usdAmount = convertToUSD(item.amount, item.currency, db.rates);
+          // item.amount is in minor units after M1 fix; convert before USD calculation
+          const usdAmount = convertToUSD(minorToMajor(item.amount, item.currency), item.currency, db.rates);
           return sum + usdAmount;
         }, 0)
       });
@@ -7218,11 +8254,31 @@ app.post('/employer/bulk-payment',
     body('payrollItems').isArray({ min: 1, max: 1000 }),
     body('payrollItems.*.workerId').isString(),
     body('payrollItems.*.walletId').isString(),
-    body('payrollItems.*.amount').isFloat({ min: 0.01 }),
+    body('payrollItems.*.amount').isInt({ min: 1 }),
     body('payrollItems.*.currency').isString()
   ]),
   async (req, res) => {
+    // ── Idempotency check (same pattern as POST /transactions) ─────────────
+    const clientKey = req.body.idempotencyKey ||
+      req.headers['idempotency-key'] ||
+      req.headers['x-idempotency-key'];
+    if (!clientKey) return res.status(400).json({ error: 'Idempotency-Key header is required' });
+    const cached0 = idempotencyStore.get(clientKey);
+    if (cached0 && cached0.userId === req.user.userId && Date.now() - cached0.timestamp < IDEMPOTENCY_EXPIRY) {
+      return res.status(200).json(cached0.response);
+    }
+
+    return withBalanceMutex(async () => {
     const db = loadDB();
+
+    // Durable idempotency — survives restart
+    if (clientKey) {
+      const durableHit = checkDurableIdempotency(db, clientKey, req.user.userId);
+      if (durableHit) {
+        idempotencyStore.set(clientKey, { userId: req.user.userId, response: durableHit, timestamp: Date.now() });
+        return res.status(200).json(durableHit);
+      }
+    }
 
     const employer = db.employers.find(e => e.userId === req.user.userId);
     if (!employer) return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
@@ -7246,6 +8302,19 @@ app.post('/employer/bulk-payment',
       const workerWallet = db.wallets.find(w => w.id === item.walletId);
       if (!workerWallet) {
         validationErrors.push(`Worker ${item.workerEmail || item.workerId}: wallet ${item.walletId} not found`);
+        continue;
+      }
+      // Wallet must belong to the claimed worker — prevents misdirecting funds to arbitrary wallets
+      if (workerWallet.userId !== item.workerId) {
+        validationErrors.push(`Worker ${item.workerEmail || item.workerId}: wallet ${item.walletId} does not belong to this worker`);
+        continue;
+      }
+      // Worker must be linked to this employer — prevents paying non-employees
+      const isLinked = (db.employerEmployees || []).some(
+        ee => ee.employerId === employer.id && ee.workerId === item.workerId
+      );
+      if (!isLinked) {
+        validationErrors.push(`Worker ${item.workerEmail || item.workerId}: not linked to this employer`);
         continue;
       }
       resolvedItems.push({ ...item, workerWallet });
@@ -7289,7 +8358,8 @@ app.post('/employer/bulk-payment',
     //   2. Sender is a registered employer (employer record found above)
     //   3. Employer is verified (verificationStatus check above)
     const batchTotalUSD = resolvedItems.reduce((sum, item) => {
-      return sum + convertToUSD(item.amount, item.currency, db.rates);
+      // item.amount is in minor units; convert to major before USD calculation
+      return sum + convertToUSD(minorToMajor(item.amount, item.currency), item.currency, db.rates);
     }, 0);
 
     const payrollLimitCheck = checkPayrollLimits(employer, batchTotalUSD);
@@ -7431,7 +8501,8 @@ app.post('/employer/bulk-payment',
     // Update employer stats
     employer.totalBatches = (employer.totalBatches || 0) + 1;
     const totalUSD = resolvedItems.reduce((sum, item) => {
-      return sum + convertToUSD(item.amount, item.currency, db.rates);
+      // item.amount is in minor units; convert to major before USD calculation
+      return sum + convertToUSD(minorToMajor(item.amount, item.currency), item.currency, db.rates);
     }, 0);
     employer.totalPayrollSent = (employer.totalPayrollSent || 0) + totalUSD;
 
@@ -7441,8 +8512,22 @@ app.post('/employer/bulk-payment',
     if (!db.payrollBatches) db.payrollBatches = [];
     db.payrollBatches.push(batch);
 
-    // Single atomic write — all debits and credits committed together
+    // Build response before saveDB so idempotency is committed with the financial mutation.
+    const responseBody = {
+      success: true,
+      batchId: batch.id,
+      totalItems: batch.totalItems,
+      successCount: batch.successCount,
+      failureCount: 0,
+      status: 'completed',
+      results,
+    };
+    if (clientKey) saveDurableIdempotency(db, clientKey, responseBody, req.user.userId);
+
+    // Single atomic write — all debits, credits, batch record, and idempotency committed together
     saveDB(db);
+
+    if (clientKey) idempotencyStore.set(clientKey, { userId: req.user.userId, response: responseBody, timestamp: Date.now() });
 
     logger.info('Payroll batch completed and saved', {
       batchId,
@@ -7453,15 +8538,8 @@ app.post('/employer/bulk-payment',
 
     logAIInteraction(req.user.userId, 'BULK_PAYROLL_SENT', [batchId, batch.successCount], null, req);
 
-    res.json({
-      success: true,
-      batchId: batch.id,
-      totalItems: batch.totalItems,
-      successCount: batch.successCount,
-      failureCount: 0,
-      status: 'completed',
-      results,
-    });
+    res.json(responseBody);
+    }); // withBalanceMutex
   }
 );
 
@@ -7598,31 +8676,50 @@ app.get('/employer/employees', authMiddleware, (req, res) => {
 });
 
 // Fund employer wallet (demo/test endpoint — adds funds for payroll testing)
-app.post('/employer/fund-wallet', authMiddleware, (req, res) => {
-  const db = loadDB();
-  const employer = db.employers.find(e => e.userId === req.user.userId);
-  if (!employer) return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
-  const fundingWallet = db.wallets.find(w => w.id === employer.fundingWalletId);
-  if (!fundingWallet) return res.status(500).json({ error: t('error_employer_not_found', req.lang || 'en') });
-  const { amount = 1000000, currency = 'XAF' } = req.body;
-  const addAmount = typeof amount === 'number' ? amount : 1000000;
-  let balance = fundingWallet.balances.find(b => b.currency === currency);
-  if (!balance) {
-    balance = { currency, amount: 0 };
-    fundingWallet.balances.push(balance);
+app.post('/employer/fund-wallet', authMiddleware, adminMiddleware, async (req, res) => {
+  // C5: This endpoint mints balance without a real payment source.
+  // Disabled in production to prevent fraudulent payroll funding.
+  if (process.env.NODE_ENV === 'production') {
+    logger.error('POST /employer/fund-wallet called in production — endpoint disabled', {
+      userId: req.user.userId,
+    });
+    return res.status(503).json({
+      error: 'Employer wallet funding is not available. Use a real payment source.',
+    });
   }
-  balance.amount += addAmount;
-  saveDB(db);
-  logger.info('Employer funding wallet topped up', { employerId: employer.id, addAmount, currency });
-  res.json({ success: true, balance: { currency: balance.currency, amount: balance.amount } });
+
+  // Dev/staging only — validate amount before crediting anything.
+  const { amount, currency = 'XAF' } = req.body;
+  if (!Number.isInteger(amount) || amount <= 0 || amount > 1_000_000_000) {
+    return res.status(400).json({ error: 'amount must be a positive integer in minor units (max 1 000 000 000)' });
+  }
+
+  return withBalanceMutex(async () => {
+    const db = loadDB();
+    const employer = db.employers.find(e => e.userId === req.user.userId);
+    if (!employer) return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
+    const fundingWallet = db.wallets.find(w => w.id === employer.fundingWalletId);
+    if (!fundingWallet) return res.status(500).json({ error: t('error_employer_not_found', req.lang || 'en') });
+    let balance = fundingWallet.balances.find(b => b.currency === currency);
+    if (!balance) {
+      balance = { currency, amount: 0 };
+      fundingWallet.balances.push(balance);
+    }
+    balance.amount += amount;
+    saveDB(db);
+    logger.info('Employer funding wallet topped up (dev/staging)', { employerId: employer.id, amount, currency });
+    res.json({ success: true, balance: { currency: balance.currency, amount: balance.amount } });
+  });
 });
 
 // Get linked employers (worker view)
 app.get('/employer/linked', authMiddleware, (req, res) => {
   const db = loadDB();
   
-  // Find all employer-employee relationships for this user
-  const relationships = db.employerEmployees.filter(ee => ee.userId === req.user.userId);
+  // Find all employer-employee relationships for this worker.
+  // Records use workerId (correct field set by add-employee).
+  // Legacy records that mistakenly stored userId are migrated at startup.
+  const relationships = db.employerEmployees.filter(ee => ee.workerId === req.user.userId);
   
   // Get employer details for each relationship
   const employers = relationships.map(rel => {
@@ -7653,9 +8750,9 @@ app.post('/employer/payment-request',
     const db = loadDB();
     const { employerId, amount, currency, memo } = req.body;
     
-    // Verify worker is linked to this employer
-    const relationship = db.employerEmployees.find(ee => 
-      ee.employerId === employerId && ee.userId === req.user.userId
+    // Verify worker is linked to this employer (workerId is the correct field).
+    const relationship = db.employerEmployees.find(ee =>
+      ee.employerId === employerId && ee.workerId === req.user.userId
     );
     
     if (!relationship) {
@@ -7716,117 +8813,18 @@ app.post('/employer/payment-request',
   }
 );
 
-// Confirm payroll payment (with idempotency protection)
-app.post('/payroll/confirm-payment',
-  authMiddleware,
-  (req, res) => {
-    const db = loadDB();
-    const { employerId, batchId, amount, currency } = req.body;
-    
-    // Validate required fields
-    if (!employerId || !batchId || !amount || !currency) {
-      return res.status(400).json({ 
-        error: t('error_missing_fields', req.lang || 'en') 
-      });
-    }
-    
-    // Idempotency check - prevent duplicate payments
-    const idempotencyKey = req.headers['idempotency-key'];
-    if (idempotencyKey) {
-      const existingPayment = db.transactions.find(
-        t => t.metadata?.idempotencyKey === idempotencyKey
-      );
-      
-      if (existingPayment) {
-        logger.info('Idempotent payment request - returning existing transaction', {
-          transactionId: existingPayment.id,
-          idempotencyKey,
-          userId: req.user.userId
-        });
-        
-        return res.json({ 
-          success: true, 
-          transaction: existingPayment,
-          isIdempotent: true 
-        });
-      }
-    }
-    
-    // Find employer
-    const employer = db.employers.find(e => e.id === employerId);
-    if (!employer) {
-      return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
-    }
-    
-    // Find user relationship with employer
-    const relationship = db.employerEmployees.find(
-      ee => ee.employerId === employerId && ee.workerId === req.user.userId
-    );
-    
-    if (!relationship) {
-      logger.warn('Unauthorized payroll confirmation attempt', {
-        employerId,
-        userId: req.user.userId
-      });
-      return res.status(403).json({ 
-        error: t('error_not_authorized_employer', req.lang || 'en') 
-      });
-    }
-    
-    // Find user's wallet for this currency
-    const wallet = db.wallets.find(
-      w => w.userId === req.user.userId && w.currency === currency
-    );
-    
-    if (!wallet) {
-      return res.status(404).json({ 
-        error: t('error_wallet_not_found', req.lang || 'en') 
-      });
-    }
-    
-    // Create transaction
-    const transaction = {
-      id: `txn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      type: 'payroll',
-      fromWalletId: null, // Payroll from employer (external)
-      toWalletId: wallet.id,
-      amount,
-      currency,
-      status: 'completed',
-      createdAt: new Date().toISOString(),
-      metadata: {
-        employerId,
-        employerName: employer.employerName,
-        batchId,
-        verified: employer.verified,
-        idempotencyKey: idempotencyKey || `auto_${Date.now()}`
-      }
-    };
-    
-    // Update wallet balance
-    wallet.balance.amount += amount;
-    wallet.balance.lastUpdated = new Date().toISOString();
-    
-    db.transactions.push(transaction);
-    saveDB(db);
-    
-    logger.info('Payroll payment confirmed', {
-      transactionId: transaction.id,
-      userId: req.user.userId,
-      employerId,
-      amount,
-      currency,
-      batchId,
-      idempotencyKey
-    });
-    
-    res.json({ 
-      success: true, 
-      transaction,
-      isIdempotent: false
-    });
-  }
-);
+// Confirm payroll payment — disabled pending correct implementation.
+// This endpoint has a broken wallet schema and no employer debit logic.
+// The correct payroll flow is POST /employer/bulk-payment.
+app.post('/payroll/confirm-payment', authMiddleware, (req, res) => {
+  logger.error('POST /payroll/confirm-payment called — endpoint disabled, use /employer/bulk-payment', {
+    userId: req.user.userId,
+    body: req.body,
+  });
+  return res.status(503).json({
+    error: 'Payroll QR confirmation is not available. Contact your employer to process payment via the payroll dashboard.',
+  });
+});
 
 // Remove employee
 app.post('/employer/remove-employee/:relationshipId',
@@ -8061,5 +9059,159 @@ server.on('error', (err) => {
     console.error(`Port ${PORT} is already in use`);
   }
   process.exit(1);
+});
+
+// ── Startup: migrate legacy withdrawal PII to encrypted format ────────────────
+// Scrubs full card PANs to last4; encrypts plaintext bank PII; sets accountMask
+// and bankNameDisplay display copies.  Safe to re-run — isEncrypted() guard is idempotent.
+setImmediate(() => {
+  try {
+    const db = loadDB();
+    let changed = 0;
+    const PII_FIELDS = ['accountNumber', 'iban', 'swiftBic', 'accountHolderName', 'bankName'];
+    for (const w of (db.withdrawals || [])) {
+      let dirty = false;
+
+      // Scrub full card PANs — must happen before encryption to avoid encrypting a full PAN.
+      if ((w.method === 'debit' || w.method === 'credit') && w.accountNumber) {
+        const raw = String(w.accountNumber);
+        if (!isEncrypted(raw) && raw.replace(/\D/g, '').length > 4) {
+          w.accountNumber = raw.replace(/\D/g, '').slice(-4) || null;
+          dirty = true;
+        }
+      }
+
+      // Encrypt any plaintext PII field that hasn't been migrated yet.
+      for (const field of PII_FIELDS) {
+        if (w[field] && !isEncrypted(w[field])) {
+          w[field] = encryptPII(w[field]);
+          dirty = true;
+        }
+      }
+
+      // Back-fill display copies if missing.
+      if (!w.accountMask && w.accountNumber) {
+        // accountNumber may now be encrypted — compute mask from raw before encrypt if possible,
+        // but for already-encrypted records we can only set a generic mask.
+        w.accountMask = isEncrypted(w.accountNumber) ? '****' : maskAccountNumber(w.accountNumber);
+        dirty = true;
+      }
+      if (!w.bankNameDisplay && w.bankName) {
+        // bankName is now encrypted — display copy lost for legacy records; store generic label.
+        w.bankNameDisplay = isEncrypted(w.bankName) ? null : w.bankName;
+        dirty = true;
+      }
+
+      if (dirty) changed++;
+    }
+    if (changed > 0) {
+      saveDB(db);
+      logger.info(`[startup] Migrated PII fields for ${changed} legacy withdrawal(s)`);
+    }
+  } catch (e) {
+    logger.warn('[startup] Withdrawal PII migration failed — non-fatal', { error: e.message });
+  }
+});
+
+// ── Startup: migrate legacy employerEmployees records that used userId instead of workerId ──
+// H-3: add-employee always wrote workerId, but two read paths mistakenly used ee.userId.
+// Any records written during that window are corrected here.
+setImmediate(() => {
+  try {
+    const db = loadDB();
+    let migrated = 0;
+    for (const ee of (db.employerEmployees || [])) {
+      if (ee.userId && !ee.workerId) {
+        ee.workerId = ee.userId;
+        delete ee.userId;
+        migrated++;
+      }
+    }
+    if (migrated > 0) {
+      saveDB(db);
+      logger.info(`[startup] Migrated ${migrated} employerEmployee record(s): userId → workerId`);
+    }
+  } catch (e) {
+    logger.warn('[startup] employerEmployee migration failed — non-fatal', { error: e.message });
+  }
+});
+
+// ── Startup: migrate legacy plaintext refresh tokens to hashed format ─────────
+// S-new-7: Records written before S-2 may still carry a raw `token` field.
+// Hash them, strip the plaintext, and save once so subsequent loads are clean.
+setImmediate(() => {
+  try {
+    const db = loadDB();
+    let migrated = 0;
+    db.refreshTokens = (db.refreshTokens || []).map(r => {
+      if (!r.token) return r;
+      const hash = r.tokenHash || hashToken(r.token);
+      migrated++;
+      return { tokenHash: hash, userId: r.userId, createdAt: r.createdAt || Date.now() };
+    });
+    if (migrated > 0) {
+      saveDB(db);
+      logger.info(`[startup] Migrated ${migrated} legacy refresh token(s) to hashed format`);
+    }
+  } catch (e) {
+    logger.warn('[startup] Refresh token migration failed — non-fatal', { error: e.message });
+  }
+});
+
+// ── Startup reconciliation sweep ──────────────────────────────────────────────
+// After the server is ready, scan for any withdrawals stuck in 'processing' from a
+// previous process crash and resume them in a safe, idempotent way.
+setImmediate(async () => {
+  try {
+    const db = loadDB();
+
+    // Purge expired advisory payout locks left by a previous crash (TTL-based release).
+    if (db.payoutLocks && db.payoutLocks.length > 0) {
+      const before = db.payoutLocks.length;
+      db.payoutLocks = db.payoutLocks.filter(l => l.expiresAt > Date.now());
+      if (db.payoutLocks.length < before) {
+        try { saveDB(db); } catch (_) { /* non-fatal */ }
+        logger.info(`[startup] Purged ${before - db.payoutLocks.length} expired payout lock(s)`);
+      }
+    }
+
+    const stuckWithdrawals = (db.withdrawals || []).filter(w => w.status === 'processing');
+    if (stuckWithdrawals.length === 0) return;
+
+    logger.warn(`[startup] Found ${stuckWithdrawals.length} processing withdrawal(s) — scanning for stuck payouts`);
+
+    for (const w of stuckWithdrawals) {
+      if (!w.payoutDispatchRef) {
+        // No HTTP call was made before the crash — safe to re-run executePayout from scratch.
+        logger.warn('[startup] Resuming withdrawal — no dispatch attempted, re-running payout engine', {
+          id: w.id, payoutAttempts: w.payoutAttempts,
+        });
+        setImmediate(() => executePayout(w.id, loadDB, saveDB, logger, withBalanceMutex));
+
+      } else if (!w.payoutReference) {
+        // payoutDispatchRef is set (HTTP call was initiated) but no provider reference returned.
+        // Outcome is unknown — could be: timeout after acceptance, or rejection before acceptance.
+        // Cannot safely refund or retry without querying the provider. Flag for manual reconciliation.
+        logger.error('[startup] Withdrawal needs manual reconciliation — dispatch was initiated but outcome unknown', {
+          id: w.id,
+          payoutDispatchRef: w.payoutDispatchRef,
+          payoutAttempts:    w.payoutAttempts,
+          hint: `POST /admin/withdrawals/${w.id}/reconcile`,
+        });
+
+      } else {
+        // Provider accepted (payoutReference saved) but payout not yet settled (e.g. Stripe in_transit).
+        // The reconcile endpoint or a Stripe/Kora webhook must complete this when the provider settles.
+        logger.warn('[startup] Withdrawal awaiting provider settlement — use reconcile endpoint or wait for webhook', {
+          id:             w.id,
+          payoutReference: w.payoutReference,
+          payoutProvider:  w.payoutProvider,
+          hint: `POST /admin/withdrawals/${w.id}/reconcile`,
+        });
+      }
+    }
+  } catch (sweepErr) {
+    logger.error('[startup] Reconciliation sweep failed', { error: sweepErr.message });
+  }
 });
 

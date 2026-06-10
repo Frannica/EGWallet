@@ -40,8 +40,9 @@ export default ({ config }) => ({
   plugins: [
     "expo-notifications",
     ["@sentry/react-native/expo", {
-      "organization": "egwallet",
-      "project": "egwallet-mobile"
+      "organization": process.env.SENTRY_ORG || "egwallet-hu",
+      "project": process.env.SENTRY_PROJECT || "react-native",
+      "authToken": process.env.SENTRY_AUTH_TOKEN
     }]
   ]
 });

@@ -150,7 +150,7 @@ export default function SettingsScreen() {
       `App Version: 1.1.0\n` +
       `Timestamp: ${new Date().toISOString()}\n`
     );
-    Linking.openURL(`mailto:support@egwalletfinance.com?subject=${subject}&body=${body}`);
+    Linking.openURL(`mailto:SUPPORT@EGWALLETFINANCE.COM?subject=${subject}&body=${body}`);
     setBugDescription('');
     setShowBugModal(false);
   };
@@ -1217,3 +1217,4 @@ const styles = StyleSheet.create({
     color: '#15803D',
   },
 });
+

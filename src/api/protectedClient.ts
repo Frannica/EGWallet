@@ -9,6 +9,7 @@
 
 import NetInfo from '@react-native-community/netinfo';
 import { Alert } from 'react-native';
+import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 
 type ProtectedApiOptions = {
   timeout?: number;
@@ -40,31 +41,6 @@ async function checkOnlineStatus(): Promise<boolean> {
 }
 
 /**
- * Wrap fetch with timeout
- */
-function fetchWithTimeout(
-  url: string,
-  options: RequestInit,
-  timeoutMs: number
-): Promise<Response> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error('Request timed out'));
-    }, timeoutMs);
-
-    fetch(url, options)
-      .then((response) => {
-        clearTimeout(timer);
-        resolve(response);
-      })
-      .catch((error) => {
-        clearTimeout(timer);
-        reject(error);
-      });
-  });
-}
-
-/**
  * Protected API call with comprehensive error handling
  */
 export async function protectedApiCall<T>(
@@ -73,7 +49,6 @@ export async function protectedApiCall<T>(
   protectionOptions: ProtectedApiOptions = {}
 ): Promise<{ data: T | null; error: ApiError | null }> {
   const {
-    timeout = 15000, // 15 second default timeout
     retries = 1,
     idempotencyKey,
     skipOfflineCheck = false,
@@ -107,11 +82,7 @@ export async function protectedApiCall<T>(
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const response = await fetchWithTimeout(
-        url,
-        { ...options, headers },
-        timeout
-      );
+      const response = await fetchWithTokenRefresh(url, { ...options, headers });
 
       // Step 4: Handle response
       if (!response.ok) {
@@ -186,3 +157,4 @@ export function showErrorAlert(error: ApiError, onRetry?: () => void) {
     buttons
   );
 }
+

@@ -83,3 +83,4 @@ const styles = StyleSheet.create({
   },
   text: { color: '#fff', fontSize: 14, fontWeight: '600', flex: 1, lineHeight: 20 },
 });
+

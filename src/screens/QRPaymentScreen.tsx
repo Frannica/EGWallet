@@ -118,11 +118,6 @@ export default function QRPaymentScreen() {
       setTransactionId(data.transaction.id);
       setPaymentState('success');
       await debitLocalBalance(currency, amount);
-    } catch (error: any) {
-      // Backend unavailable — simulate demo payment success
-      setTransactionId(`demo-${Date.now()}`);
-      setPaymentState('success');
-      await debitLocalBalance(currency, amount);
       await logLocalTransaction({
         type: 'qr_payment',
         direction: 'out',
@@ -130,6 +125,9 @@ export default function QRPaymentScreen() {
         currency,
         memo: `QR Payment to ${employerName}`,
       });
+    } catch (error: any) {
+      setErrorMessage(t('qr.paymentUnavailable'));
+      setPaymentState('error');
     }
   }
 
@@ -507,3 +505,4 @@ const styles = StyleSheet.create({
     color: '#657786',
   },
 });
+

@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -69,8 +69,8 @@ export default function CardScreen() {
         const now = new Date();
         setCards([{
           id: 'demo-default',
-          cardNumber: '4242424242424242',
-          cvv: '737',
+          cardNumber: '0000000000000000',
+          cvv: '',
           expiryMonth: String(now.getMonth() + 1).padStart(2, '0'),
           expiryYear: String(now.getFullYear() + 3),
           currency: 'USD',
@@ -85,8 +85,8 @@ export default function CardScreen() {
       const now = new Date();
       setCards([{
         id: 'demo-default',
-        cardNumber: '4242424242424242',
-        cvv: '737',
+        cardNumber: '0000000000000000',
+        cvv: '',
         expiryMonth: String(now.getMonth() + 1).padStart(2, '0'),
         expiryYear: String(now.getFullYear() + 3),
         currency: 'USD',
@@ -111,6 +111,7 @@ export default function CardScreen() {
           text: t('card.createAction'),
           onPress: async () => {
             try {
+              if (!auth.token) return;
               setIsCreating(true);
               setLoading(true);
               const walletId = wallets[0]?.id || 'demo';
@@ -119,12 +120,12 @@ export default function CardScreen() {
               toast.show(t('card.cardCreated'));
               loadCards();
             } catch (error: any) {
-              // Backend unavailable — create a local demo card so the screen never shows failure
+              // Backend unavailable � create a local demo card so the screen never shows failure
               const now = new Date();
               const demoCard: VirtualCard = {
                 id: `card-${Date.now()}`,
-                cardNumber: '4111111111111111',
-                cvv: String(Math.floor(100 + Math.random() * 900)),
+                cardNumber: '0000000000000000',
+                cvv: '',
                 expiryMonth: String(now.getMonth() + 1).padStart(2, '0'),
                 expiryYear: String(now.getFullYear() + 3),
                 currency: 'USD',
@@ -156,6 +157,7 @@ export default function CardScreen() {
           text: action,
           onPress: async () => {
             try {
+              if (!auth.token) return;
               setLoading(true);
               await toggleCardFreeze(auth.token!, cardId);
               loadCards();
@@ -181,6 +183,7 @@ export default function CardScreen() {
       {
         text: 'Delete', style: 'destructive', onPress: async () => {
           try {
+            if (!auth.token) return;
             setLoading(true);
             await deleteVirtualCard(auth.token!, cardId);
             loadCards();
@@ -197,7 +200,7 @@ export default function CardScreen() {
   };
 
   const maskCardNumber = (number: string) => {
-    return `•••• •••• •••• ${number.slice(-4)}`;
+    return `���� ���� ���� ${number.slice(-4)}`;
   };
 
   if (selectedCard) {
@@ -231,7 +234,7 @@ export default function CardScreen() {
               </View>
               <View>
                 <Text style={styles.cardLabel}>CVV</Text>
-                <Text style={styles.cardValue}>•••</Text>
+                <Text style={styles.cardValue}>���</Text>
               </View>
               <View style={styles.visaBadge}>
                 <Text style={styles.visaText}>VISA</Text>
@@ -243,11 +246,11 @@ export default function CardScreen() {
         <View style={styles.cardInfo}>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>{t('card.number')}</Text>
-            <Text style={styles.infoValue}>{selectedCard.cardNumber}</Text>
+            <Text style={styles.infoValue}>{maskCardNumber(selectedCard.cardNumber)}</Text>
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>{t('card.cvv')}</Text>
-            <Text style={styles.infoValue}>{selectedCard.cvv}</Text>
+            <Text style={styles.infoValue}>{'���'}</Text>
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>{t('card.expiry')}</Text>
@@ -726,3 +729,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 });
+

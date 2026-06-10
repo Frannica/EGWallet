@@ -3,8 +3,9 @@ import { View, Text, TextInput, Alert, ScrollView, TouchableOpacity, StyleSheet,
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { listWallets } from '../api/auth';
-import { sendTransaction, getWalletCurrency, fetchFxQuote, FxQuote } from '../api/transactions';
+import { sendTransaction, getWalletCurrency, fetchFxQuote, FxQuote, generateId } from '../api/transactions';
 import { API_BASE, fetchRates } from '../api/client';
+import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { majorToMinor, minorToMajor, decimalsFor, formatCurrency, formatMajorAmount, CURRENCY_INFO, convert } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
@@ -32,6 +33,10 @@ export default function SendScreen() {
   const [wallets, setWallets] = useState<Array<any>>([]);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'transfer' | 'withdraw'>('transfer');
+
+  // Stable idempotency keys — reused across retries; reset only after confirmed success
+  const sendIdempotencyKeyRef = useRef(generateId());
+  const withdrawalIdempotencyKeyRef = useRef(generateId());
   const [fromWalletId, setFromWalletId] = useState<string | null>(null);
   const [toWalletId, setToWalletId] = useState<string>('');
   const [amount, setAmount] = useState<string>('');
@@ -316,7 +321,9 @@ export default function SendScreen() {
     if (!toWalletId) return Alert.alert(t('common.error'), t('send.enterDestWalletId'));
     setLoading(true);
     try {
-      const res = await sendTransaction(auth.token, fromWalletId, toWalletId, amountMinor, currency);
+      const res = await sendTransaction(auth.token, fromWalletId, toWalletId, amountMinor, currency, undefined, sendIdempotencyKeyRef.current);
+      // Reset key only after confirmed success so retries reuse the same key
+      sendIdempotencyKeyRef.current = generateId();
       await debitLocalBalance(currency, amountMinor);
       await loadWallets();
       setAmount('');
@@ -377,11 +384,11 @@ export default function SendScreen() {
       // Lock funds locally before the network request (pending deduction prevents double-spend)
       await addPendingWithdrawal(currency, amountMinor);
 
-      const response = await fetch(`${API_BASE}/withdrawals`, {
+      const response = await fetchWithTokenRefresh(`${API_BASE}/withdrawals`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${auth.token}`,
+          'Idempotency-Key': withdrawalIdempotencyKeyRef.current,
         },
         body: JSON.stringify({
           fromWalletId,
@@ -390,7 +397,10 @@ export default function SendScreen() {
           method: withdrawalMethod,
           isInternational: isIntlWithdrawal,
           bankName: withdrawalMethod === 'credit' ? 'Credit Card' : withdrawalMethod === 'debit' ? 'Debit Card' : bankName,
-          accountNumber: (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? withdrawalCardNumber.replace(/\s/g, '') : accountNumber,
+          // For card withdrawals send only last4 — never transmit or store the full PAN
+          accountNumber: (withdrawalMethod === 'debit' || withdrawalMethod === 'credit')
+            ? withdrawalCardNumber.replace(/\s/g, '').slice(-4)
+            : accountNumber,
           accountHolderName: accountName,
           ...((withdrawalMethod === 'debit' || withdrawalMethod === 'credit') && { cardExpiry: withdrawalCardExpiry }),
           ...(withdrawalMethod === 'bank' && !isIntlWithdrawal && bankCode.trim()   && { bankCode:    bankCode.trim() }),
@@ -408,6 +418,8 @@ export default function SendScreen() {
       
       // Debit local balance and log locally (backend stores withdrawals
       // in db.withdrawals, NOT db.transactions, so we must log here)
+      // Reset key only after confirmed success so retries reuse the same key
+      withdrawalIdempotencyKeyRef.current = generateId();
       await debitLocalBalance(currency, amountMinor);
       await clearPendingWithdrawal(currency, amountMinor);
       await logLocalTransaction({
@@ -536,7 +548,9 @@ export default function SendScreen() {
 
     setLoading(true);
     try {
-      const res = await sendTransaction(auth.token, fromWalletId, toWalletId, amountMinor, currency);
+      const res = await sendTransaction(auth.token, fromWalletId, toWalletId, amountMinor, currency, undefined, sendIdempotencyKeyRef.current);
+      // Reset only after confirmed success — retries reuse the same key
+      sendIdempotencyKeyRef.current = generateId();
       await debitLocalBalance(currency, amountMinor);
       await loadWallets();
       setAmount('');
@@ -2447,4 +2461,5 @@ const styles = StyleSheet.create({
     color: '#7C3AED',
   },
 });
+
 

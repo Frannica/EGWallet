@@ -63,3 +63,4 @@ export const FEE_SCHEDULE = [
     note: 'No recurring or hidden charges',
   },
 ] as const;
+

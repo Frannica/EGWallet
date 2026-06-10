@@ -258,10 +258,10 @@ export default function WalletScreen() {
           {([
             { icon: 'send' as const, label: t('common.send'), bg: '#DBEAFE', color: '#1565C0', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Send'); (navigation as any).navigate('Send'); } },
             { icon: 'download' as const, label: t('common.request'), bg: '#DCFCE7', color: '#15803D', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Request'); (navigation as any).navigate('Request'); } },
+            { icon: 'swap-horizontal' as const, label: t('exchange.btnLabel'), bg: '#FFF0F0', color: '#C62828', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Exchange'); (navigation as any).navigate('Exchange', { walletId: wallets[0]?.id }); } },
             { icon: 'add-circle' as const, label: t('wallet.addMoney'), bg: '#FEF9C3', color: '#A16207', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Add Money'); (navigation as any).navigate('Deposit', { walletId: wallets[0]?.id }); } },
             { icon: 'card' as const, label: t('nav.card'), bg: '#F3E8FF', color: '#7E22CE', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Card'); (navigation as any).navigate('Card'); } },
             { icon: 'sparkles' as const, label: t('wallet.aiSupport'), bg: '#EDE9FE', color: '#7C3AED', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: AI Support'); (navigation as any).navigate('AIChat'); } },
-            { icon: 'swap-horizontal' as const, label: t('exchange.btnLabel'), bg: '#FFF0F0', color: '#C62828', onPress: () => { if (__DEV__) console.log('[Wallet] Quick action: Exchange'); (navigation as any).navigate('Exchange', { walletId: wallets[0]?.id }); } },
           ]).map(({ icon, label, bg, color, onPress }) => (
             <TouchableOpacity key={label} style={styles.quickActionBtn} onPress={onPress} activeOpacity={0.75}>
               <View style={[styles.quickActionIcon, { backgroundColor: bg }]}>
@@ -701,3 +701,4 @@ const styles = StyleSheet.create({
   },
 
 });
+
