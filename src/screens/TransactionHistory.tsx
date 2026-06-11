@@ -459,7 +459,7 @@ export default function TransactionHistory() {
                     <View style={styles.actionButtons}>
                       <TouchableOpacity
                         style={styles.receiptButton}
-                        onPress={() => generateAndShareReceipt(item, auth.user?.email || 'user@egwallet.com')}
+                        onPress={() => generateAndShareReceipt(item, auth.user?.email || '')}
                       >
                         <Ionicons name="document-text" size={16} color="#007AFF" />
                         <Text style={styles.receiptButtonText}>{t('txHistory.receipt')}</Text>

@@ -180,6 +180,45 @@ if (NODE_ENV === 'production') {
     process.exit(1);
   }
 
+  // Webhook secrets guard — without these, provider settlement events are silently dropped,
+  // leaving holdBalance permanently locked on real payouts.
+  if (process.env.STRIPE_SECRET_KEY && !process.env.STRIPE_WEBHOOK_SECRET) {
+    console.error(
+      '❌ FATAL: STRIPE_SECRET_KEY is set but STRIPE_WEBHOOK_SECRET is missing. ' +
+      'Stripe settlement webhooks will be silently dropped, permanently locking user holdBalance. ' +
+      'Set STRIPE_WEBHOOK_SECRET from your Stripe dashboard (Developers → Webhooks).'
+    );
+    process.exit(1);
+  }
+  if (process.env.KORA_API_KEY && !process.env.KORA_WEBHOOK_SECRET) {
+    console.error(
+      '❌ FATAL: KORA_API_KEY is set but KORA_WEBHOOK_SECRET is missing. ' +
+      'Kora settlement webhooks will be silently dropped, permanently locking user holdBalance. ' +
+      'Set KORA_WEBHOOK_SECRET from your Kora dashboard webhook settings.'
+    );
+    process.exit(1);
+  }
+
+  // Stripe test-key guard — test keys allow fake card charges that credit real wallets,
+  // enabling attackers to fund Kora (or other live-rail) withdrawals with no real money.
+  if ((process.env.STRIPE_SECRET_KEY      || '').startsWith('sk_test_')) {
+    console.error(
+      '❌ FATAL: STRIPE_SECRET_KEY starts with sk_test_ in a production environment. ' +
+      'Test-mode Stripe charges are free — an attacker can deposit unlimited test funds and ' +
+      'withdraw real money via a live payout rail (e.g. Kora). ' +
+      'Set a live Stripe key (sk_live_…) or unset STRIPE_SECRET_KEY to disable Stripe deposits.'
+    );
+    process.exit(1);
+  }
+  if ((process.env.STRIPE_PUBLISHABLE_KEY || '').startsWith('pk_test_')) {
+    console.error(
+      '❌ FATAL: STRIPE_PUBLISHABLE_KEY starts with pk_test_ in a production environment. ' +
+      'Mismatched test/live Stripe keys will cause PaymentSheet failures and indicate a ' +
+      'misconfigured environment. Set a live publishable key (pk_live_…) or unset it.'
+    );
+    process.exit(1);
+  }
+
   if (!FRESHDESK_DOMAIN || !FRESHDESK_API_KEY) {
     console.warn('⚠️  WARNING: Freshdesk not configured. Tickets will be stored locally only.');
   }
@@ -534,7 +573,7 @@ async function createFreshdeskTicket(ticket, userData) {
     const freshdeskPayload = {
       subject: ticket.subject,
       description: ticket.description,
-      email: userData.email || 'noreply@egwallet.com',
+      email: userData.email || 'SUPPORT@EGWALLETFINANCE.COM',
       priority: freshdeskPriority,
       status: 2, // Open
       tags: ticket.tags,
@@ -814,7 +853,7 @@ const translations = {
     sla_normal: "Expected response time: 24-48 hours",
     email_updates: "✓ You'll receive email updates about your ticket",
     track_status: "✓ Track status anytime in the Support section",
-    security_email: "🛡 For immediate security assistance, also email: security@egwallet.com",
+    security_email: "🛡 For immediate security assistance, also email: SUPPORT@EGWALLETFINANCE.COM",
     account_limits: "📊 Your Account Limits:\n• Daily limit: ${dailyLimit}\n• Used today: ${dailySpent}\n• Remaining: ${dailyRemaining}",
     get_verified: "💡 Get verified to unlock $50,000+ daily limits!",
     verification_pending: "⏳ Your verification is under review. Higher limits coming soon!",
@@ -956,7 +995,7 @@ const translations = {
     sla_normal: "Tiempo de respuesta esperado: 24-48 horas",
     email_updates: "✓ Recibirás actualizaciones por correo sobre tu ticket",
     track_status: "✓ Rastrea el estado en cualquier momento en la sección de Soporte",
-    security_email: "🛡 Para asistencia de seguridad inmediata, también envía correo a: security@egwallet.com",
+    security_email: "🛡 Para asistencia de seguridad inmediata, también envía correo a: SUPPORT@EGWALLETFINANCE.COM",
     account_limits: "📊 Límites de tu Cuenta:\n• Límite diario: ${dailyLimit}\n• Usado hoy: ${dailySpent}\n• Restante: ${dailyRemaining}",
     get_verified: "💡 ¡Verifica tu cuenta para desbloquear límites diarios de $50,000+!",
     verification_pending: "⏳ Tu verificación está en revisión. ¡Límites más altos próximamente!",
@@ -1098,7 +1137,7 @@ const translations = {
     sla_normal: "Temps de réponse attendu : 24-48 heures",
     email_updates: "✓ Vous recevrez des mises à jour par e-mail sur votre ticket",
     track_status: "✓ Suivez l'état à tout moment dans la section Support",
-    security_email: "🛡 Pour une assistance de sécurité immédiate, envoyez également un e-mail à : security@egwallet.com",
+    security_email: "🛡 Pour une assistance de sécurité immédiate, envoyez également un e-mail à : SUPPORT@EGWALLETFINANCE.COM",
     account_limits: "📊 Limites de votre compte :\n• Limite quotidienne : ${dailyLimit}\n• Utilisé aujourd'hui : ${dailySpent}\n• Restant : ${dailyRemaining}",
     get_verified: "💡 Vérifiez-vous pour débloquer des limites quotidiennes de $50,000+ !",
     verification_pending: "⏳ Votre vérification est en cours de révision. Des limites plus élevées bientôt !",
@@ -1240,7 +1279,7 @@ const translations = {
     sla_normal: "Tempo de resposta esperado: 24-48 horas",
     email_updates: "✓ Você receberá atualizações por e-mail sobre seu ticket",
     track_status: "✓ Acompanhe o status a qualquer momento na seção de Suporte",
-    security_email: "🛡 Para assistência de segurança imediata, envie também um e-mail para: security@egwallet.com",
+    security_email: "🛡 Para assistência de segurança imediata, envie também um e-mail para: SUPPORT@EGWALLETFINANCE.COM",
     account_limits: "📊 Limites da sua Conta:\n• Limite diário: ${dailyLimit}\n• Usado hoje: ${dailySpent}\n• Restante: ${dailyRemaining}",
     get_verified: "💡 Verifique-se para desbloquear limites diários de $50,000+!",
     verification_pending: "⏳ Sua verificação está em revisão. Limites mais altos em breve!",
@@ -1382,7 +1421,7 @@ const translations = {
     sla_normal: "预期响应时间：24-48 小时",
     email_updates: "✓ 您将收到有关工单的电子邮件更新",
     track_status: "✓ 随时在支持部分跟踪状态",
-    security_email: "🛡 如需立即获得安全协助，请发送电子邮件至：security@egwallet.com",
+    security_email: "🛡 如需立即获得安全协助，请发送电子邮件至：SUPPORT@EGWALLETFINANCE.COM",
     account_limits: "📊 您的账户限额：\n• 每日限额：${dailyLimit}\n• 今日已用：${dailySpent}\n• 剩余：${dailyRemaining}",
     get_verified: "💡 验证身份以解锁 $50,000+ 每日限额！",
     verification_pending: "⏳ 您的验证正在审核中。更高限额即将到来！",
@@ -1524,7 +1563,7 @@ const translations = {
     sla_normal: "予想応答時間：24～48時間",
     email_updates: "✓ チケットに関するメール更新を受け取ります",
     track_status: "✓ サポートセクションでいつでもステータスを追跡できます",
-    security_email: "🛡 緊急のセキュリティサポートが必要な場合は、次のアドレスにもメールしてください：security@egwallet.com",
+    security_email: "🛡 緊急のセキュリティサポートが必要な場合は、次のアドレスにもメールしてください：SUPPORT@EGWALLETFINANCE.COM",
     account_limits: "📊 アカウントの制限：\n• 1日の制限：${dailyLimit}\n• 本日使用：${dailySpent}\n• 残り：${dailyRemaining}",
     get_verified: "💡 本人確認をして $50,000+ の1日制限を解除しましょう！",
     verification_pending: "⏳ 本人確認は審査中です。より高い制限がまもなく利用可能になります！",
@@ -1666,7 +1705,7 @@ const translations = {
     sla_normal: "Ожидаемое время ответа: 24-48 часов",
     email_updates: "✓ Вы будете получать обновления по электронной почте о вашей заявке",
     track_status: "✓ Отслеживайте статус в любое время в разделе Поддержка",
-    security_email: "🛡 Для немедленной помощи по вопросам безопасности также отправьте письмо на: security@egwallet.com",
+    security_email: "🛡 Для немедленной помощи по вопросам безопасности также отправьте письмо на: SUPPORT@EGWALLETFINANCE.COM",
     account_limits: "📊 Лимиты вашей учетной записи:\n• Дневной лимит: ${dailyLimit}\n• Использовано сегодня: ${dailySpent}\n• Осталось: ${dailyRemaining}",
     get_verified: "💡 Пройдите верификацию, чтобы разблокировать дневные лимиты $50,000+!",
     verification_pending: "⏳ Ваша верификация находится на рассмотрении. Более высокие лимиты скоро!",
@@ -1808,7 +1847,7 @@ const translations = {
     sla_normal: "Erwartete Antwortzeit: 24-48 Stunden",
     email_updates: "✓ Sie erhalten E-Mail-Updates zu Ihrem Ticket",
     track_status: "✓ Verfolgen Sie den Status jederzeit im Support-Bereich",
-    security_email: "🛡 Für sofortige Sicherheitshilfe senden Sie auch eine E-Mail an: security@egwallet.com",
+    security_email: "🛡 Für sofortige Sicherheitshilfe senden Sie auch eine E-Mail an: SUPPORT@EGWALLETFINANCE.COM",
     account_limits: "📊 Ihre Kontolimits:\n• Tageslimit: ${dailyLimit}\n• Heute verwendet: ${dailySpent}\n• Verbleibend: ${dailyRemaining}",
     get_verified: "💡 Verifizieren Sie sich, um Tageslimits von $50,000+ freizuschalten!",
     verification_pending: "⏳ Ihre Verifizierung wird überprüft. Höhere Limits kommen bald!",
@@ -2103,6 +2142,11 @@ function loadDB() {
     if (!db.demoIntents) db.demoIntents = [];
     if (!db.notifications) db.notifications = [];
     if (!db.passwordResetTokens) db.passwordResetTokens = [];
+    // Core money-path collections — must exist before any deposit/withdrawal handler runs.
+    if (!db.transactions)       db.transactions       = [];
+    if (!db.withdrawals)        db.withdrawals        = [];
+    if (!db.ledger)             db.ledger             = [];
+    if (!db.idempotencyRecords) db.idempotencyRecords = [];
     // Persistent KYC identity claims: { [kycIdHash]: { userId, status, claimedAt, updatedAt } }
     // Authoritative dedup source — survives rejection/error without clearing hash.
     if (!db.kycIdentityClaims) db.kycIdentityClaims = {};
@@ -2142,8 +2186,11 @@ function loadDB() {
         if (!backupDb.notifications)     backupDb.notifications     = [];
         if (!backupDb.passwordResetTokens) backupDb.passwordResetTokens = [];
         if (!backupDb.idempotencyRecords)  backupDb.idempotencyRecords  = [];
-        if (!backupDb.withdrawals)       backupDb.withdrawals       = [];
-        if (!backupDb.kycIdentityClaims) backupDb.kycIdentityClaims = {};
+        if (!backupDb.withdrawals)         backupDb.withdrawals         = [];
+        if (!backupDb.transactions)        backupDb.transactions        = [];
+        if (!backupDb.ledger)              backupDb.ledger              = [];
+        if (!backupDb.kycIdentityClaims)   backupDb.kycIdentityClaims   = {};
+        if (!backupDb.payoutLocks)         backupDb.payoutLocks         = [];
         return backupDb;
       } catch (backupErr) {
         console.error('[loadDB] Backup restore also failed', backupErr.message);
@@ -2337,8 +2384,8 @@ app.post('/webhooks/stripe',
   async (req, res) => {
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
     if (!webhookSecret || !stripeClient) {
-      logger.warn('[webhook/stripe] STRIPE_WEBHOOK_SECRET or stripeClient not configured — ignoring event');
-      return res.json({ received: true });
+      logger.warn('[webhook/stripe] STRIPE_WEBHOOK_SECRET or stripeClient not configured');
+      return res.status(503).json({ error: 'Webhook endpoint not configured — provider should retry' });
     }
     const sig = req.headers['stripe-signature'];
     let event;
@@ -2347,6 +2394,82 @@ app.post('/webhooks/stripe',
     } catch (err) {
       logger.warn('[webhook/stripe] Signature verification failed', { error: err.message });
       return res.status(400).json({ error: 'Webhook signature verification failed' });
+    }
+
+    // ── payment_intent.succeeded — deposit settlement fallback ───────────────
+    // Credits the wallet from intent metadata if /deposits/confirm was never
+    // called (network failure, app killed after PaymentSheet completed, etc.).
+    // Uses the same stripeIntentId idempotency guard as /deposits/confirm so
+    // double-credit is impossible regardless of which path fires first.
+    if (event.type === 'payment_intent.succeeded') {
+      const intent = event.data.object;
+      // Defense-in-depth: reject test-mode events in production.
+      // The startup guard already blocks sk_test_ keys, but this catches events
+      // delivered after a key rotation or from misconfigured Stripe dashboard webhooks.
+      if (NODE_ENV === 'production' && event.livemode === false) {
+        logger.warn('[webhook/stripe] Ignoring test-mode payment_intent.succeeded in production',
+          { intentId: intent.id });
+        return res.json({ received: true });
+      }
+      const { userId: intentUserId, walletId: intentWalletId,
+              netCredited: netCreditedStr, feeAmount: feeAmountStr,
+              feeRate: feeRateStr } = intent.metadata || {};
+      if (!intentUserId || !intentWalletId) {
+        logger.warn('[webhook/stripe] payment_intent.succeeded missing metadata', { intentId: intent.id });
+        return res.json({ received: true });
+      }
+      try {
+        await withBalanceMutex(async () => {
+          const db = loadDB();
+          // Idempotency — already credited by /deposits/confirm or a prior webhook delivery?
+          if ((db.transactions || []).some(tx => tx.stripeIntentId === intent.id)) {
+            logger.info('[webhook/stripe] payment_intent.succeeded already credited — idempotent', { intentId: intent.id });
+            return;
+          }
+          const wallet = (db.wallets || []).find(
+            w => w.id === intentWalletId && w.userId === intentUserId
+          );
+          if (!wallet) {
+            logger.error('[webhook/stripe] Wallet not found for payment_intent.succeeded',
+              { intentId: intent.id, intentUserId, intentWalletId });
+            throw new Error('Wallet not found');
+          }
+          const netCredited = Number(netCreditedStr) || intent.amount;
+          const feeAmount   = Number(feeAmountStr)   || 0;
+          const feeRate     = Number(feeRateStr)     || 0;
+          const currency    = (intent.currency || '').toUpperCase();
+          let balance = wallet.balances.find(b => b.currency === currency);
+          if (!balance) { balance = { currency, amount: 0 }; wallet.balances.push(balance); }
+          balance.amount += netCredited;
+          db.transactions.push({
+            id: uuidv4(),
+            type: 'deposit',
+            fromWalletId: null,
+            toWalletId: intentWalletId,
+            amount: netCredited,
+            currency,
+            receivedAmount: netCredited,
+            receivedCurrency: currency,
+            wasConverted: false,
+            feeAmount,
+            feeRate,
+            grossAmount: netCredited + feeAmount,
+            status: 'completed',
+            timestamp: Date.now(),
+            memo: 'Deposit via Stripe (webhook settlement)',
+            direction: 'in',
+            stripeIntentId: intent.id,
+          });
+          saveDB(db);
+          logger.info('[webhook/stripe] payment_intent.succeeded — wallet credited via webhook',
+            { intentId: intent.id, intentUserId, intentWalletId, netCredited, currency });
+        });
+        return res.json({ received: true });
+      } catch (err) {
+        logger.error('[webhook/stripe] payment_intent.succeeded processing error',
+          { intentId: intent.id, error: err.message });
+        return res.status(500).json({ error: 'Processing failed' });
+      }
     }
 
     const STRIPE_PAYOUT_EVENTS = new Set(['payout.paid', 'payout.failed', 'payout.canceled']);
@@ -2368,6 +2491,15 @@ app.post('/webhooks/stripe',
           markWithdrawalPaid(db, withdrawalId, payout.id, 'stripe');
           logger.info('[webhook/stripe] Marked paid', { withdrawalId, payoutId: payout.id });
         } else {
+          // C-2: If a disbursement was already initiated, do not auto-refund on an out-of-order
+          // failure event — the provider may still settle.  Leave processing for admin reconcile.
+          if (w.payoutReference || w.payoutDispatchRef) {
+            w.reconcileRequired = true;
+            saveDB(db);
+            logger.warn('[webhook/stripe] Failure event on active disbursement — leaving processing for reconcile',
+              { withdrawalId, payoutId: payout.id, status: payout.status });
+            return;
+          }
           markWithdrawalFailed(db, withdrawalId,
             `Stripe webhook: payout ${payout.status} (${payout.id})`);
           logger.info('[webhook/stripe] Marked failed', { withdrawalId, payoutId: payout.id, status: payout.status });
@@ -2385,18 +2517,21 @@ app.post('/webhooks/stripe',
 // ─── POST /webhooks/kora ────────────────────────────────────────────────────
 // Receives signed Kora disbursement events.
 // KORA_WEBHOOK_SECRET must be set to the HMAC-SHA256 secret from Kora dashboard.
-// Kora signs with: x-korapay-signature = HMAC-SHA256(secret, JSON.stringify(body))
+// Kora signs with: x-korapay-signature = HMAC-SHA256(secret, <raw-body-bytes>)
+// We use express.raw to capture the raw body before any JSON parsing so the HMAC
+// is computed over the exact bytes Kora signed — re-serialising parsed JSON can
+// produce different whitespace/key order and will always fail timingSafeEqual.
 app.post('/webhooks/kora',
-  express.json({ limit: '100kb' }),
+  express.raw({ type: 'application/json' }),
   async (req, res) => {
     const webhookSecret = process.env.KORA_WEBHOOK_SECRET;
     if (!webhookSecret) {
-      logger.warn('[webhook/kora] KORA_WEBHOOK_SECRET not configured — ignoring event');
-      return res.json({ received: true });
+      logger.warn('[webhook/kora] KORA_WEBHOOK_SECRET not configured');
+      return res.status(503).json({ error: 'Webhook endpoint not configured — provider should retry' });
     }
     const sig = req.headers['x-korapay-signature'];
     const expected = crypto.createHmac('sha256', webhookSecret)
-      .update(JSON.stringify(req.body))
+      .update(req.body)   // req.body is a raw Buffer — matches Kora's signed bytes exactly
       .digest('hex');
     let valid = false;
     try {
@@ -2410,7 +2545,15 @@ app.post('/webhooks/kora',
       return res.status(400).json({ error: 'Webhook signature verification failed' });
     }
 
-    const data      = req.body?.data || {};
+    // Parse JSON only after signature is verified
+    let koraBody;
+    try {
+      koraBody = JSON.parse(req.body.toString('utf8'));
+    } catch (_e) {
+      return res.status(400).json({ error: 'Invalid JSON body' });
+    }
+
+    const data      = koraBody?.data || {};
     const reference = data.reference || data.transaction_reference;
     if (!reference || !reference.startsWith('egw-')) return res.json({ received: true });
 
@@ -2433,6 +2576,15 @@ app.post('/webhooks/kora',
           markWithdrawalPaid(db, withdrawalId, koraRef, 'kora');
           logger.info('[webhook/kora] Marked paid', { withdrawalId, koraRef, status });
         } else {
+          // C-2: If a disbursement was already initiated, do not auto-refund on an out-of-order
+          // failure event — the provider may still settle.  Leave processing for admin reconcile.
+          if (w.payoutReference || w.payoutDispatchRef) {
+            w.reconcileRequired = true;
+            saveDB(db);
+            logger.warn('[webhook/kora] Failure event on active disbursement — leaving processing for reconcile',
+              { withdrawalId, koraRef, status });
+            return;
+          }
           markWithdrawalFailed(db, withdrawalId,
             `Kora webhook: status=${status} ref=${koraRef}`);
           logger.info('[webhook/kora] Marked failed', { withdrawalId, koraRef, status });
@@ -3178,7 +3330,7 @@ app.post('/auth/forgot-password', forgotPasswordLimiter, async (req, res) => {
             tls: { rejectUnauthorized: true },
           });
 
-          const fromAddress = process.env.SMTP_FROM || 'EGWallet <no-reply@egwallet.app>';
+          const fromAddress = process.env.SMTP_FROM || 'EGWallet <egwallet.business@gmail.com>';
 
           // Mobile-optimised HTML email (table-based, widely compatible)
           const htmlEmail = `<!DOCTYPE html>
@@ -3747,7 +3899,10 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
   // in production, leaving funds permanently locked in holdBalance.
   if (process.env.NODE_ENV === 'production') {
     const resolvedProvider = payoutRouter(country || '');
-    const stripeReady = !!process.env.STRIPE_SECRET_KEY && !!process.env.STRIPE_CONNECT_READY;
+    // H-2: Stripe payouts currently disburse to the operator's STRIPE_CONNECT_ACCOUNT,
+    // not the user's entered bank details.  Block Stripe-routed withdrawals in
+    // production until per-user Stripe Connect external accounts are implemented.
+    const stripeReady = false;
     const koraReady   = !!process.env.KORA_API_KEY;
     const providerReady = (resolvedProvider === 'stripe' && stripeReady) ||
                           (resolvedProvider === 'kora'   && koraReady);
@@ -4341,6 +4496,7 @@ app.post('/deposits/create-intent', authMiddleware,
           clientSecret: intent.client_secret,
           intentId: intent.id,
           publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
+          resolvedWalletId: effectiveWalletId,
           mode: 'stripe',
           feeBreakdown: {
             youPay: totalCharged,
@@ -4383,6 +4539,7 @@ app.post('/deposits/create-intent', authMiddleware,
       clientSecret: `${demoIntentId}_secret`,
       intentId: demoIntentId,
       publishableKey: null,
+      resolvedWalletId: effectiveWalletId,
       mode: 'demo',
       feeBreakdown: {
         youPay: totalCharged,
@@ -4705,13 +4862,15 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
         });
       }
       
-      // SECURITY CHECK: Duplicate request prevention (24 hour window)
+      // High-3: Duplicate request prevention (24-hour window).
+      // Match on BOTH field names: r.targetEmployerId (legacy) and r.employerId (new path),
+      // and normalize currency to prevent cross-path duplicates slipping through.
       const DUPLICATE_WINDOW = 24 * 60 * 60 * 1000; // 24 hours
-      const recentRequests = db.paymentRequests.filter(r => 
-        r.requesterId === req.user.userId &&
-        r.targetEmployerId === targetEmployer.id &&
+      const recentRequests = db.paymentRequests.filter(r =>
+        (r.requesterId === req.user.userId || r.userId === req.user.userId) &&
+        (r.targetEmployerId === targetEmployer.id || r.employerId === targetEmployer.id) &&
         r.amount === amount &&
-        r.currency === currency &&
+        (r.currency || '').toUpperCase() === (currency || '').toUpperCase() &&
         r.status === 'pending' &&
         (now - r.createdAt) < DUPLICATE_WINDOW
       );
@@ -4728,9 +4887,8 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
           existingRequestId: recentRequests[0].id
         });
       }
-      
-      // Add to rate limit tracker
-      db.paymentRequestsRateLimit[rateLimitKey].push(now);
+      // NOTE: rate-limit timestamp is pushed inside withBalanceMutex below to prevent
+      // TOCTOU (two concurrent requests both reading count=0 and both passing).
     }
   }
   
@@ -4787,16 +4945,120 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
     };
   }
   
+  // High-2: Employer requests use withBalanceMutex for an atomic rate-limit-push +
+  // duplicate re-check + push + save, preventing TOCTOU in single-process deployment.
+  // (Multi-instance deployments need a distributed lock; the in-process mutex documents
+  // the single-pod guarantee, consistent with the pattern used throughout this codebase.)
+  if (isEmployerRequest && employerRelationship) {
+    withBalanceMutex(() => {
+      const dbLocked = loadDB();
+      const now2 = Date.now();
+      const legacyEmpId = employerRelationship.employerId;
+      const rlKey2 = `${req.user.userId}_${legacyEmpId}`;
+
+      // High-2: Re-check active linkage inside mutex (may have been revoked since outer check).
+      const lockedLinkage = (dbLocked.employerEmployees || []).find(ee =>
+        ee.employerId === legacyEmpId && ee.workerId === req.user.userId && ee.status === 'active'
+      );
+      if (!lockedLinkage) {
+        logger.warn('[/payment-requests legacy] Worker linkage revoked before mutex write', {
+          workerId: req.user.userId, employerId: legacyEmpId
+        });
+        res.status(403).json({ error: t('error_not_linked_employer', req.lang || 'en') });
+        return;
+      }
+
+      // High-2: Re-check employer verification inside mutex.
+      const lockedEmployer = (dbLocked.employers || []).find(e => e.id === legacyEmpId);
+      if (!lockedEmployer || lockedEmployer.verificationStatus !== 'verified') {
+        logger.warn('[/payment-requests legacy] Employer no longer verified inside mutex', {
+          workerId: req.user.userId, employerId: legacyEmpId
+        });
+        res.status(403).json({ error: t('error_employer_unverified', req.lang || 'en') });
+        return;
+      }
+
+      // Authoritative rate-limit check inside mutex (fresh snapshot).
+      if (!dbLocked.paymentRequestsRateLimit) dbLocked.paymentRequestsRateLimit = {};
+      if (!dbLocked.paymentRequestsRateLimit[rlKey2]) dbLocked.paymentRequestsRateLimit[rlKey2] = [];
+      dbLocked.paymentRequestsRateLimit[rlKey2] = dbLocked.paymentRequestsRateLimit[rlKey2]
+        .filter(ts => now2 - ts < 60 * 60 * 1000);
+      if (dbLocked.paymentRequestsRateLimit[rlKey2].length >= 5) {
+        res.status(429).json({ error: t('error_duplicate_request', req.lang || 'en'), retryAfter: 3600 });
+        return;
+      }
+
+      // Authoritative duplicate check inside mutex — both field names, normalized currency.
+      const normalizedLegacyCur = (currency || '').toUpperCase();
+      const dupCheck = (dbLocked.paymentRequests || []).filter(r =>
+        (r.requesterId === req.user.userId || r.userId === req.user.userId) &&
+        (r.targetEmployerId === legacyEmpId || r.employerId === legacyEmpId) &&
+        r.amount === amount &&
+        (r.currency || '').toUpperCase() === normalizedLegacyCur &&
+        r.status === 'pending' &&
+        (now2 - r.createdAt) < 24 * 60 * 60 * 1000
+      );
+      if (dupCheck.length > 0) {
+        res.status(400).json({
+          error: t('error_duplicate_request', req.lang || 'en'),
+          existingRequestId: dupCheck[0].id
+        });
+        return;
+      }
+
+      // High-1: Check funding balance including pending reservation for this employer + currency.
+      const legacyFundingWallet = (dbLocked.wallets || []).find(w => w.id === lockedEmployer.fundingWalletId);
+      const legacyFundingBalance = legacyFundingWallet &&
+        (legacyFundingWallet.balances || []).find(b => b.currency === normalizedLegacyCur);
+      const legacyReserved = (dbLocked.paymentRequests || [])
+        .filter(r =>
+          r.status === 'pending' &&
+          r.type === 'payroll_request' &&
+          (r.employerId === legacyEmpId || r.targetEmployerId === legacyEmpId) &&
+          (r.currency || '').toUpperCase() === normalizedLegacyCur
+        )
+        .reduce((sum, r) => sum + (r.amount || 0), 0);
+      if (!legacyFundingBalance || legacyFundingBalance.amount < amount + legacyReserved) {
+        logger.warn('[/payment-requests legacy] Funding balance insufficient after reservations', {
+          workerId: req.user.userId, employerId: legacyEmpId,
+          requested: amount, reserved: legacyReserved,
+          available: legacyFundingBalance ? legacyFundingBalance.amount : 0
+        });
+        res.status(400).json({ error: t('error_employer_insufficient_balance', req.lang || 'en') });
+        return;
+      }
+
+      // All checks pass — record rate-limit timestamp, persist, and respond.
+      dbLocked.paymentRequestsRateLimit[rlKey2].push(now2);
+      dbLocked.paymentRequests.push(request);
+      saveDB(dbLocked);
+
+      logger.info('Employer payment request created (legacy path)', {
+        requestId: request.id, workerId: req.user.userId,
+        employerId: employerRelationship.employerId, amount, currency,
+        amountUSD: convertToUSD(minorToMajor(amount, currency), currency, dbLocked.rates)
+      });
+
+      const response = { request };
+      if (idempotencyKey) idempotencyStore.set(idempotencyKey, { userId: req.user.userId, response, timestamp: Date.now() });
+      res.json(response);
+    }).catch(err => {
+      logger.error('[/payment-requests employer] mutex error', { error: err.message });
+      if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
+    });
+    return; // employer path handled fully inside mutex; prevent fall-through
+  }
+
+  // Non-employer (personal) request path — unchanged.
   db.paymentRequests.push(request);
   saveDB(db);
 
-  // Notify recipient if resolved
   if (recipientUserId) {
     const requester = db.users.find(u => u.id === req.user.userId);
     const requesterName = requester
       ? `${requester.firstName || ''} ${requester.lastName || ''}`.trim() || requester.email.split('@')[0]
       : 'Someone';
-    const displayAmount = minorToMajor(amount, currency).toFixed(decimalsFor(currency)); // minor → major
+    const displayAmount = minorToMajor(amount, currency).toFixed(decimalsFor(currency));
     createNotification(
       db,
       recipientUserId,
@@ -4807,26 +5069,11 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
     );
     saveDB(db);
   }
-  
-  // AUDIT TRAIL: Log all employer payment requests
-  if (isEmployerRequest) {
-    logger.info('Employer payment request created', {
-      requestId: request.id,
-      workerId: req.user.userId,
-      employerId: employerRelationship.employerId,
-      amount,
-      currency,
-      amountUSD: convertToUSD(minorToMajor(amount, currency), currency, db.rates)
-    });
-  }
-  
+
   const response = { request };
-  
-  // Store idempotency key
   if (idempotencyKey) {
     idempotencyStore.set(idempotencyKey, { userId: req.user.userId, response, timestamp: Date.now() });
   }
-  
   res.json(response);
 });
 
@@ -4977,6 +5224,24 @@ app.post('/payment-requests/:id/pay', authMiddleware, async (req, res) => {
   let wasConverted = false;
   let fxFeeAmount = 0;
 
+  // High-3: payroll_request payments must be settled in the exact requested currency.
+  // Cross-currency FX is not permitted for payroll — bulk-payment (POST /employer/bulk-payment)
+  // enforces the same rule, and mixing paths must produce consistent compliance records.
+  if (request.type === 'payroll_request') {
+    const exactPayrollBalance = fromWallet.balances.find(b => b.currency === reqCurrency);
+    if (!exactPayrollBalance || exactPayrollBalance.amount < reqAmount) {
+      logger.warn('[/payment-requests/pay] Payroll pay rejected — no exact-currency balance on funding wallet', {
+        requestId: request.id, reqCurrency, reqAmount,
+        available: exactPayrollBalance ? exactPayrollBalance.amount : 0,
+      });
+      return res.status(400).json({
+        error: `Payroll payments require an exact ${reqCurrency} balance on the funding wallet. FX conversion is not permitted for payroll.`,
+      });
+    }
+    // Pre-assign payFromBalance to bypass the FX block entirely.
+    payFromBalance = exactPayrollBalance;
+  }
+
   if (!payFromBalance || payFromBalance.amount < reqAmount) {
     // Try cross-currency: pick payer's richest balance (highest USD value)
     const richest = fromWallet.balances.reduce((best, b) => {
@@ -5056,6 +5321,154 @@ app.post('/payment-requests/:id/pay', authMiddleware, async (req, res) => {
     });
   }
 
+  // C-1 (defense-in-depth): reject non-positive stored amounts before any mutation.
+  // The creation path now blocks this, but old records or manual DB edits could slip through.
+  if (!Number.isInteger(reqAmount) || reqAmount <= 0) {
+    logger.error('[/payment-requests/pay] Non-positive reqAmount blocked', { requestId: request.id, reqAmount });
+    return res.status(400).json({ error: 'Payment request has an invalid amount.' });
+  }
+
+  // Payroll AML limits — apply the employer's separate daily/monthly cap when
+  // this is a worker-initiated payroll request.  Mirrors POST /employer/bulk-payment.
+  // Resolve employer ID from all field names used across legacy and new create paths:
+  //   • request.employerId        — new POST /employer/payment-request path
+  //   • request.targetEmployerId  — legacy POST /payment-requests employer branch
+  //   • request.payrollMetadata.employerId — fallback stored on creation
+  let prPayrollEmployer = null;
+  let prPayrollAmountUSD = 0;
+  if (request.type === 'payroll_request') {
+    const payrollEmployerId = request.employerId
+      || request.targetEmployerId
+      || request.payrollMetadata?.employerId;
+
+    // H-2: If we cannot resolve the employer, refuse the payment rather than
+    // silently skipping payroll AML checks.
+    if (!payrollEmployerId) {
+      logger.error('[/payment-requests/pay] payroll_request has no resolvable employerId', { requestId: request.id });
+      return res.status(403).json({ error: 'Payroll request has no associated employer. Payment blocked.' });
+    }
+
+    prPayrollEmployer = (db.employers || []).find(e => e.id === payrollEmployerId);
+
+    if (!prPayrollEmployer) {
+      logger.error('[/payment-requests/pay] payroll_request employer not found', { requestId: request.id, payrollEmployerId });
+      return res.status(403).json({ error: 'Employer record not found. Payment blocked.' });
+    }
+
+    // H-1: Only the employer (the account that owns the employer record) may pay
+    // a payroll_request.  Any other payer would debit personal wallet funds and
+    // skew the employer's payroll AML limit tracking.
+    if (req.user.userId !== prPayrollEmployer.userId) {
+      logger.warn('[/payment-requests/pay] Non-employer attempted to pay payroll_request', {
+        requestId: request.id,
+        payerId: req.user.userId,
+        employerUserId: prPayrollEmployer.userId,
+      });
+      return res.status(403).json({ error: 'Only the employer may fulfill a payroll payment request.' });
+    }
+
+    // High-1: Re-check active employer-worker linkage at pay time.
+    // The worker may have been removed or suspended after the request was created.
+    // request.userId holds the worker's userId on the new POST /employer/payment-request path;
+    // request.requesterId holds it on the legacy POST /payment-requests employer branch.
+    const prWorkerUserId = request.requesterId || request.userId;
+    const prActiveLinkage = (db.employerEmployees || []).find(ee =>
+      ee.employerId === prPayrollEmployer.id &&
+      ee.workerId === prWorkerUserId &&
+      ee.status === 'active'
+    );
+    if (!prActiveLinkage) {
+      logger.warn('[/payment-requests/pay] Worker no longer actively linked to employer at pay time', {
+        requestId: request.id,
+        employerId: prPayrollEmployer.id,
+        workerUserId: prWorkerUserId,
+      });
+      return res.status(403).json({
+        error: 'Worker is no longer actively linked to this employer. Payment blocked.',
+      });
+    }
+
+    // H-3: Re-verify employer status at pay time — employer may have been
+    // suspended/rejected after the payroll request was created.
+    if (prPayrollEmployer.verificationStatus !== 'verified') {
+      logger.warn('[/payment-requests/pay] Employer no longer verified at pay time', {
+        requestId: request.id,
+        employerId: prPayrollEmployer.id,
+        verificationStatus: prPayrollEmployer.verificationStatus,
+      });
+      return res.status(403).json({
+        error: 'Employer is no longer verified. Payment cannot be processed.',
+      });
+    }
+    prPayrollAmountUSD = convertToUSD(minorToMajor(reqAmount, reqCurrency), reqCurrency, db.rates);
+    const prPayrollCheck = checkPayrollLimits(prPayrollEmployer, prPayrollAmountUSD);
+    if (!prPayrollCheck.allowed) {
+      logger.warn('[/payment-requests/pay] Payroll limit exceeded for payroll_request', {
+        requestId: request.id,
+        employerId: prPayrollEmployer.id,
+        prPayrollAmountUSD: prPayrollAmountUSD.toFixed(2),
+        limitType: prPayrollCheck.limitType,
+      });
+      return res.status(403).json({
+        code:                prPayrollCheck.code,
+        error:               prPayrollCheck.message,
+        limitType:           prPayrollCheck.limitType,
+        remainingDailyUSD:   prPayrollCheck.remainingDailyUSD,
+        remainingMonthlyUSD: prPayrollCheck.remainingMonthlyUSD,
+      });
+    }
+
+    // High-4: Payroll payments must be debited from the employer's dedicated funding
+    // wallet, not a personal wallet.  This preserves payroll accounting integrity and
+    // prevents the employer from using personal funds to satisfy a payroll obligation
+    // while the funding wallet balance remains untouched.
+    if (prPayrollEmployer.fundingWalletId && fromWallet.id !== prPayrollEmployer.fundingWalletId) {
+      logger.warn('[/payment-requests/pay] Employer attempted payroll pay from non-funding wallet', {
+        requestId: request.id,
+        employerId: prPayrollEmployer.id,
+        fromWalletId: fromWallet.id,
+        fundingWalletId: prPayrollEmployer.fundingWalletId,
+      });
+      return res.status(403).json({
+        error: 'Payroll payments must be made from the employer funding wallet.',
+      });
+    }
+
+    // 24-hour per-worker settlement guard — mirrors the same check in bulk-payment.
+    // Prevents double payment when:
+    //   (a) employer already bulk-paid worker W and W creates a new request (bulk→request)
+    //   (b) employer already paid one request for W and W opens a second one (request→request)
+    const prWorkerToCheck = request.userId || request.requesterId;
+    const prSettleWindow = 24 * 60 * 60 * 1000;
+    const prNowSettle = Date.now();
+    const prAlreadyPaidViaRequest = (db.paymentRequests || []).some(pr =>
+      pr.id !== request.id &&
+      pr.type === 'payroll_request' &&
+      pr.status === 'paid' &&
+      (pr.userId === prWorkerToCheck || pr.requesterId === prWorkerToCheck) &&
+      (pr.employerId === prPayrollEmployer.id || pr.targetEmployerId === prPayrollEmployer.id) &&
+      pr.paidAt && (prNowSettle - pr.paidAt) < prSettleWindow
+    );
+    const prAlreadyPaidViaBulk = (db.transactions || []).some(tx =>
+      tx.type === 'payroll' &&
+      tx.status === 'completed' &&
+      tx.payrollMetadata?.employerId === prPayrollEmployer.id &&
+      tx.payrollMetadata?.workerId === prWorkerToCheck &&
+      tx.timestamp && (prNowSettle - tx.timestamp) < prSettleWindow
+    );
+    if (prAlreadyPaidViaRequest || prAlreadyPaidViaBulk) {
+      logger.warn('[/payment-requests/pay] Payroll worker already settled within 24h', {
+        requestId: request.id,
+        employerId: prPayrollEmployer.id,
+        workerUserId: prWorkerToCheck,
+        via: prAlreadyPaidViaBulk ? 'bulk' : 'request',
+      });
+      return res.status(409).json({
+        error: 'This worker was already paid by this employer within the last 24 hours. Wait 24 hours or verify the payment.',
+      });
+    }
+  }
+
   // Deduct from payer (in their currency, including FX fee if converted)
   payFromBalance.amount -= debitAmount;
 
@@ -5112,6 +5525,12 @@ app.post('/payment-requests/:id/pay', authMiddleware, async (req, res) => {
   // so saveDB below persists the updated counters atomically with the balance change.
   updateLimitTracking(prPayerUser, prDebitUSD);
 
+  // H-1: Increment employer payroll limit tracking for payroll_request payments.
+  // prPayrollEmployer is a reference inside db.employers — persisted by saveDB below.
+  if (prPayrollEmployer) {
+    updatePayrollLimitTracking(prPayrollEmployer, prPayrollAmountUSD);
+  }
+
   // Build response and save idempotency record atomically with the balance mutation.
   // A crash after saveDB leaves a durable record — replay returns cached response.
   const prResponseBody = { request, transaction: tx };
@@ -5146,7 +5565,9 @@ app.post('/payment-requests/:id/cancel', authMiddleware, (req, res) => {
   const db = loadDB();
   const request = db.paymentRequests.find(r => r.id === req.params.id);
   if (!request) return res.status(404).json({ error: t('error_request_not_found', req.lang || 'en') });
-  if (request.requesterId !== req.user.userId) return res.status(403).json({ error: t('error_unauthorized', req.lang || 'en') });
+  // High-1: new-path creates store userId (not requesterId); accept either field.
+  const cancelOwnerId = request.requesterId || request.userId;
+  if (cancelOwnerId !== req.user.userId) return res.status(403).json({ error: t('error_unauthorized', req.lang || 'en') });
   if (request.status !== 'pending') return res.status(400).json({ error: t('error_request_processed', req.lang || 'en') });
   
   request.status = 'cancelled';
@@ -7084,9 +7505,8 @@ function checkAndSendFollowUps() {
   }
 }
 
-// Manual follow-up check endpoint (can be called by cron job)
-app.post('/support/process-followups', authMiddleware, (req, res) => {
-  // In production: add admin auth or use internal API key
+// Manual follow-up check endpoint — admin only (mirrors cron automation)
+app.post('/support/process-followups', authMiddleware, adminMiddleware, (req, res) => {
   checkAndSendFollowUps();
   res.json({ success: true, message: 'Follow-ups processed' });
 });
@@ -7174,7 +7594,7 @@ app.post('/disputes', authMiddleware, (req, res) => {
     ticketNumber,
     userId: req.user.userId,
     userEmail: resolvedEmail,
-    notifyEmail: 'support@egwalletfinance.com',
+    notifyEmail: 'SUPPORT@EGWALLETFINANCE.COM',
     transactionId: String(transactionId).slice(0, 100), // cap length
     reason,
     description: description.trim(),
@@ -7560,7 +7980,20 @@ app.delete('/gdpr/delete-account', authMiddleware, async (req, res) => {
   (db.virtualCards || []).filter(c => c.userId === userId).forEach(card => {
     card.status = 'deleted';
   });
-  
+
+  // H-1 (GDPR Art. 17): Redact encrypted PII from withdrawal records.
+  // Non-PII audit fields (id, userId, amount, currency, status, timestamps) are
+  // kept for financial reconciliation; all identifying bank/account data is erased.
+  (db.withdrawals || []).filter(w => w.userId === userId).forEach(w => {
+    w.accountNumber     = null;
+    w.iban              = null;
+    w.swiftBic          = null;
+    w.accountHolderName = null;
+    w.bankName          = null;
+    w.accountMask       = '[DELETED]';
+    w.bankNameDisplay   = '[DELETED]';
+  });
+
   saveDB(db);
   
   auditLogger.warn('ACCOUNT_DELETED', { 
@@ -8309,15 +8742,34 @@ app.post('/employer/bulk-payment',
         validationErrors.push(`Worker ${item.workerEmail || item.workerId}: wallet ${item.walletId} does not belong to this worker`);
         continue;
       }
-      // Worker must be linked to this employer — prevents paying non-employees
+      // Worker must be active and linked to this employer — prevents paying
+      // suspended or terminated employees.
       const isLinked = (db.employerEmployees || []).some(
-        ee => ee.employerId === employer.id && ee.workerId === item.workerId
+        ee => ee.employerId === employer.id && ee.workerId === item.workerId &&
+              ee.status === 'active'
       );
       if (!isLinked) {
         validationErrors.push(`Worker ${item.workerEmail || item.workerId}: not linked to this employer`);
         continue;
       }
       resolvedItems.push({ ...item, workerWallet });
+    }
+
+    // High-2: Reject batches with duplicate workerIds — a copy-paste error or
+    // malicious input could otherwise debit the employer twice for the same worker
+    // in a single saveDB call.
+    const batchWorkerIdCounts = new Map();
+    for (const item of resolvedItems) {
+      batchWorkerIdCounts.set(item.workerId, (batchWorkerIdCounts.get(item.workerId) || 0) + 1);
+    }
+    const duplicateBatchWorkers = [...batchWorkerIdCounts.entries()]
+      .filter(([, count]) => count > 1)
+      .map(([wid]) => wid);
+    if (duplicateBatchWorkers.length > 0) {
+      return res.status(400).json({
+        error: 'Batch contains duplicate worker entries. Each worker may appear only once per batch.',
+        duplicateWorkerIds: duplicateBatchWorkers,
+      });
     }
 
     if (validationErrors.length > 0) {
@@ -8331,22 +8783,81 @@ app.post('/employer/bulk-payment',
       });
     }
 
-    // Check total funding balance per currency — all at once, before any debit
+    // Cross-flow settlement guard (request→bulk direction): reject bulk items where a
+    // payroll_request for that worker+employer was already paid via /payment-requests/:id/pay
+    // within the last 24 hours.  This prevents a worker from being paid twice when the
+    // employer forgets to remove them from a bulk run after their request was already settled.
+    const BULK_DEDUPE_WINDOW = 24 * 60 * 60 * 1000;
+    const bulkNow = Date.now();
+
+    // High-1: Extend the dedupe set to cover both channels:
+    //   (a) payroll_request records paid via /payment-requests/:id/pay
+    //   (b) payroll transactions created by a prior /employer/bulk-payment run
+    // This blocks bulk→bulk and post-bulk-new-request double payment within 24 hours.
+    const settledViaRequest = (db.paymentRequests || [])
+      .filter(pr =>
+        pr.type === 'payroll_request' &&
+        pr.status === 'paid' &&
+        (pr.employerId === employer.id || pr.targetEmployerId === employer.id) &&
+        pr.paidAt && (bulkNow - pr.paidAt) < BULK_DEDUPE_WINDOW
+      )
+      .map(pr => pr.userId || pr.requesterId)
+      .filter(Boolean);
+
+    const settledViaBulk = (db.transactions || [])
+      .filter(tx =>
+        tx.type === 'payroll' &&
+        tx.status === 'completed' &&
+        tx.payrollMetadata?.employerId === employer.id &&
+        tx.timestamp && (bulkNow - tx.timestamp) < BULK_DEDUPE_WINDOW
+      )
+      .map(tx => tx.payrollMetadata?.workerId)
+      .filter(Boolean);
+
+    const recentlySettledWorkerIds = new Set([...settledViaRequest, ...settledViaBulk]);
+    const alreadyPaidItems = resolvedItems.filter(item =>
+      recentlySettledWorkerIds.has(item.workerId)
+    );
+    if (alreadyPaidItems.length > 0) {
+      logger.warn('[/employer/bulk-payment] Bulk batch blocked — workers already paid via request-pay within 24h', {
+        employerId: employer.id,
+        blockedWorkerIds: alreadyPaidItems.map(i => i.workerId),
+      });
+      return res.status(409).json({
+        error: 'One or more workers in this batch were already paid via a payment request within the last 24 hours. Remove them from the batch or wait 24 hours.',
+        blockedWorkerIds: alreadyPaidItems.map(i => i.workerId),
+      });
+    }
+
+    // Check total funding balance per currency — all at once, before any debit.
+    // High-3: Include pending payroll_request reservation so bulk-payment cannot
+    // spend funds already notionally reserved by worker-initiated pending requests.
     const totalsNeeded = {};
     for (const item of resolvedItems) {
       totalsNeeded[item.currency] = (totalsNeeded[item.currency] || 0) + item.amount;
     }
-    for (const [currency, total] of Object.entries(totalsNeeded)) {
-      const balance = fundingWallet.balances.find(b => b.currency === currency);
-      if (!balance || balance.amount < total) {
-        logger.error('Payroll batch rejected — insufficient funds', {
-          employerId: employer.id, currency, needed: total, available: balance?.amount || 0,
+    for (const [bulkCurrency, total] of Object.entries(totalsNeeded)) {
+      const balance = fundingWallet.balances.find(b => b.currency === bulkCurrency);
+      const pendingReserved = (db.paymentRequests || [])
+        .filter(r =>
+          r.status === 'pending' &&
+          r.type === 'payroll_request' &&
+          (r.employerId === employer.id || r.targetEmployerId === employer.id) &&
+          (r.currency || '').toUpperCase() === bulkCurrency.toUpperCase()
+        )
+        .reduce((sum, r) => sum + (r.amount || 0), 0);
+      const effectivelyAvailable = (balance?.amount || 0) - pendingReserved;
+      if (!balance || effectivelyAvailable < total) {
+        logger.error('Payroll batch rejected — insufficient funds after pending reservations', {
+          employerId: employer.id, currency: bulkCurrency, needed: total,
+          available: balance?.amount || 0, pendingReserved, effectivelyAvailable,
         });
         return res.status(400).json({
           error: t('error_insufficient_funds_payroll', req.lang || 'en'),
-          currency,
+          currency: bulkCurrency,
           needed: total,
           available: balance?.amount || 0,
+          pendingReserved,
         });
       }
     }
@@ -8463,6 +8974,26 @@ app.post('/employer/bulk-payment',
       };
 
       db.transactions.push(txn);
+
+      // Cross-flow settlement (bulk→request direction): cancel ALL pending
+      // payroll_request rows for this worker+employer regardless of currency.
+      // Matching only the paid currency left cross-currency requests payable,
+      // allowing a second payout in a different currency for the same obligation.
+      const settlementTs = Date.now();
+      (db.paymentRequests || []).forEach(pr => {
+        if (
+          pr.status === 'pending' &&
+          pr.type === 'payroll_request' &&
+          (pr.userId === item.workerId || pr.requesterId === item.workerId) &&
+          (pr.employerId === employer.id || pr.targetEmployerId === employer.id)
+        ) {
+          pr.status = 'cancelled';
+          pr.cancelledAt = settlementTs;
+          pr.cancelReason = 'settled_via_bulk';
+          pr.settledByTransactionId = txn.id;
+        }
+      });
+
       batch.transactions.push(txn.id);
       batch.successCount++;
 
@@ -8747,68 +9278,162 @@ app.post('/employer/payment-request',
     body('currency').isString()
   ]),
   (req, res) => {
-    const db = loadDB();
-    const { employerId, amount, currency, memo } = req.body;
-    
-    // Verify worker is linked to this employer (workerId is the correct field).
-    const relationship = db.employerEmployees.find(ee =>
-      ee.employerId === employerId && ee.workerId === req.user.userId
-    );
-    
-    if (!relationship) {
-      return res.status(403).json({ error: t('error_not_linked_employer', req.lang || 'en') });
+    const { employerId, amount, memo } = req.body;
+    // H-4: Normalize currency to uppercase.
+    const cur = String(req.body.currency || '').toUpperCase().trim();
+
+    // --- Fast-path validation (cheap read-only checks, no mutex needed) ---
+    const amountMinor = majorToMinor(Number(amount), cur);
+
+    // C-1: Reject zero or negative amounts early.
+    if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
+      return res.status(400).json({ error: 'amount must be a positive value' });
     }
-    
-    const employer = db.employers.find(e => e.id === employerId);
-    if (!employer) {
-      return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
-    }
-    
-    // Get worker's wallet
-    const userWallet = db.wallets.find(w => w.userId === req.user.userId);
-    if (!userWallet) {
-      return res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
-    }
-    
-    // Create payment request
-    const request = {
-      id: uuidv4(),
-      walletId: userWallet.id,
-      userId: req.user.userId,
-      employerId: employerId,
-      amount: Math.round(amount * 100), // Convert to minor units
-      currency,
-      memo: memo || '',
-      type: 'payroll_request',
-      status: 'pending',
-      createdAt: Date.now(),
-      paidAt: null,
-      payrollMetadata: {
-        employerName: employer.companyName,
-        employerId: employer.id,
-        requestedByWorker: true
+
+    // --- Critical section: rate-limit + duplicate + balance + create must be atomic.
+    // High-3 fix: wrap in withBalanceMutex and do a fresh loadDB() inside so that
+    // concurrent requests cannot both read the same snapshot and bypass the guards.
+    withBalanceMutex(() => {
+      const db = loadDB();
+      const prNow = Date.now();
+
+      // Re-check active linkage inside mutex (fresh snapshot).
+      const relationship = (db.employerEmployees || []).find(ee =>
+        ee.employerId === employerId && ee.workerId === req.user.userId && ee.status === 'active'
+      );
+      if (!relationship) {
+        res.status(403).json({ error: t('error_not_linked_employer', req.lang || 'en') });
+        return;
       }
-    };
-    
-    db.paymentRequests.push(request);
-    saveDB(db);
-    
-    logger.info('Employer payment request created', {
-      requestId: request.id,
-      employerId,
-      userId: req.user.userId,
-      amount: request.amount,
-      currency
-    });
-    
-    res.json({ 
-      success: true, 
-      request: {
-        id: request.id,
-        amount: request.amount,
-        currency: request.currency,
-        status: request.status
+
+      // Re-resolve employer inside mutex (may have been suspended since pre-flight).
+      const employer = (db.employers || []).find(e => e.id === employerId);
+      if (!employer) {
+        res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
+        return;
       }
+      if (employer.verificationStatus !== 'verified') {
+        res.status(403).json({ error: t('error_employer_not_verified', req.lang || 'en') });
+        return;
+      }
+
+      // Per-worker request cap (stored in minor units).
+      if (relationship.maxRequestAmount && amountMinor > relationship.maxRequestAmount) {
+        res.status(403).json({
+          error: t('error_request_exceeds_limit', req.lang || 'en',
+            { limit: relationship.maxRequestAmount, currency: cur })
+        });
+        return;
+      }
+
+      // High-5 / High-1: Resolve employer's dedicated funding wallet via fundingWalletId
+      // (same pattern as POST /employer/bulk-payment). Using userId instead could pick a
+      // personal wallet when an employer holds multiple wallet records.
+      const employerWallet = (db.wallets || []).find(w => w.id === employer.fundingWalletId);
+      const empBalance = employerWallet && (employerWallet.balances || []).find(b => b.currency === cur);
+
+      // High-1: Include reserved amount from all other pending payroll_request records for
+      // this employer + currency so concurrent requests cannot over-commit the funding balance.
+      const empReserved = (db.paymentRequests || [])
+        .filter(r =>
+          r.status === 'pending' &&
+          r.type === 'payroll_request' &&
+          (r.employerId === employerId || r.targetEmployerId === employerId) &&
+          (r.currency || '').toUpperCase() === cur
+        )
+        .reduce((sum, r) => sum + (r.amount || 0), 0);
+
+      if (!empBalance || empBalance.amount < amountMinor + empReserved) {
+        logger.warn('[/employer/payment-request] Funding balance insufficient after reservations', {
+          employerId, requested: amountMinor, reserved: empReserved,
+          available: empBalance ? empBalance.amount : 0
+        });
+        res.status(400).json({ error: t('error_employer_insufficient_balance', req.lang || 'en') });
+        return;
+      }
+
+      // Get worker's wallet (for walletId stored on the request record).
+      const userWallet = (db.wallets || []).find(w => w.userId === req.user.userId);
+      if (!userWallet) {
+        res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
+        return;
+      }
+
+      // Rate limit — 5 payroll requests per worker/employer pair per hour.
+      const PR_RATE_LIMIT_WINDOW = 60 * 60 * 1000;
+      const PR_RATE_LIMIT_MAX = 5;
+      if (!db.paymentRequestsRateLimit) db.paymentRequestsRateLimit = {};
+      const prRateLimitKey = `${req.user.userId}_${employerId}`;
+      if (!db.paymentRequestsRateLimit[prRateLimitKey]) db.paymentRequestsRateLimit[prRateLimitKey] = [];
+      db.paymentRequestsRateLimit[prRateLimitKey] = db.paymentRequestsRateLimit[prRateLimitKey]
+        .filter(ts => prNow - ts < PR_RATE_LIMIT_WINDOW);
+      if (db.paymentRequestsRateLimit[prRateLimitKey].length >= PR_RATE_LIMIT_MAX) {
+        logger.warn('[/employer/payment-request] Rate limit exceeded', { workerId: req.user.userId, employerId });
+        res.status(429).json({ error: t('error_duplicate_request', req.lang || 'en'), retryAfter: 3600 });
+        return;
+      }
+
+      // High-4 + High-2: Duplicate-pending guard — 24-hour window.
+      // Match on both field names used by legacy (targetEmployerId) and new (employerId) create paths.
+      const PR_DUPLICATE_WINDOW = 24 * 60 * 60 * 1000;
+      const prDuplicate = (db.paymentRequests || []).find(r =>
+        r.type === 'payroll_request' &&
+        (r.userId === req.user.userId || r.requesterId === req.user.userId) &&
+        (r.employerId === employerId || r.targetEmployerId === employerId) &&
+        r.amount === amountMinor &&
+        (r.currency || '').toUpperCase() === cur &&
+        r.status === 'pending' &&
+        (prNow - r.createdAt) < PR_DUPLICATE_WINDOW
+      );
+      if (prDuplicate) {
+        logger.warn('[/employer/payment-request] Duplicate pending request detected', {
+          workerId: req.user.userId, employerId, existingId: prDuplicate.id
+        });
+        res.status(409).json({
+          error: t('error_duplicate_request', req.lang || 'en'),
+          existingRequestId: prDuplicate.id
+        });
+        return;
+      }
+
+      // All checks passed — record rate-limit timestamp and create request.
+      db.paymentRequestsRateLimit[prRateLimitKey].push(prNow);
+
+      const request = {
+        id: uuidv4(),
+        walletId: userWallet.id,
+        userId: req.user.userId,
+        requesterId: req.user.userId, // High-1: align with cancel/pay auth checks
+        employerId: employerId,
+        amount: amountMinor,
+        currency: cur,
+        memo: memo || '',
+        type: 'payroll_request',
+        status: 'pending',
+        createdAt: prNow,
+        paidAt: null,
+        payrollMetadata: {
+          employerName: employer.companyName,
+          employerId: employer.id,
+          requestedByWorker: true
+        }
+      };
+
+      db.paymentRequests.push(request);
+      saveDB(db);
+
+      logger.info('Employer payment request created', {
+        requestId: request.id, employerId, userId: req.user.userId,
+        amount: request.amount, currency: cur
+      });
+
+      res.json({
+        success: true,
+        request: { id: request.id, amount: request.amount, currency: request.currency, status: request.status }
+      });
+    }).catch(err => {
+      logger.error('[/employer/payment-request] mutex error', { error: err.message });
+      if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
     });
   }
 );
@@ -8846,12 +9471,32 @@ app.post('/employer/remove-employee/:relationshipId',
     }
     
     const removed = db.employerEmployees.splice(relationshipIndex, 1)[0];
+
+    // High-2: Auto-cancel pending payroll_request rows for this worker+employer pair.
+    // Without this, orphaned pending records permanently reduce the employer's available
+    // funding balance in the reservation sum and can never be paid (linkage check fails).
+    let cancelledCount = 0;
+    (db.paymentRequests || []).forEach(r => {
+      if (
+        r.status === 'pending' &&
+        r.type === 'payroll_request' &&
+        (r.userId === removed.workerId || r.requesterId === removed.workerId) &&
+        (r.employerId === employer.id || r.targetEmployerId === employer.id)
+      ) {
+        r.status = 'cancelled';
+        r.cancelledAt = Date.now();
+        r.cancelReason = 'worker_removed';
+        cancelledCount++;
+      }
+    });
+
     saveDB(db);
     
     logger.info('Employee removed from employer', {
       employerId: employer.id,
       workerId: removed.workerId,
-      removedBy: req.user.userId
+      removedBy: req.user.userId,
+      pendingRequestsCancelled: cancelledCount,
     });
     
     res.json({ success: true, removed });

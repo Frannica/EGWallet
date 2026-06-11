@@ -178,6 +178,7 @@ export default function DepositScreen() {
     clientSecret: string;
     intentId: string;
     publishableKey: string | null;
+    resolvedWalletId: string;
   } | null>(null);
   const [feeInfo, setFeeInfo] = useState<{
     depositCount: number;
@@ -314,6 +315,10 @@ export default function DepositScreen() {
   async function handleDeposit() {
     if (loading) return;
     if (!auth.token) return;
+    if (!walletId) {
+      Alert.alert(t('common.error'), t('deposit.walletNotLoaded') || 'Wallet not loaded. Please wait and try again.');
+      return;
+    }
     if (__DEV__) console.log('[Deposit] button pressed');
     const numAmount = parsedAmount();
     if (numAmount < 1) {
@@ -322,8 +327,6 @@ export default function DepositScreen() {
     }
     // Convert major units (what user types) → minor units (what backend/wallet stores)
     const amountMinor = majorToMinor(numAmount, currency);
-    // Use 'demo' as wallet ID if none found — backend will handle or local fallback will kick in
-    const effectiveWalletId = walletId || 'demo';
 
     setLoading(true);
     try {
@@ -331,7 +334,7 @@ export default function DepositScreen() {
       const res = await fetch(`${API_BASE}/deposits/create-intent`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ amount: amountMinor, currency, walletId: effectiveWalletId }),
+        body: JSON.stringify({ amount: amountMinor, currency, walletId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || data.message || 'Create intent failed');
@@ -339,14 +342,15 @@ export default function DepositScreen() {
       setMode(data.mode);
 
       if (data.mode === 'demo') {
-        // Demo mode: confirm immediately
-        await confirmDeposit(data.intentId, effectiveWalletId);
+        // Demo mode: confirm immediately using the wallet ID resolved by the backend
+        await confirmDeposit(data.intentId, data.resolvedWalletId || walletId);
       } else {
         // Stripe mode: store intent so the PaymentSheet component can render
         setStripeIntent({
           clientSecret: data.clientSecret,
           intentId: data.intentId,
           publishableKey: data.publishableKey,
+          resolvedWalletId: data.resolvedWalletId || walletId,
         });
       }
     } catch (e: any) {
@@ -371,8 +375,9 @@ export default function DepositScreen() {
     }
   }
 
-  async function confirmDeposit(intentId: string, effectiveWalletId?: string) {
-    const wid = effectiveWalletId || walletId || 'demo';
+  async function confirmDeposit(intentId: string, resolvedWalletId: string) {
+    const wid = resolvedWalletId;
+    if (!wid) throw new Error('confirmDeposit called without a resolved wallet ID');
     const res = await fetch(`${API_BASE}/deposits/confirm`, {
       method: 'POST',
       headers,
@@ -412,15 +417,38 @@ export default function DepositScreen() {
 
   async function handleStripeSuccess() {
     if (!stripeIntent) return;
+    // Capture before any async work so the catch closure never sees a stale value.
+    const { intentId, resolvedWalletId } = stripeIntent;
     setLoading(true);
     try {
-      await confirmDeposit(stripeIntent.intentId);
+      await confirmDeposit(intentId, resolvedWalletId);
     } catch (e: any) {
-      // Backend unavailable — show pending confirmation
+      // Confirm failed (network / server error after card charged).
+      // Offer a retry that re-calls /deposits/confirm with the same intentId —
+      // the server's stripeIntentId idempotency guard prevents double-credit.
+      // The payment_intent.succeeded webhook provides a second automatic fallback.
       Alert.alert(
         t('deposit.depositSubmitted'),
-        'Your payment is being processed. Funds will appear in your wallet shortly.',
-        [{ text: 'Done', onPress: () => (navigation as any).goBack() }]
+        'Your payment was received. Tap Retry to credit your wallet now, or funds will appear automatically.',
+        [
+          { text: 'Done', style: 'cancel', onPress: () => (navigation as any).goBack() },
+          {
+            text: 'Retry',
+            onPress: async () => {
+              setLoading(true);
+              try {
+                await confirmDeposit(intentId, resolvedWalletId);
+              } catch {
+                Alert.alert(
+                  t('common.error'),
+                  'Retry failed. Funds will appear in your wallet automatically within 24 hours.',
+                );
+              } finally {
+                setLoading(false);
+              }
+            },
+          },
+        ]
       );
     } finally {
       setLoading(false);
@@ -833,9 +861,9 @@ export default function DepositScreen() {
         {!stripeIntent ? (
           <Animated.View style={[styles.buttonWrapper, { transform: [{ scale: buttonScale }] }]}>
             <TouchableOpacity
-              style={[styles.primaryButtonOuter, (loading || numAmount < 100) && styles.buttonDisabled]}
+              style={[styles.primaryButtonOuter, (loading || numAmount < 100 || !walletId) && styles.buttonDisabled]}
               onPress={() => { animatePress(); setShowPaymentMethodModal(true); }}
-              disabled={loading || numAmount < 100}
+              disabled={loading || numAmount < 100 || !walletId}
               activeOpacity={1}
             >
               <LinearGradient
