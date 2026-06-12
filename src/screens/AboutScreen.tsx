@@ -33,7 +33,7 @@ export default function AboutScreen() {
   };
 
   const handleSupport = () => {
-    const email = 'SUPPORT@EGWALLETFINANCE.COM';
+    const email = 'support@egwalletfinance.com';
     Linking.openURL(`mailto:${email}`);
   };
 

@@ -84,7 +84,7 @@ export default function HelpCenterScreen() {
     : FAQS;
 
   const handleContactSupport = () => {
-    Linking.openURL('mailto:SUPPORT@EGWALLETFINANCE.COM?subject=Help Request');
+    Linking.openURL('mailto:support@egwalletfinance.com?subject=Help Request');
   };
 
   return (

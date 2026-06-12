@@ -158,15 +158,15 @@ export default function AppNavigator() {
               <Stack.Screen name="TrustedDevices" component={TrustedDevicesScreen} options={{ title: t('screen.trustedDevices') }} />
               <Stack.Screen name="KYCVerification" component={KYCVerificationScreen} options={{ title: t('screen.kyc') }} />
               <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: t('screen.aiAssistant') }} />
-              <Stack.Screen name="DisputeTransaction" component={DisputeTransactionScreen} options={{ title: 'Dispute Transaction' }} />
-              <Stack.Screen name="QRPayment" component={QRPaymentScreen} options={{ title: 'QR Payment' }} />
+              <Stack.Screen name="DisputeTransaction" component={DisputeTransactionScreen} options={{ title: t('dispute.title') }} />
+              <Stack.Screen name="QRPayment" component={QRPaymentScreen} options={{ title: t('qrScan.title') }} />
               <Stack.Screen name="EmployerDashboard" component={EmployerDashboardScreen} options={{ title: t('screen.employerDashboard') }} />
               <Stack.Screen name="Send" component={SendScreen} options={{ title: t('screen.sendMoney') }} />
               <Stack.Screen name="Request" component={RequestScreen} options={{ title: t('screen.requestMoney') }} />
               <Stack.Screen name="Deposit" component={DepositScreen} options={{ title: t('screen.addMoney') }} />
               <Stack.Screen name="Receipt" component={ReceiptScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: t('screen.notifications') }} />
-              <Stack.Screen name="PayRequest" component={PayRequestScreen} options={{ title: 'Pay Request' }} />
+              <Stack.Screen name="PayRequest" component={PayRequestScreen} options={{ title: t('payRequest.paymentRequest') }} />
               <Stack.Screen name="QRScanner" component={QRScannerScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Exchange" component={ExchangeScreen} options={{ title: t('exchange.screenTitle') }} />
             </>

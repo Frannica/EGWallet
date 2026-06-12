@@ -40,13 +40,13 @@ const ALL_EXCHANGE_CURRENCIES = Object.keys(CURRENCY_INFO).sort((a, b) => {
   return a.localeCompare(b);
 });
 
-function rateAgeText(ts: number): string {
+function rateAgeText(ts: number, t: (key: string) => string): string {
   const mins = Math.floor((Date.now() - ts) / 60000);
-  if (mins < 2) return '< 1 min ago';
-  if (mins < 60) return `${mins} min ago`;
+  if (mins < 2) return t('common.justNow');
+  if (mins < 60) return t('common.minsAgo').replace('{{n}}', String(mins));
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
+  if (hrs < 24) return t('common.hoursAgo').replace('{{n}}', String(hrs));
+  return t('common.daysAgo').replace('{{n}}', String(Math.floor(hrs / 24)));
 }
 
 type Balance = { currency: string; amount: number };
@@ -98,9 +98,9 @@ export default function ExchangeScreen({ route, navigation }: any) {
     setQuoteError(null);
     fetchFxQuote(auth.token, fromCurrency, toCurrency, amountMinor)
       .then(q => { setQuote(q); setQuoteError(null); })
-      .catch((err: any) => { setQuote(null); setQuoteError(err.message || 'Could not get exchange rate'); })
+      .catch((err: any) => { setQuote(null); setQuoteError(err.message || t('exchange.rateError')); })
       .finally(() => setQuoteLoading(false));
-  }, [auth.token, fromCurrency, toCurrency, amountStr]);
+  }, [auth.token, fromCurrency, toCurrency, amountStr, t]);
 
   useEffect(() => {
     if (quoteTimer.current) clearTimeout(quoteTimer.current);
@@ -153,7 +153,7 @@ export default function ExchangeScreen({ route, navigation }: any) {
         { text: t('common.ok'), onPress: () => navigation.goBack() },
       ]);
     } catch (err: any) {
-      Alert.alert(t('common.error'), err.message || t('common.error'));
+      Alert.alert(t('common.error'), /network|fetch|connection/i.test(err.message || '') ? t('common.networkError') : (err.message || t('common.networkError')));
     } finally {
       setSubmitting(false);
     }
@@ -179,7 +179,7 @@ export default function ExchangeScreen({ route, navigation }: any) {
           onPress={() => setShowFromPicker(true)}
           activeOpacity={0.75}
         >
-          <Text style={styles.currencyText}>{fromCurrency || '—'}</Text>
+          <Text style={styles.currencyText}>{fromCurrency || '-'}</Text>
           <Ionicons name="chevron-down" size={18} color="#555" />
         </TouchableOpacity>
         {fromBal && (
@@ -219,12 +219,12 @@ export default function ExchangeScreen({ route, navigation }: any) {
           onPress={() => setShowToPicker(true)}
           activeOpacity={0.75}
         >
-          <Text style={styles.currencyText}>{toCurrency || '—'}</Text>
+          <Text style={styles.currencyText}>{toCurrency || '-'}</Text>
           <Ionicons name="chevron-down" size={18} color="#555" />
         </TouchableOpacity>
         {quote && !quoteLoading && (
           <Text style={styles.netReceiveText}>
-            ≈ {formatMinorAmount(netReceive, toCurrency)} {toCurrency}
+            ~ {formatMinorAmount(netReceive, toCurrency)} {toCurrency}
           </Text>
         )}
         {quoteLoading && (
@@ -254,7 +254,7 @@ export default function ExchangeScreen({ route, navigation }: any) {
           />
           {quote.ratesUpdatedAt ? (
             <Text style={styles.rateAge}>
-              {t('exchange.ratesUpdatedAt')}: {rateAgeText(quote.ratesUpdatedAt)}
+              {t('exchange.ratesUpdatedAt')}: {rateAgeText(quote.ratesUpdatedAt, t)}
             </Text>
           ) : null}
           {quote.ratesStale ? (
@@ -347,6 +347,7 @@ function CurrencyPickerModal({
   onSelect: (c: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useLanguage();
   const [search, setSearch] = useState('');
 
   useEffect(() => { if (!visible) setSearch(''); }, [visible]);
@@ -367,7 +368,7 @@ function CurrencyPickerModal({
             style={styles.modalSearch}
             value={search}
             onChangeText={setSearch}
-            placeholder="Search currencies..."
+            placeholder={t('exchange.searchPlaceholder')}
             placeholderTextColor="#9BAEC8"
             autoCorrect={false}
             autoCapitalize="characters"
@@ -378,7 +379,7 @@ function CurrencyPickerModal({
             keyboardShouldPersistTaps="handled"
             style={{ flex: 1 }}
             ListEmptyComponent={
-              <Text style={styles.pickerEmpty}>No currencies found</Text>
+              <Text style={styles.pickerEmpty}>{t('exchange.noCurrencies')}</Text>
             }
             renderItem={({ item }) => (
               <TouchableOpacity

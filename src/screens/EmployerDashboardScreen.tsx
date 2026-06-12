@@ -294,12 +294,12 @@ export default function EmployerDashboardScreen() {
     }
     const preview = employees
       .filter(e => e.status === 'active')
-      .map(e => `• ${e.workerEmail}: ${payrollAmount} ${payrollCurrency}`)
+      .map(e => `- ${e.workerEmail}: ${payrollAmount} ${payrollCurrency}`)
       .join('\n');
     Alert.alert(
       t('employer.payrollLoaded'),
       `${readyCount} employee(s) ready for payment:\n\n${preview}\n\nPress "Run Payroll" to execute.`,
-      [{ text: 'OK' }]
+      [{ text: t('common.confirm') }]
     );
   }
 
@@ -335,7 +335,7 @@ export default function EmployerDashboardScreen() {
       t('employer.confirmPayroll'),
       `Pay ${readyEmployees.length} employee(s)?\n\nAmount: ${amount.toLocaleString()} ${payrollCurrency} each\nTotal: ${total.toLocaleString()} ${payrollCurrency}`,
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
           text: t('employer.runPayrollBtn'),
           onPress: async () => {

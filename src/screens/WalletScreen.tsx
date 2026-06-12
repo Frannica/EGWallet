@@ -43,7 +43,7 @@ export default function WalletScreen() {
       const r = await fetchRates();
       setRates(r);
     } catch (e) {
-      if (__DEV__) console.warn('Failed to load rates � using demo rates', e);
+      if (__DEV__) console.warn('Failed to load rates - using demo rates', e);
       setRates(DEMO_RATES); // Always show balance even offline
     }
   }
@@ -206,7 +206,7 @@ export default function WalletScreen() {
             </Text>
           )}
           {rates && (
-            <Text style={styles.balanceEquiv}>� {formatCurrency(calculateTotalBalance(), 'USD')}</Text>
+            <Text style={styles.balanceEquiv}>~ {formatCurrency(calculateTotalBalance(), 'USD')}</Text>
           )}
           <TouchableOpacity
             onPress={() => setShowCurrencyPicker(!showCurrencyPicker)}
@@ -293,7 +293,7 @@ export default function WalletScreen() {
                   <Text style={styles.currencyAmount}>{formatCurrency(b.amount, b.currency)}</Text>
                   {rates && b.currency !== 'USD' && (
                     <Text style={styles.currencyConverted}>
-                      ≈ {formatCurrency(convert(b.amount, b.currency, 'USD', rates), 'USD')}
+                      ~ {formatCurrency(convert(b.amount, b.currency, 'USD', rates), 'USD')}
                     </Text>
                   )}
                 </View>

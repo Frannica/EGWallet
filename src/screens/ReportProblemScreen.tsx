@@ -65,7 +65,7 @@ export default function ReportProblemScreen() {
         ticketId
           ? t('report.submittedWithTicket')
           : t('report.submittedNoTicket'),
-        [{ text: 'OK', onPress: () => { setTitle(''); setDescription(''); setCategory('bug'); } }]
+        [{ text: t('common.confirm'), onPress: () => { setTitle(''); setDescription(''); setCategory('bug'); } }]
       );
 
     } catch (error: any) {

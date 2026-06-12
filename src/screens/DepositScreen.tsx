@@ -235,7 +235,7 @@ export default function DepositScreen() {
         Alert.alert(t('send.missingInfo'), t('deposit.missingBankFields'));
         return;
       }
-      const last4 = bankAccountNum.slice(-4).padStart(4, '\u2022');
+      const last4 = bankAccountNum.slice(-4).padStart(4, '*');
       const method: DepositPaymentMethod = { id: Date.now().toString(), type: 'bank', label: 'Bank Account', last4 };
       setSavedPaymentMethods(prev => [...prev, method]);
       setSelectedPaymentMethod(method);
@@ -316,7 +316,7 @@ export default function DepositScreen() {
     if (loading) return;
     if (!auth.token) return;
     if (!walletId) {
-      Alert.alert(t('common.error'), t('deposit.walletNotLoaded') || 'Wallet not loaded. Please wait and try again.');
+      Alert.alert(t('common.error'), t('deposit.walletNotLoaded'));
       return;
     }
     if (__DEV__) console.log('[Deposit] button pressed');
@@ -366,7 +366,7 @@ export default function DepositScreen() {
       } else {
         // Backend unavailable — show a clear error instead of silently crediting funds
         Alert.alert(
-          'Service Unavailable',
+          t('common.error'),
           t('deposit.serviceUnavailable'),
         );
       }
@@ -429,11 +429,11 @@ export default function DepositScreen() {
       // The payment_intent.succeeded webhook provides a second automatic fallback.
       Alert.alert(
         t('deposit.depositSubmitted'),
-        'Your payment was received. Tap Retry to credit your wallet now, or funds will appear automatically.',
+        t('deposit.paymentReceived'),
         [
-          { text: 'Done', style: 'cancel', onPress: () => (navigation as any).goBack() },
+          { text: t('common.done'), style: 'cancel', onPress: () => (navigation as any).goBack() },
           {
-            text: 'Retry',
+            text: t('common.retry'),
             onPress: async () => {
               setLoading(true);
               try {
@@ -441,7 +441,7 @@ export default function DepositScreen() {
               } catch {
                 Alert.alert(
                   t('common.error'),
-                  'Retry failed. Funds will appear in your wallet automatically within 24 hours.',
+                  t('deposit.retryFailed'),
                 );
               } finally {
                 setLoading(false);
@@ -491,7 +491,7 @@ export default function DepositScreen() {
                     <View style={pmStyles.selectedBanner}>
                       <Ionicons name={pmIcon(selectedPaymentMethod.type) as any} size={18} color={pmColor(selectedPaymentMethod.type)} />
                       <Text style={pmStyles.selectedText}>
-                        {selectedPaymentMethod.label} \u2022\u2022\u2022\u2022 {selectedPaymentMethod.last4} {t('deposit.selectedSuffix')}
+                        {selectedPaymentMethod.label} **** {selectedPaymentMethod.last4} {t('deposit.selectedSuffix')}
                       </Text>
                     </View>
                   )}
@@ -515,7 +515,7 @@ export default function DepositScreen() {
                           </View>
                           <View style={{ flex: 1 }}>
                             <Text style={pmStyles.optionLabel}>{m.label}</Text>
-                            <Text style={pmStyles.optionSub}>\u2022\u2022\u2022\u2022 {m.last4}</Text>
+                            <Text style={pmStyles.optionSub}>**** {m.last4}</Text>
                           </View>
                           <Ionicons name="chevron-forward" size={18} color="#9BAAB8" />
                         </TouchableOpacity>
@@ -885,7 +885,7 @@ export default function DepositScreen() {
                       <>
                         <Ionicons name="card" size={20} color="#fff" />
                         <Text style={styles.primaryButtonText}>
-                          {`${t('deposit.depositAction')} ${numAmount > 0 ? numAmount.toLocaleString() : '—'} ${currency}`}
+                          {`${t('deposit.depositAction')} ${numAmount > 0 ? numAmount.toLocaleString() : '-'} ${currency}`}
                         </Text>
                       </>
                     )
@@ -901,7 +901,7 @@ export default function DepositScreen() {
                   publishableKey={stripeIntent.publishableKey}
                   clientSecret={stripeIntent.clientSecret}
                   onSuccess={handleStripeSuccess}
-                  onError={msg => Alert.alert(t('common.error'), msg)}
+                  onError={msg => Alert.alert(t('common.error'), /network|fetch|connection/i.test(msg || '') ? t('common.networkError') : msg)}
                 />
               </StripeProvider>
             )

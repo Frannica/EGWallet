@@ -137,9 +137,11 @@ export default function BudgetScreen() {
 
     Alert.alert(
       t('budget.createBudgetTitle'),
-      `Set monthly budget limit to ${getCurrencySymbol(currency)}${formatMajorAmount(amountValue, currency)} ${currency}?`,
+      t('budget.setLimitMsg')
+        .replace('{{amount}}', `${getCurrencySymbol(currency)}${formatMajorAmount(amountValue, currency)}`)
+        .replace('{{currency}}', currency),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
           text: t('budget.createAction'),
           onPress: async () => {
@@ -181,9 +183,9 @@ export default function BudgetScreen() {
 
   const handleDelete = async (budgetId: string) => {
     Alert.alert(t('budget.deleteBudget'), t('common.areYouSure'), [
-      { text: 'Cancel', style: 'cancel' },
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Delete', style: 'destructive', onPress: async () => {
+        text: t('common.delete'), style: 'destructive', onPress: async () => {
           try {
             setLoading(true);
             await deleteBudget(auth.token!, budgetId);

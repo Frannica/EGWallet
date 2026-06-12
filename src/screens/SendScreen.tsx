@@ -268,7 +268,7 @@ export default function SendScreen() {
         Alert.alert(t('send.missingInfo'), t('send.pleaseFillFields'));
         return;
       }
-      const last4 = bankAccountNum.slice(-4).padStart(4, '•');
+      const last4 = bankAccountNum.slice(-4).padStart(4, '*');
       const method: PaymentMethod = {
         id: Date.now().toString(),
         type: 'bank',
@@ -343,7 +343,8 @@ export default function SendScreen() {
         status: 'completed',
       });
     } catch (e: any) {
-      Alert.alert(t('send.transactionFailed'), e?.message || t('send.backendUnavailable'));
+      const _m = e?.message || '';
+      Alert.alert(t('send.transactionFailed'), /network|fetch|connection/i.test(_m) ? t('common.networkError') : (_m || t('send.backendUnavailable')));
     } finally {
       setLoading(false);
     }
@@ -458,7 +459,8 @@ export default function SendScreen() {
     } catch (e: any) {
       // Release the pending lock on failure so user can retry
       await clearPendingWithdrawal(currency, amountMinor);
-      Alert.alert(t('send.transactionFailed'), e?.message || t('send.backendUnavailable'));
+      const _m = e?.message || '';
+      Alert.alert(t('send.transactionFailed'), /network|fetch|connection/i.test(_m) ? t('common.networkError') : (_m || t('send.backendUnavailable')));
       return;
     } finally {
       setLoading(false);
@@ -573,7 +575,8 @@ export default function SendScreen() {
       });
       setToWalletId('');
     } catch (e: any) {
-      Alert.alert(t('send.transactionFailed'), e?.message || t('send.backendUnavailable'));
+      const _m = e?.message || '';
+      Alert.alert(t('send.transactionFailed'), /network|fetch|connection/i.test(_m) ? t('common.networkError') : (_m || t('send.backendUnavailable')));
       return;
     } finally {
       setLoading(false);
@@ -647,7 +650,7 @@ export default function SendScreen() {
                           </View>
                           <View style={{ flex: 1 }}>
                             <Text style={styles.pmLabel}>{method.label}</Text>
-                            <Text style={styles.pmSub}>•••• {method.last4}</Text>
+                            <Text style={styles.pmSub}>**** {method.last4}</Text>
                           </View>
                           <Ionicons name="chevron-forward" size={18} color="#9BAAB8" />
                         </TouchableOpacity>
@@ -873,7 +876,7 @@ export default function SendScreen() {
               <View style={styles.pmBadge}>
                 <Ionicons name={getPaymentMethodIcon(selectedPaymentMethod.type) as any} size={14} color="#1565C0" />
                 <Text style={styles.pmBadgeText}>
-                  {t('send.payingFrom')}: {selectedPaymentMethod.label} •••• {selectedPaymentMethod.last4}
+                  {t('send.payingFrom')}: {selectedPaymentMethod.label} **** {selectedPaymentMethod.last4}
                 </Text>
               </View>
             )}
@@ -893,7 +896,7 @@ export default function SendScreen() {
               <>
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLabel}>{t('card.number')}</Text>
-                  <Text style={styles.summaryValue}>•••• •••• •••• {withdrawalCardNumber.replace(/\s/g, '').slice(-4)}</Text>
+                  <Text style={styles.summaryValue}>**** **** **** {withdrawalCardNumber.replace(/\s/g, '').slice(-4)}</Text>
                 </View>
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLabel}>{t('card.expiry')}</Text>

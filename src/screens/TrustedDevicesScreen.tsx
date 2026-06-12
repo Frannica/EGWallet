@@ -80,11 +80,11 @@ export default function TrustedDevicesScreen() {
   async function handleRemoveDevice(device: Device) {
     Alert.alert(
       t('trusted.removeTitle'),
-      `Are you sure you want to remove "${device.name}"? You will need to verify this device again next time you sign in from it.`,
+      t('trusted.removeMessage').replace('{{name}}', device.name),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Remove',
+          text: t('trusted.remove'),
           style: 'destructive',
           onPress: async () => {
             try {

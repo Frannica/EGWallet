@@ -64,7 +64,7 @@ export default function ResetPasswordScreen() {
       }
 
       Alert.alert(t('auth.resetSuccess'), t('auth.resetSuccessMsg'), [
-        { text: 'OK', onPress: () => navigation.navigate('Auth') },
+        { text: t('common.confirm'), onPress: () => navigation.navigate('Auth') },
       ]);
     } catch (_err) {
       Alert.alert(t('common.error'), t('auth.checkCredentials'));

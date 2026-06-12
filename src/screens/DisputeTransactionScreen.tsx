@@ -6,7 +6,8 @@ import { API_BASE } from '../api/client';
 import { formatCurrency } from '../utils/currency';
 import { useLanguage } from '../i18n/LanguageContext';
 
-const SUPPORT_EMAIL = 'SUPPORT@EGWALLETFINANCE.COM';
+const SUPPORT_EMAIL = 'support@egwalletfinance.com';
+const ALT_SUPPORT_EMAIL = 'egwallet.business@gmail.com';
 
 type DisputeReason = 'unauthorized' | 'wrong_amount' | 'not_received' | 'duplicate' | 'other';
 
@@ -112,7 +113,7 @@ export default function DisputeTransactionScreen() {
 
     if (!auth.token) {
       setSubmitting(false);
-      Alert.alert(t('common.error'), 'Please sign in to submit a dispute.');
+      Alert.alert(t('common.error'), t('common.notAuthenticated'));
       return;
     }
 
@@ -146,7 +147,7 @@ export default function DisputeTransactionScreen() {
 
     // Always open the device mail client so the dispute lands in the support inbox
     // regardless of backend availability.
-    const emailSubject = encodeURIComponent(`[${finalTicket}] Dispute: ${reasonLabel} — Tx ${selectedTransaction.id}`);
+    const emailSubject = encodeURIComponent(`[${finalTicket}] Dispute: ${reasonLabel} - Tx ${selectedTransaction.id}`);
     const emailBody = encodeURIComponent(
       `Ticket: ${finalTicket}\n` +
       `User: ${auth.user?.email ?? 'unknown'}\n` +
@@ -161,7 +162,7 @@ export default function DisputeTransactionScreen() {
 
     Alert.alert(
       t('dispute.submittedTitle'),
-      `Ticket ${finalTicket} created.\n\nYour mail app will open so you can send this dispute directly to ${SUPPORT_EMAIL}. Our team responds within 2–3 business days.`,
+      `Ticket ${finalTicket} created.\n\nYour mail app will open so you can send this dispute directly to ${SUPPORT_EMAIL}. Alternative: ${ALT_SUPPORT_EMAIL}. Our team responds within 2-3 business days.`,
       [
         {
           text: t('dispute.sendEmailButton'),

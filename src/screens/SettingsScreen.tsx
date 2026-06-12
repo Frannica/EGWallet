@@ -99,9 +99,9 @@ export default function SettingsScreen() {
   const handleSignOut = async () => {
     if (__DEV__) console.log('[Settings] Sign Out pressed');
     Alert.alert(t('settings.signOut'), t('settings.signOutConfirm'), [
-      { text: 'Cancel', style: 'cancel' },
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Sign Out',
+        text: t('settings.signOut'),
         style: 'destructive',
         onPress: async () => {
           await auth.signOut();
@@ -116,9 +116,9 @@ export default function SettingsScreen() {
       t('settings.deleteAccount'),
       t('settings.deleteAccountConfirmFull'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common.delete'),
           style: 'destructive',
           onPress: () => {
             Alert.alert(
@@ -150,7 +150,7 @@ export default function SettingsScreen() {
       `App Version: 1.1.0\n` +
       `Timestamp: ${new Date().toISOString()}\n`
     );
-    Linking.openURL(`mailto:SUPPORT@EGWALLETFINANCE.COM?subject=${subject}&body=${body}`);
+    Linking.openURL(`mailto:support@egwalletfinance.com?subject=${subject}&body=${body}`);
     setBugDescription('');
     setShowBugModal(false);
   };
@@ -563,6 +563,12 @@ export default function SettingsScreen() {
             <Ionicons name="mail" size={20} color="#657786" />
             <Text style={styles.supportText}>
               {t('settings.emailLabel')} <Text style={styles.supportEmail}>support@egwalletfinance.com</Text>
+            </Text>
+          </View>
+          <View style={styles.supportContent}>
+            <Ionicons name="mail-outline" size={20} color="#657786" />
+            <Text style={styles.supportText}>
+              {t('settings.emailLabel')} <Text style={styles.supportEmail}>egwallet.business@gmail.com</Text>
             </Text>
           </View>
         </View>

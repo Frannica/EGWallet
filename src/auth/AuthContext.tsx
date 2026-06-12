@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { Alert } from 'react-native';
+import { useLanguage } from '../i18n/LanguageContext';
 import { login as apiLogin, register as apiRegister, me as apiMe, listWallets } from '../api/auth';
 import { API_BASE } from '../api/client';
 import { getDeviceFingerprint, getDeviceDisplayName, getDeviceType } from '../utils/deviceInfo';
@@ -50,6 +51,7 @@ export function useAuth() {
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { t: tl } = useLanguage();
   const [user, setUser] = useState<{ id: string; email: string; preferredCurrency?: string; autoConvertIncoming?: boolean; region?: string } | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -142,12 +144,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Check if this is a new device
       if (res.newDevice) {
         Alert.alert(
-          'New Device Detected',
-          `This is the first time you're signing in from "${res.deviceName || 'this device'}". If this wasn't you, please change your password immediately.`,
+          tl('auth.newDeviceTitle'),
+          tl('auth.newDeviceMsg').replace('{{device}}', res.deviceName || 'this device'),
           [
-            { text: 'I Trust This Device', style: 'default' },
-            { text: 'Review Security', style: 'cancel', onPress: () => {
-              Alert.alert('Security Tips', 'Go to Settings > Privacy & Security to review your trusted devices and enable biometric authentication.');
+            { text: tl('auth.trustDevice'), style: 'default' },
+            { text: tl('auth.reviewSecurity'), style: 'cancel', onPress: () => {
+              Alert.alert(tl('auth.securityTipsTitle'), tl('auth.securityTipsMsg'));
             }}
           ]
         );

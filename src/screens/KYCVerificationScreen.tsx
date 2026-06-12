@@ -171,7 +171,7 @@ export default function KYCVerificationScreen() {
         setKycStatus('under_review');
         Alert.alert(t('kyc.documentCaptured'), t('kyc.documentCapturedMsg'));
       } else {
-        Alert.alert(t('kyc.uploadFailed'), error.message ?? t('common.networkError'));
+        Alert.alert(t('kyc.uploadFailed'), /network|fetch|connection/i.test(error.message || '') ? t('common.networkError') : (error.message ?? t('common.networkError')));
       }
     } finally {
       setUploading(false);
@@ -183,7 +183,7 @@ export default function KYCVerificationScreen() {
       getDocumentTypeLabel(type),
       getDocumentInstructions(type, t),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         { text: t('kyc.takePhoto'), onPress: () => pickAndUpload(type, 'camera') },
         { text: t('kyc.chooseFromGallery'), onPress: () => pickAndUpload(type, 'gallery') },
       ]
@@ -222,10 +222,10 @@ export default function KYCVerificationScreen() {
 
   function getDocumentTypeLabel(type: KYCDocument['type']): string {
     switch (type) {
-      case 'id_card': return 'National ID Card';
-      case 'passport': return 'Passport';
-      case 'drivers_license': return 'Driver\'s License';
-      case 'proof_of_address': return 'Proof of Address';
+      case 'id_card': return t('kyc.idCard');
+      case 'passport': return t('kyc.passport');
+      case 'drivers_license': return t('kyc.driversLicense');
+      case 'proof_of_address': return t('kyc.proofOfAddress');
     }
   }
 

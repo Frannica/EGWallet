@@ -197,7 +197,7 @@ export default function QRScannerScreen() {
       );
     } catch (err: any) {
       setPaying(false);
-      Alert.alert(t('common.error'), err.message ?? t('qrScan.somethingWentWrong'));
+      Alert.alert(t('common.error'), /network|fetch|connection/i.test(err.message || '') ? t('common.networkError') : (err.message ?? t('qrScan.somethingWentWrong')));
     }
   };
 

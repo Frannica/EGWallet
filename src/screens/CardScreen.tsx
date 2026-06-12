@@ -106,7 +106,7 @@ export default function CardScreen() {
       t('card.createVirtualCardTitle'),
       t('card.createVirtualCardMsg'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
           text: t('card.createAction'),
           onPress: async () => {
@@ -120,7 +120,7 @@ export default function CardScreen() {
               toast.show(t('card.cardCreated'));
               loadCards();
             } catch (error: any) {
-              // Backend unavailable � create a local demo card so the screen never shows failure
+              // Backend unavailable - create a local demo card so the screen never shows failure
               const now = new Date();
               const demoCard: VirtualCard = {
                 id: `card-${Date.now()}`,
@@ -146,15 +146,15 @@ export default function CardScreen() {
 
   const handleToggleFreeze = async (cardId: string) => {
     const card = cards.find(c => c.id === cardId);
-    const action = card?.status === 'active' ? 'Freeze' : 'Unfreeze';
+    const isFreezing = card?.status === 'active';
 
     Alert.alert(
-      `${action} Card`,
-      card?.status === 'active' ? t('card.freezeConfirmMsg') : t('card.unfreezeConfirmMsg'),
+      isFreezing ? t('card.freeze') : t('card.unfreeze'),
+      isFreezing ? t('card.freezeConfirmMsg') : t('card.unfreezeConfirmMsg'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: action,
+          text: isFreezing ? t('card.freeze') : t('card.unfreeze'),
           onPress: async () => {
             try {
               if (!auth.token) return;
@@ -179,9 +179,9 @@ export default function CardScreen() {
 
   const handleDelete = async (cardId: string) => {
     Alert.alert(t('card.deleteCard'), t('common.areYouSure'), [
-      { text: 'Cancel', style: 'cancel' },
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Delete', style: 'destructive', onPress: async () => {
+        text: t('common.delete'), style: 'destructive', onPress: async () => {
           try {
             if (!auth.token) return;
             setLoading(true);
@@ -200,7 +200,7 @@ export default function CardScreen() {
   };
 
   const maskCardNumber = (number: string) => {
-    return `���� ���� ���� ${number.slice(-4)}`;
+    return `**** **** **** ${number.slice(-4)}`;
   };
 
   if (selectedCard) {
@@ -233,8 +233,8 @@ export default function CardScreen() {
                 <Text style={styles.cardValue}>{selectedCard.expiryMonth}/{selectedCard.expiryYear}</Text>
               </View>
               <View>
-                <Text style={styles.cardLabel}>CVV</Text>
-                <Text style={styles.cardValue}>���</Text>
+                <Text style={styles.cardLabel}>{t('card.cvv').toUpperCase()}</Text>
+                <Text style={styles.cardValue}>***</Text>
               </View>
               <View style={styles.visaBadge}>
                 <Text style={styles.visaText}>VISA</Text>
@@ -250,7 +250,7 @@ export default function CardScreen() {
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>{t('card.cvv')}</Text>
-            <Text style={styles.infoValue}>{'���'}</Text>
+            <Text style={styles.infoValue}>{'***'}</Text>
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>{t('card.expiry')}</Text>

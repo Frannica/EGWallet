@@ -2,7 +2,7 @@ export default ({ config }) => ({
   ...config,
   name: "EGWallet",
   slug: "EGWalletSimple",
-  version: "1.1.0",
+  version: "1.2.0",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "light",
@@ -23,7 +23,7 @@ export default ({ config }) => ({
     },
     edgeToEdgeEnabled: true,
     package: "com.francisco1953.egwalletmobile",
-    versionCode: 61
+    versionCode: 67
   },
   web: {
     favicon: "./assets/favicon.png"
@@ -39,6 +39,19 @@ export default ({ config }) => ({
   owner: "francisco1953",
   plugins: [
     "expo-notifications",
+    [
+      "expo-camera",
+      {
+        "cameraPermission": "Allow EGWallet to use your camera to scan QR codes for payments."
+      }
+    ],
+    [
+      "expo-image-picker",
+      {
+        "photosPermission": "Allow EGWallet to access your photos to upload KYC identity documents.",
+        "cameraPermission": "Allow EGWallet to use your camera to photograph your identity documents for verification."
+      }
+    ],
     ["@sentry/react-native/expo", {
       "organization": process.env.SENTRY_ORG || "egwallet-hu",
       "project": process.env.SENTRY_PROJECT || "react-native",

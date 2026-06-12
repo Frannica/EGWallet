@@ -66,7 +66,7 @@ export default function PayRequestScreen({ route, navigation }: any) {
       .then(data => {
         if (data.error) {
           setError(data.error === 'Request not found'
-            ? 'This payment request no longer exists or has expired.'
+            ? t('payRequest.notFound')
             : data.error);
         } else {
           setRequest(data.request);
@@ -144,7 +144,7 @@ export default function PayRequestScreen({ route, navigation }: any) {
         body: JSON.stringify({ fromWalletId: wid }),
       });
       const payData = await payRes.json();
-      if (!payRes.ok) throw new Error(payData.error || 'Payment failed');
+      if (!payRes.ok) throw new Error(payData.error || t('payRequest.paymentFailed'));
 
       setRequest(prev => prev ? { ...prev, status: 'paid' } : prev);
 
@@ -201,7 +201,7 @@ export default function PayRequestScreen({ route, navigation }: any) {
     return (
       <View style={styles.center}>
         <Ionicons name="alert-circle-outline" size={52} color="#E53935" />
-        <Text style={styles.errorText}>{error || 'Request not found.'}</Text>
+        <Text style={styles.errorText}>{error || t('payRequest.notFound')}</Text>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Text style={styles.backBtnText}>{t('payRequest.goBack')}</Text>
         </TouchableOpacity>
@@ -217,8 +217,12 @@ export default function PayRequestScreen({ route, navigation }: any) {
 
   // Pay button label: show sender's actual currency/amount if conversion applies
   const payBtnLabel = feePreview?.wasConverted
-    ? `Pay ${formatAmount(minorToMajor(feePreview.debitAmount, feePreview.debitCurrency), feePreview.debitCurrency)} ${feePreview.debitCurrency}`
-    : `Pay ${formatAmount(displayAmount, request.currency)} ${request.currency}`;
+    ? t('payRequest.payBtn')
+        .replace('{{amount}}', formatAmount(minorToMajor(feePreview.debitAmount, feePreview.debitCurrency), feePreview.debitCurrency))
+        .replace('{{currency}}', feePreview.debitCurrency)
+    : t('payRequest.payBtn')
+        .replace('{{amount}}', formatAmount(displayAmount, request.currency))
+        .replace('{{currency}}', request.currency);
 
   return (
     <View style={styles.container}>

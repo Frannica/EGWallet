@@ -442,7 +442,7 @@ export default function RequestScreen() {
         expiresAt: data.expiresAt,
       });
     } catch (err: any) {
-      Alert.alert(t('common.error'), err.message || t('request.invalidAmount'));
+      Alert.alert(t('common.error'), /network|fetch|connection/i.test(err.message || '') ? t('common.networkError') : (err.message || t('request.invalidAmount')));
     }
   };
 
