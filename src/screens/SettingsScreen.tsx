@@ -8,8 +8,9 @@ import { useBiometric } from '../auth/BiometricContext';
 import { useNavigation } from '@react-navigation/native';
 import { getCurrencySymbol, getCurrencyName, CURRENCY_INFO, formatCurrency, convert } from '../utils/currency';
 import { listWallets } from '../api/auth';
-import { fetchRates, DEMO_RATES, Rates, API_BASE } from '../api/client';
+import { fetchRates, DEMO_RATES, Rates, API_BASE, getApiLanguage } from '../api/client';
 import { useLanguage, SupportedLanguage } from '../i18n/LanguageContext';
+import { getApiErrorMessage } from '../utils/apiErrorMessage';
 
 // Full list ordered: popular first, then alphabetical by code
 const CURRENCIES = Object.keys(CURRENCY_INFO).sort((a, b) => {
@@ -83,16 +84,23 @@ export default function SettingsScreen() {
     try {
       const res = await fetch(`${API_BASE}/auth/username`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth.token}` },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${auth.token}`,
+          'Accept-Language': getApiLanguage(),
+        },
         body: JSON.stringify({ username: clean }),
       });
       const data = await res.json();
-      if (!res.ok) { Alert.alert(t('common.error'), data.error || t('settings.couldNotSetUsername')); return; }
+      if (!res.ok) {
+        Alert.alert(t('common.error'), getApiErrorMessage({ message: data.error, status: res.status }, t));
+        return;
+      }
       setUsername(data.username);
       setShowUsernameModal(false);
       Alert.alert(t('settings.usernameSetTitle'), `${t('settings.usernameSetMessage')} @${data.username}.`);
     } catch (e: any) {
-      Alert.alert(t('common.error'), t('common.networkError'));
+      Alert.alert(t('common.error'), getApiErrorMessage(e, t));
     }
   };
 
@@ -139,7 +147,7 @@ export default function SettingsScreen() {
   const handleBugReport = () => {
     const desc = bugDescription.trim();
     if (!desc) { Alert.alert(t('common.error'), t('settings.describeBugIssue')); return; }
-    const subject = encodeURIComponent('Bug Report — EGWallet');
+    const subject = encodeURIComponent('Bug Report - EGWallet');
     const body = encodeURIComponent(
       `${desc}\n\n` +
       `--- Device Info ---\n` +
@@ -314,7 +322,7 @@ export default function SettingsScreen() {
               <Text style={styles.wdLabel}>{t('settings.walletId')}</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Text style={styles.wdValue}>
-                  {walletInfo ? `${walletInfo.id.substring(0, 14)}...` : '—'}
+                  {walletInfo ? `${walletInfo.id.substring(0, 14)}...` : 'N/A'}
                 </Text>
                 {walletInfo && <Ionicons name="share-social-outline" size={14} color="#007AFF" />}
               </View>
@@ -331,7 +339,7 @@ export default function SettingsScreen() {
               <Text style={styles.wdValue}>
                 {walletInfo
                   ? `$${Math.round(walletInfo.usdValue / 100).toLocaleString()} / $${walletInfo.maxLimitUSD.toLocaleString()}`
-                  : `— / $250,000`}
+                  : `- / $250,000`}
               </Text>
             </View>
           </View>
@@ -738,7 +746,10 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[styles.umSaveBtn, { flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', alignItems: 'center' }]}
               onPress={() => {
-                Share.share({ message: `My EGWallet ID: ${walletInfo?.id || ''}`, title: 'EGWallet ID' });
+                Share.share({
+                  message: t('settings.shareWalletIdMessage').replace('{{id}}', walletInfo?.id || ''),
+                  title: t('settings.walletId'),
+                });
               }}
             >
               <Ionicons name="share-social" size={18} color="#fff" />

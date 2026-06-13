@@ -13,6 +13,7 @@ import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 import { getCurrencySymbol, majorToMinor, formatMajorAmount, formatCurrency, decimalsFor } from '../utils/currency';
 import { logLocalTransaction, debitLocalBalance } from '../utils/localBalance';
 import { sendTransaction, generateId } from '../api/transactions';
+import { getApiErrorMessage } from '../utils/apiErrorMessage';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import QRCode from 'react-native-qrcode-svg';
 import { useToast } from '../utils/toast';
@@ -292,7 +293,7 @@ export default function RequestScreen() {
     if (!empFirstName.trim()) return Alert.alert(t('send.missingInfo'), t('request.missingFirstName'));
     if (!empLastName.trim()) return Alert.alert(t('send.missingInfo'), t('request.missingLastName'));
     if (!empWalletHandle.trim()) {
-      return Alert.alert(t('common.error'), t('request.invalidWalletHandle') || 'Please enter a valid wallet ID or @username.');
+      return Alert.alert(t('common.error'), t('request.invalidWalletHandle'));
     }
     const emp: Employee = {
       id: uid(),
@@ -374,7 +375,7 @@ export default function RequestScreen() {
               toast.show(t('request.requestSentToast'));
               Alert.alert(t('request.sentTitle'), `${t('request.payrollSentMsg')} ${selectedEmployee.firstName} ${selectedEmployee.lastName}.`);
             } catch (err: any) {
-              Alert.alert(t('common.error'), err?.message || t('request.payrollFailed'));
+              Alert.alert(t('common.error'), getApiErrorMessage(err, t));
             } finally {
               setIsSendingPayroll(false);
             }
@@ -400,7 +401,13 @@ export default function RequestScreen() {
   const handleShare = async (req: LocalRequest) => {
     const id = req.backendId || req.id;
     const link = `egwallet://pay/${id}`;
-    const msg = `Hi ${req.firstName}, I'm requesting ${getCurrencySymbol(req.currency)}${formatMajorAmount(req.amount, req.currency)} ${req.currency}${req.note ? ` for "${req.note}"` : ''}.\n\nPay via EGWallet: ${link}`;
+    const noteSuffix = req.note ? t('request.shareNoteSuffix').replace('{{note}}', req.note) : '';
+    const msg = t('request.sharePaymentMessage')
+      .replace('{{firstName}}', req.firstName)
+      .replace('{{amount}}', `${getCurrencySymbol(req.currency)}${formatMajorAmount(req.amount, req.currency)}`)
+      .replace('{{currency}}', req.currency)
+      .replace('{{noteSuffix}}', noteSuffix)
+      .replace('{{link}}', link);
     try { await Share.share({ message: msg }); } catch (_) {}
   };
 
@@ -433,7 +440,11 @@ export default function RequestScreen() {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Failed to generate QR');
+        const error = new Error(err.error || t('request.qrGenerateFailed')) as Error & { code?: string; limitType?: string; status?: number };
+        error.code = err.code;
+        error.limitType = err.limitType;
+        error.status = res.status;
+        throw error;
       }
 
       const data = await res.json();
@@ -442,7 +453,7 @@ export default function RequestScreen() {
         expiresAt: data.expiresAt,
       });
     } catch (err: any) {
-      Alert.alert(t('common.error'), /network|fetch|connection/i.test(err.message || '') ? t('common.networkError') : (err.message || t('request.invalidAmount')));
+      Alert.alert(t('common.error'), getApiErrorMessage(err, t));
     }
   };
 
@@ -485,7 +496,7 @@ export default function RequestScreen() {
       {/* ══════════════════════ INCOMING REQUESTS (always visible) ══════════════════════ */}
       {incomingRequests.length > 0 && (
         <>
-          <Text style={styles.historyTitle}>{t('request.incomingRequests') || 'Incoming Requests'}</Text>
+          <Text style={styles.historyTitle}>{t('request.incomingRequests')}</Text>
           {incomingRequests.map(req => (
             <View key={req.id} style={[styles.requestCard, { borderLeftColor: '#7C3AED', borderLeftWidth: 3 }]}>
               <View style={styles.requestHeader}>
@@ -508,7 +519,7 @@ export default function RequestScreen() {
                     onPress={() => (navigation as any).navigate('PayRequest', { requestId: req.id })}
                   >
                     <Ionicons name="cash-outline" size={18} color="#7C3AED" />
-                    <Text style={[styles.shareButtonText, { color: '#7C3AED' }]}>{t('request.payNow') || 'Pay Now'}</Text>
+                    <Text style={[styles.shareButtonText, { color: '#7C3AED' }]}>{t('request.payNow')}</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -805,7 +816,7 @@ export default function RequestScreen() {
                   : (
                     <>
                       <Ionicons name="cash-outline" size={18} color="#FFFFFF" />
-                      <Text style={styles.createButtonText}>{t('request.payEmployee') || 'Pay Employee'}</Text>
+                      <Text style={styles.createButtonText}>{t('request.payEmployee')}</Text>
                     </>
                   )
                 }

@@ -8,6 +8,7 @@ import { listWallets } from '../api/auth';
 import { useFocusEffect } from '@react-navigation/native';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { useLanguage } from '../i18n/LanguageContext';
+import { getApiErrorMessage } from '../utils/apiErrorMessage';
 import { CardSkeleton } from '../components/SkeletonLoader';
 import { useToast } from '../utils/toast';
 
@@ -63,36 +64,10 @@ export default function CardScreen() {
     try {
       setLoading(true);
       const data = await getVirtualCards(auth.token);
-      const loaded = data.cards || [];
-      if (loaded.length === 0) {
-        // Pre-populate a demo card so the screen is never empty
-        const now = new Date();
-        setCards([{
-          id: 'demo-default',
-          cardNumber: '0000000000000000',
-          cvv: '',
-          expiryMonth: String(now.getMonth() + 1).padStart(2, '0'),
-          expiryYear: String(now.getFullYear() + 3),
-          currency: 'USD',
-          label: 'My Virtual Card',
-          status: 'active',
-        }]);
-      } else {
-        setCards(loaded);
-      }
+      setCards(data.cards || []);
     } catch (error: any) {
-      // Demo card so screen is never empty
-      const now = new Date();
-      setCards([{
-        id: 'demo-default',
-        cardNumber: '0000000000000000',
-        cvv: '',
-        expiryMonth: String(now.getMonth() + 1).padStart(2, '0'),
-        expiryYear: String(now.getFullYear() + 3),
-        currency: 'USD',
-        label: 'My Virtual Card',
-        status: 'active',
-      }]);
+      setCards([]);
+      Alert.alert(t('common.error'), getApiErrorMessage(error, t));
     } finally {
       setLoading(false);
     }
@@ -120,20 +95,7 @@ export default function CardScreen() {
               toast.show(t('card.cardCreated'));
               loadCards();
             } catch (error: any) {
-              // Backend unavailable - create a local demo card so the screen never shows failure
-              const now = new Date();
-              const demoCard: VirtualCard = {
-                id: `card-${Date.now()}`,
-                cardNumber: '0000000000000000',
-                cvv: '',
-                expiryMonth: String(now.getMonth() + 1).padStart(2, '0'),
-                expiryYear: String(now.getFullYear() + 3),
-                currency: 'USD',
-                label: 'My Virtual Card',
-                status: 'active',
-              };
-              setCards(prev => [...prev.filter(c => c.id !== 'demo-default'), demoCard]);
-              toast.show(t('card.cardCreated'));
+              Alert.alert(t('common.error'), getApiErrorMessage(error, t));
             } finally {
               setLoading(false);
               setIsCreating(false);
@@ -162,12 +124,7 @@ export default function CardScreen() {
               await toggleCardFreeze(auth.token!, cardId);
               loadCards();
             } catch (error: any) {
-              setCards(prev => prev.map(c =>
-                c.id === cardId ? { ...c, status: c.status === 'active' ? 'frozen' : 'active' } : c
-              ));
-              if (selectedCard?.id === cardId) {
-                setSelectedCard(prev => prev ? { ...prev, status: prev.status === 'active' ? 'frozen' : 'active' } : prev);
-              }
+              Alert.alert(t('common.error'), getApiErrorMessage(error, t));
             } finally {
               setLoading(false);
             }
@@ -189,8 +146,7 @@ export default function CardScreen() {
             loadCards();
             setSelectedCard(null);
           } catch (error: any) {
-            setCards(prev => prev.filter(c => c.id !== cardId));
-            setSelectedCard(null);
+            Alert.alert(t('common.error'), getApiErrorMessage(error, t));
           } finally {
             setLoading(false);
           }

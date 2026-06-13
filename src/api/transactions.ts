@@ -240,7 +240,7 @@ export async function createVirtualCard(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Create card failed');
+    throwApiError(err, 'Create card failed', res.status);
   }
 
   return res.json();
@@ -274,7 +274,7 @@ export async function toggleCardFreeze(token: string, cardId: string) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Toggle freeze failed');
+    throwApiError(err, 'Toggle freeze failed', res.status);
   }
 
   return res.json();
@@ -291,7 +291,7 @@ export async function deleteVirtualCard(token: string, cardId: string) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Delete card failed');
+    throwApiError(err, 'Delete card failed', res.status);
   }
 
   return res.json();
@@ -445,7 +445,7 @@ export async function payViaQr(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'QR payment failed');
+    throwApiError(err, 'QR payment failed', res.status);
   }
 
   return res.json();

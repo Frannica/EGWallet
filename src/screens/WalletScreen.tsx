@@ -10,6 +10,7 @@ import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { Ionicons } from '@expo/vector-icons';
 import { getLocalBalances, mergeWithLocalBalances, syncLocalBalancesFromBackend } from '../utils/localBalance';
 import { useLanguage } from '../i18n/LanguageContext';
+import { getApiErrorMessage } from '../utils/apiErrorMessage';
 
 type Balance = { currency: string; amount: number };
 
@@ -64,7 +65,7 @@ export default function WalletScreen() {
       setApiError(null);
     } catch (e: any) {
       if (__DEV__) console.warn('Load wallets failed:', e?.message);
-      setApiError(e?.message || t('common.serverUnreachable'));
+      setApiError(getApiErrorMessage(e, t));
       // Show demo wallet with local balances so the UI stays functional
       const localBalancesOnError = await getLocalBalances();
       const localCurrencies = Object.entries(localBalancesOnError).filter(([, amt]) => amt > 0);

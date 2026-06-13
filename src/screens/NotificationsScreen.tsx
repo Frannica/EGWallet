@@ -55,7 +55,7 @@ function getLocalizedBody(
       const fromIdx = body.lastIndexOf(' from ');
       const senderName = fromIdx !== -1
         ? body.substring(fromIdx + 6).replace(/ for "[^"]*"$/, '').trim()
-        : '—';
+        : '-';
       return fill(t('notif.body.money_received'), {
         amount: formatMinorAmount(m.amount, m.currency),
         currency: m.currency,
@@ -108,7 +108,7 @@ function getLocalizedBody(
     if (type === 'payment_request') {
       const nameMatch = body.match(/^(.+?) is requesting/);
       return fill(t('notif.body.payment_request'), {
-        name: nameMatch ? nameMatch[1] : '—',
+        name: nameMatch ? nameMatch[1] : '-',
         amount: formatMinorAmount(m.amount, m.currency),
         currency: m.currency,
       });

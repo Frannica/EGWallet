@@ -1131,7 +1131,10 @@ export default function SendScreen() {
                         );
                       })()}
                       <TouchableOpacity
-                        onPress={() => Share.share({ message: `My EGWallet ID: ${w.id}`, title: 'Share Wallet ID' })}
+                        onPress={() => Share.share({
+                          message: t('settings.shareWalletIdMessage').replace('{{id}}', w.id),
+                          title: t('settings.walletId'),
+                        })}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         style={{ marginTop: 6, alignSelf: 'flex-start' }}
                       >
@@ -1530,7 +1533,7 @@ export default function SendScreen() {
             <View style={styles.infoBox}>
               <Text style={styles.infoText}>
                 {activeTab === 'withdraw'
-                  ? `ℹ️ ${t('send.intlFeeHint')}${isIntlWithdrawal ? ` (${t('send.typeInternational').toLowerCase()})` : ` — ${t('send.withdrawalFeeInfo')}`}`
+                  ? `ℹ️ ${t('send.intlFeeHint')}${isIntlWithdrawal ? ` (${t('send.typeInternational').toLowerCase()})` : ` - ${t('send.withdrawalFeeInfo')}`}`
                   : t('send.transferFreeInfo')
                 }
               </Text>

@@ -24,6 +24,7 @@ import { useAuth } from '../auth/AuthContext';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { API_BASE } from '../api/client';
 import { useLanguage } from '../i18n/LanguageContext';
+import { getApiErrorMessage } from '../utils/apiErrorMessage';
 import { majorToMinor, formatCurrency, getCurrencySymbol, getCurrencyName, CURRENCY_INFO } from '../utils/currency';
 import { creditLocalBalance } from '../utils/localBalance';
 import { TOPUP_FREE_LIMIT, TOPUP_FEE_RATE } from '../config/fees';
@@ -901,7 +902,7 @@ export default function DepositScreen() {
                   publishableKey={stripeIntent.publishableKey}
                   clientSecret={stripeIntent.clientSecret}
                   onSuccess={handleStripeSuccess}
-                  onError={msg => Alert.alert(t('common.error'), /network|fetch|connection/i.test(msg || '') ? t('common.networkError') : msg)}
+                  onError={msg => Alert.alert(t('common.error'), getApiErrorMessage({ message: msg }, t))}
                 />
               </StripeProvider>
             )

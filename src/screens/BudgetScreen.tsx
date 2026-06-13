@@ -8,6 +8,7 @@ import { listWallets } from '../api/auth';
 import { getCurrencySymbol, formatCurrency, formatMajorAmount } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { useLanguage } from '../i18n/LanguageContext';
+import { getApiErrorMessage } from '../utils/apiErrorMessage';
 import { BudgetCardSkeleton } from '../components/SkeletonLoader';
 import { useToast } from '../utils/toast';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -157,20 +158,7 @@ export default function BudgetScreen() {
               setShowCreateForm(false);
               loadBudgets();
             } catch (error: any) {
-              // Demo mode: add a local budget and persist it so it survives refresh
-              const localBudget: Budget = {
-                id: `demo-${Date.now()}`,
-                walletId: wallets[0]?.id || 'demo',
-                currency,
-                monthlyLimit: amountMinor,
-              };
-              const updated = [...budgets, localBudget];
-              setBudgets(updated);
-              try { await AsyncStorage.setItem(BUDGETS_STORAGE_KEY, JSON.stringify(updated)); } catch {}
-              if (__DEV__) console.log('[Budget] Created demo budget');
-              toast.show(t('budget.budgetSaved'));
-              setAmount('');
-              setShowCreateForm(false);
+              Alert.alert(t('common.error'), getApiErrorMessage(error, t));
             } finally {
               setLoading(false);
               setIsCreating(false);
@@ -192,11 +180,7 @@ export default function BudgetScreen() {
             loadBudgets();
             setSelectedBudget(null);
           } catch (error: any) {
-            // Demo mode: remove locally and persist
-            const filtered = budgets.filter(b => b.id !== budgetId);
-            setBudgets(filtered);
-            try { await AsyncStorage.setItem(BUDGETS_STORAGE_KEY, JSON.stringify(filtered)); } catch {}
-            setSelectedBudget(null);
+            Alert.alert(t('common.error'), getApiErrorMessage(error, t));
           } finally {
             setLoading(false);
           }

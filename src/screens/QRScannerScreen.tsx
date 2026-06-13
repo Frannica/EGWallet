@@ -11,6 +11,7 @@ import { validateQr, payViaQr, ValidatedQr, generateId } from '../api/transactio
 import { listWallets } from '../api/auth';
 import { majorToMinor, formatCurrency } from '../utils/currency';
 import { useLanguage } from '../i18n/LanguageContext';
+import { getApiErrorMessage } from '../utils/apiErrorMessage';
 import { debitLocalBalance } from '../utils/localBalance';
 
 function formatAmountInput(text: string): string {
@@ -197,7 +198,7 @@ export default function QRScannerScreen() {
       );
     } catch (err: any) {
       setPaying(false);
-      Alert.alert(t('common.error'), /network|fetch|connection/i.test(err.message || '') ? t('common.networkError') : (err.message ?? t('qrScan.somethingWentWrong')));
+      Alert.alert(t('common.error'), getApiErrorMessage(err, t));
     }
   };
 

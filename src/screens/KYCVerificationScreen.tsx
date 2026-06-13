@@ -5,6 +5,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
 import { useLanguage } from '../i18n/LanguageContext';
+import { getApiErrorMessage } from '../utils/apiErrorMessage';
 
 type KYCStatus = 'not_started' | 'pending' | 'under_review' | 'approved' | 'rejected';
 
@@ -156,23 +157,7 @@ export default function KYCVerificationScreen() {
       setKycStatus('under_review');
       Alert.alert(t('kyc.documentSubmittedTitle'), t('kyc.documentSubmittedMsg'));
     } catch (error: any) {
-      // If backend KYC endpoint not yet live, store locally as pending
-      if (error?.message?.includes('fetch') || error?.message?.includes('network') || error?.message?.includes('404')) {
-        const newDoc: KYCDocument = {
-          id: Math.random().toString(36).substring(7),
-          type,
-          status: 'under_review',
-          uploadedAt: Date.now(),
-        };
-        setDocuments(prev => {
-          const filtered = prev.filter(d => d.type !== type);
-          return [...filtered, newDoc];
-        });
-        setKycStatus('under_review');
-        Alert.alert(t('kyc.documentCaptured'), t('kyc.documentCapturedMsg'));
-      } else {
-        Alert.alert(t('kyc.uploadFailed'), /network|fetch|connection/i.test(error.message || '') ? t('common.networkError') : (error.message ?? t('common.networkError')));
-      }
+      Alert.alert(t('kyc.uploadFailed'), getApiErrorMessage(error, t));
     } finally {
       setUploading(false);
     }
