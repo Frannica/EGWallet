@@ -4412,7 +4412,16 @@ app.post('/exchange', authMiddleware, async (req, res) => {
     'Exchange Completed',
     `Exchanged ${minorToMajor(amount, fromCurrency).toFixed(decimalsFor(fromCurrency))} ${fromCurrency} \u2192 ${minorToMajor(netReceived, toCurrency).toFixed(decimalsFor(toCurrency))} ${toCurrency}`,
     { transactionId: tx.id, amount, fromCurrency, toCurrency });
-  saveDB(db);
+  try {
+    saveDB(db);
+  } catch (notifSaveErr) {
+    // Exchange is already committed — never drop the HTTP response here.
+    logger.error('[/exchange] notification saveDB failed — exchange already committed', {
+      error: notifSaveErr.message,
+      transactionId: tx.id,
+      userId: req.user.userId,
+    });
+  }
 
   res.json(responseBody);
   }); // withBalanceMutex

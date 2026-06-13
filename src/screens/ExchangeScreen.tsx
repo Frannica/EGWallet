@@ -167,6 +167,13 @@ export default function ExchangeScreen({ route, navigation }: any) {
       ]);
     } catch (err: any) {
       if (err?.name === 'AbortError') return;
+      console.warn('[ExchangeScreen] confirmExchange failed', {
+        message: err?.message,
+        status: err?.status,
+        code: err?.code,
+        endpoint: err?.endpoint || 'POST /exchange',
+        idempotencyKey: exchangeIdempotencyKeyRef.current,
+      });
       Alert.alert(t('common.error'), getApiErrorMessage(err, t));
     } finally {
       setSubmitting(false);

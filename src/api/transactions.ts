@@ -43,15 +43,20 @@ function throwApiError(
   err: { error?: string; message?: string; code?: string; limitType?: string },
   fallback: string,
   status: number,
+  meta?: { endpoint?: string; idempotencyKey?: string },
 ): never {
   const error = new Error(err.error || err.message || fallback) as Error & {
     code?: string;
     limitType?: string;
     status?: number;
+    endpoint?: string;
+    idempotencyKey?: string;
   };
   error.code = err.code;
   error.limitType = err.limitType;
   error.status = status;
+  if (meta?.endpoint) error.endpoint = meta.endpoint;
+  if (meta?.idempotencyKey) error.idempotencyKey = meta.idempotencyKey;
   throw error;
 }
 
@@ -462,6 +467,7 @@ export async function exchangeCurrency(
   callerIdempotencyKey?: string,
 ): Promise<any> {
   const idempotencyKey = callerIdempotencyKey || generateId();
+  const endpoint = 'POST /exchange';
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
 
@@ -478,15 +484,36 @@ export async function exchangeCurrency(
       signal: controller.signal,
     });
   } catch (err: any) {
-    if (err?.name === 'AbortError') throw new Error('Request timed out. Please try again.');
-    throw err;
+    const isTimeout = err?.name === 'AbortError';
+    const error = isTimeout
+      ? new Error('Request timed out. Please try again.')
+      : err;
+    if (error && typeof error === 'object') {
+      (error as any).endpoint = endpoint;
+      (error as any).idempotencyKey = idempotencyKey;
+      if (isTimeout) (error as any).status = 408;
+    }
+    console.warn('[Exchange] transport error', {
+      message: error?.message,
+      status: (error as any)?.status,
+      endpoint,
+      idempotencyKey,
+    });
+    throw error;
   } finally {
     clearTimeout(timeoutId);
   }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throwApiError(err, 'Exchange failed', res.status);
+    console.warn('[Exchange] API error', {
+      message: err.error || err.message || 'Exchange failed',
+      status: res.status,
+      endpoint,
+      idempotencyKey,
+      code: err.code,
+    });
+    throwApiError(err, 'Exchange failed', res.status, { endpoint, idempotencyKey });
   }
 
   return res.json();
