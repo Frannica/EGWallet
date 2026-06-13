@@ -4247,7 +4247,54 @@ app.post('/exchange', authMiddleware, async (req, res) => {
     return res.status(200).json(cached0.response);
   }
 
-  return withBalanceMutex(async () => {
+  // ── 2b. Preflight (no mutex wait) — return real HTTP errors immediately ─────
+  // Authoritative balance/limit checks still run inside withBalanceMutex below.
+  try {
+    const preDb = loadDB();
+    const preWallet = preDb.wallets.find(w => w.id === walletId && w.userId === req.user.userId);
+    if (!preWallet) {
+      return res.status(404).json({ error: t('error_source_wallet_not_found', lang) });
+    }
+    const preFrom = preWallet.balances.find(b => b.currency === fromCurrency);
+    if (!preFrom || preFrom.amount < amount) {
+      return res.status(400).json({ error: t('error_insufficient_funds', lang) });
+    }
+    const preUser = preDb.users.find(u => u.id === req.user.userId);
+    if (!preUser) {
+      return res.status(404).json({ error: t('error_sender_not_found', lang) });
+    }
+    const preFromRate = preDb.rates.values[fromCurrency];
+    const preToRate = preDb.rates.values[toCurrency];
+    if (!preFromRate) return res.status(400).json({ error: `Unsupported currency: ${fromCurrency}` });
+    if (!preToRate) return res.status(400).json({ error: `Unsupported currency: ${toCurrency}` });
+    const preRatesAgeMs = Date.now() - (preDb.rates.updatedAt || 0);
+    if (preRatesAgeMs > FX_STALE_THRESHOLD_MS && NODE_ENV === 'production') {
+      return res.status(503).json({
+        error: 'FX rates are outdated. Exchange is temporarily unavailable. Please try again shortly.',
+        ratesUpdatedAt: preDb.rates.updatedAt,
+      });
+    }
+    const preAmountUSD = minorToMajor(amount, fromCurrency) / preFromRate;
+    const preLimit = checkKYCLimits(preUser, preAmountUSD, preDb);
+    if (!preLimit.allowed) {
+      return res.status(403).json({
+        code:                'LIMIT_EXCEEDED',
+        error:               preLimit.message,
+        limitType:           preLimit.limitType,
+        remainingDailyUSD:   preLimit.remainingDailyUSD,
+        remainingWeeklyUSD:  preLimit.remainingWeeklyUSD,
+        remainingMonthlyUSD: preLimit.remainingMonthlyUSD,
+        tierLevel:           preLimit.tierLevel,
+        nextTier:            preLimit.nextTier,
+      });
+    }
+  } catch (preErr) {
+    logger.error('[/exchange] preflight check failed', { error: preErr.message, userId: req.user?.userId });
+    return res.status(500).json({ error: t('error_transaction_persist', lang) });
+  }
+
+  try {
+  await withBalanceMutex(async () => {
   try {
   const db = loadDB();
 
@@ -4435,6 +4482,12 @@ app.post('/exchange', authMiddleware, async (req, res) => {
     }
   }
   }); // withBalanceMutex
+  } catch (routeErr) {
+    logger.error('[/exchange] route/mutex error', { error: routeErr.message, userId: req.user?.userId });
+    if (!res.headersSent) {
+      return res.status(500).json({ error: t('error_transaction_persist', lang) });
+    }
+  }
 });
 
 // GET /fx-rates/status — rate freshness info (safe: no balances or user data)

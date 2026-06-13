@@ -24,7 +24,7 @@ function isTransportError(message: string): boolean {
 export function getApiErrorMessage(e: ApiErrorLike, t: (key: string) => string): string {
   const msg = e?.message || '';
 
-  if (e?.code === 'LIMIT_EXCEEDED' || e?.code === 'PAYROLL_LIMIT_EXCEEDED') {
+  if (e?.code === 'LIMIT_EXCEEDED' || e?.code === 'PAYROLL_LIMIT_EXCEEDED' || (e?.status === 403 && e?.limitType)) {
     const limit = msg.match(/\$[\d,]+/)?.[0] ?? '';
     if (e.limitType === 'weekly') {
       return t('send.limitWeeklyReached').replace('{{limit}}', limit);
@@ -66,13 +66,4 @@ export function getApiErrorMessage(e: ApiErrorLike, t: (key: string) => string):
   if (msg === 'Withdrawal failed') return t('send.backendUnavailable');
 
   return msg || t('send.backendUnavailable');
-}
-
-/** Exchange UI — map false-positive transport errors to a server-unavailable message. */
-export function getExchangeErrorMessage(e: ApiErrorLike, t: (key: string) => string): string {
-  const msg = getApiErrorMessage(e, t);
-  if (msg === t('common.networkError')) {
-    return t('send.backendUnavailable');
-  }
-  return msg;
 }
