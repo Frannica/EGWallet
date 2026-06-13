@@ -83,7 +83,10 @@ export async function fetchFxQuote(
       { headers: { 'Accept-Language': getApiLanguage() }, signal: controller.signal },
     );
   } catch (err: any) {
-    if (err?.name === 'AbortError') throw err;
+    if (signal?.aborted) throw err;
+    if (controller.signal.aborted || err?.name === 'AbortError') {
+      throw new Error('Request timed out. Please try again.');
+    }
     throw err;
   } finally {
     clearTimeout(timeoutId);

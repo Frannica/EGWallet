@@ -24,7 +24,7 @@ import {
   getCurrencyName,
 } from '../utils/currency';
 import { debitLocalBalance, creditLocalBalance } from '../utils/localBalance';
-import { getApiErrorMessage } from '../utils/apiErrorMessage';
+import { getExchangeErrorMessage } from '../utils/apiErrorMessage';
 
 const POPULAR_CURRENCIES = [
   'USD', 'EUR', 'GBP', 'XAF', 'XOF', 'NGN', 'MAD', 'GHS',
@@ -106,7 +106,7 @@ export default function ExchangeScreen({ route, navigation }: any) {
       .catch((err: any) => {
         if (err?.name === 'AbortError') return;
         setQuote(null);
-        setQuoteError(getApiErrorMessage(err, t));
+        setQuoteError(getExchangeErrorMessage(err, t));
       })
       .finally(() => setQuoteLoading(false));
   }, [auth.token, fromCurrency, toCurrency, amountStr, t]);
@@ -174,7 +174,7 @@ export default function ExchangeScreen({ route, navigation }: any) {
         endpoint: err?.endpoint || 'POST /exchange',
         idempotencyKey: exchangeIdempotencyKeyRef.current,
       });
-      Alert.alert(t('common.error'), getApiErrorMessage(err, t));
+      Alert.alert(t('common.error'), getExchangeErrorMessage(err, t));
     } finally {
       setSubmitting(false);
     }

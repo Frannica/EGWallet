@@ -67,3 +67,12 @@ export function getApiErrorMessage(e: ApiErrorLike, t: (key: string) => string):
 
   return msg || t('send.backendUnavailable');
 }
+
+/** Exchange UI — map false-positive transport errors to a server-unavailable message. */
+export function getExchangeErrorMessage(e: ApiErrorLike, t: (key: string) => string): string {
+  const msg = getApiErrorMessage(e, t);
+  if (msg === t('common.networkError')) {
+    return t('send.backendUnavailable');
+  }
+  return msg;
+}
