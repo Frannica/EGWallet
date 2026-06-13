@@ -2,8 +2,9 @@
 /**
  * Translation completeness guard.
  * Run with: node check-i18n.mjs
- * 
+ *
  * Checks that every key present in the English section exists in ALL other languages.
+ * Validates UTF-8 integrity (no replacement characters).
  * Exits with code 1 if any keys are missing (suitable for CI pre-build hooks).
  */
 
@@ -14,6 +15,22 @@ const LANGUAGES = ['en', 'fr', 'es', 'pt', 'ar', 'zh', 'ja'];
 
 const content = readFileSync(FILE, 'utf-8');
 const lines = content.split('\n');
+
+// UTF-8 integrity: reject replacement chars and common mojibake from bad encoding
+if (content.includes('\uFFFD')) {
+  console.error(`ERROR: ${FILE} contains Unicode replacement characters (U+FFFD). Fix encoding before building.`);
+  process.exit(1);
+}
+const mojibakePatterns = [
+  /\u00C3[\u0080-\u00BF]/, // UTF-8 read as Latin-1
+  /\u00E2\u0080[\u0094-\u0099]/, // em/en dash mojibake
+];
+for (const re of mojibakePatterns) {
+  if (re.test(content)) {
+    console.error(`ERROR: ${FILE} contains suspected UTF-8 mojibake. Normalize encoding before building.`);
+    process.exit(1);
+  }
+}
 
 /**
  * Find the start line index of `const <lang>: TranslationMap = {`
@@ -27,12 +44,11 @@ function findSection(lang) {
 
 /**
  * Extract all translation keys from a language section.
- * Handles single-quoted, double-quoted, and escaped-quote values.
+ * Handles single-quoted and double-quoted keys.
  */
 function extractKeys(start, end) {
   const keys = new Set();
-  // Match the key portion: 'some.key': ...
-  const KEY_RE = /^\s*'([^']+)'\s*:/;
+  const KEY_RE = /^\s*['"]([^'"]+)['"]\s*:/;
   for (let i = start; i < end; i++) {
     const m = lines[i].match(KEY_RE);
     if (m) keys.add(m[1]);

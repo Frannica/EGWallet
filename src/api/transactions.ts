@@ -100,7 +100,10 @@ export async function sendTransaction(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Send failed');
+    const error = new Error(err.error || 'Send failed') as Error & { code?: string; limitType?: string };
+    error.code = err.code;
+    error.limitType = err.limitType;
+    throw error;
   }
 
   return res.json();

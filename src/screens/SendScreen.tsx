@@ -13,6 +13,7 @@ import { useToast } from '../utils/toast';
 import { getLocalBalances, debitLocalBalance, syncLocalBalancesFromBackend, mergeWithLocalBalances, logLocalTransaction, getPendingWithdrawals, addPendingWithdrawal, clearPendingWithdrawal } from '../utils/localBalance';
 import { WITHDRAW_LOCAL_RATE, WITHDRAW_INTL_RATE, FX_CONVERSION_RATE } from '../config/fees';
 import { useLanguage } from '../i18n/LanguageContext';
+import { getApiErrorMessage } from '../utils/apiErrorMessage';
 
 interface PaymentMethod {
   id: string;
@@ -343,8 +344,7 @@ export default function SendScreen() {
         status: 'completed',
       });
     } catch (e: any) {
-      const _m = e?.message || '';
-      Alert.alert(t('send.transactionFailed'), /network|fetch|connection/i.test(_m) ? t('common.networkError') : (_m || t('send.backendUnavailable')));
+      Alert.alert(t('send.transactionFailed'), getApiErrorMessage(e, t));
     } finally {
       setLoading(false);
     }
@@ -459,8 +459,7 @@ export default function SendScreen() {
     } catch (e: any) {
       // Release the pending lock on failure so user can retry
       await clearPendingWithdrawal(currency, amountMinor);
-      const _m = e?.message || '';
-      Alert.alert(t('send.transactionFailed'), /network|fetch|connection/i.test(_m) ? t('common.networkError') : (_m || t('send.backendUnavailable')));
+      Alert.alert(t('send.transactionFailed'), getApiErrorMessage(e, t));
       return;
     } finally {
       setLoading(false);
@@ -575,8 +574,7 @@ export default function SendScreen() {
       });
       setToWalletId('');
     } catch (e: any) {
-      const _m = e?.message || '';
-      Alert.alert(t('send.transactionFailed'), /network|fetch|connection/i.test(_m) ? t('common.networkError') : (_m || t('send.backendUnavailable')));
+      Alert.alert(t('send.transactionFailed'), getApiErrorMessage(e, t));
       return;
     } finally {
       setLoading(false);
