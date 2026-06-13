@@ -44,6 +44,16 @@ export function getApiErrorMessage(e: ApiErrorLike, t: (key: string) => string):
   if (/timed out|timeout/i.test(msg)) {
     return t('common.requestTimeout');
   }
+  // HTTP responses must never be shown as generic network failures
+  if (e?.status && e.status >= 400) {
+    if (msg === 'Create card failed') return t('card.createFailed');
+    if (msg === 'Toggle freeze failed' || msg === 'Delete card failed') return t('card.actionFailed');
+    if (msg === 'QR payment failed') return t('qrScan.somethingWentWrong');
+    if (msg === 'Exchange failed') return t('exchange.rateError');
+    if (msg === 'Quote unavailable') return t('exchange.rateError');
+    if (msg === 'Withdrawal failed') return t('send.backendUnavailable');
+    return msg || t('send.backendUnavailable');
+  }
   if (isTransportError(msg)) {
     return t('common.networkError');
   }

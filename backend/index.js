@@ -4248,6 +4248,7 @@ app.post('/exchange', authMiddleware, async (req, res) => {
   }
 
   return withBalanceMutex(async () => {
+  try {
   const db = loadDB();
 
   // Durable idempotency — survives restart
@@ -4424,6 +4425,15 @@ app.post('/exchange', authMiddleware, async (req, res) => {
   }
 
   res.json(responseBody);
+  } catch (handlerErr) {
+    logger.error('[/exchange] unhandled handler error', {
+      error: handlerErr.message,
+      userId: req.user?.userId,
+    });
+    if (!res.headersSent) {
+      return res.status(500).json({ error: t('error_transaction_persist', lang) });
+    }
+  }
   }); // withBalanceMutex
 });
 

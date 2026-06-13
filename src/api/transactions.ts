@@ -469,7 +469,7 @@ export async function exchangeCurrency(
   const idempotencyKey = callerIdempotencyKey || generateId();
   const endpoint = 'POST /exchange';
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
 
   let res: Response;
   try {
@@ -484,18 +484,19 @@ export async function exchangeCurrency(
       signal: controller.signal,
     });
   } catch (err: any) {
-    const isTimeout = err?.name === 'AbortError';
-    const error = isTimeout
+    const isAbort = controller.signal.aborted || err?.name === 'AbortError';
+    const error = isAbort
       ? new Error('Request timed out. Please try again.')
       : err;
     if (error && typeof error === 'object') {
       (error as any).endpoint = endpoint;
       (error as any).idempotencyKey = idempotencyKey;
-      if (isTimeout) (error as any).status = 408;
+      if (isAbort) (error as any).status = 408;
     }
     console.warn('[Exchange] transport error', {
       message: error?.message,
       status: (error as any)?.status,
+      aborted: controller.signal.aborted,
       endpoint,
       idempotencyKey,
     });
