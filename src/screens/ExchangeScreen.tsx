@@ -24,6 +24,7 @@ import {
   getCurrencyName,
 } from '../utils/currency';
 import { debitLocalBalance, creditLocalBalance } from '../utils/localBalance';
+import { getApiErrorMessage } from '../utils/apiErrorMessage';
 
 const POPULAR_CURRENCIES = [
   'USD', 'EUR', 'GBP', 'XAF', 'XOF', 'NGN', 'MAD', 'GHS',
@@ -67,6 +68,7 @@ export default function ExchangeScreen({ route, navigation }: any) {
   const [showFromPicker, setShowFromPicker] = useState(false);
   const [showToPicker, setShowToPicker] = useState(false);
   const quoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const quoteAbortRef = useRef<AbortController | null>(null);
   // Stable idempotency key — reused across retries; reset only after confirmed success
   const exchangeIdempotencyKeyRef = useRef(generateId());
 
@@ -91,14 +93,21 @@ export default function ExchangeScreen({ route, navigation }: any) {
       setQuoteError(null);
       return;
     }
-    const num = parseFloat(amountStr.replace(',', '.'));
+    const num = parseFloat(amountStr.replace(/,/g, ''));
     if (!num || num <= 0) { setQuote(null); setQuoteError(null); return; }
     const amountMinor = majorToMinor(num, fromCurrency);
+    quoteAbortRef.current?.abort();
+    const controller = new AbortController();
+    quoteAbortRef.current = controller;
     setQuoteLoading(true);
     setQuoteError(null);
-    fetchFxQuote(auth.token, fromCurrency, toCurrency, amountMinor)
+    fetchFxQuote(auth.token, fromCurrency, toCurrency, amountMinor, controller.signal)
       .then(q => { setQuote(q); setQuoteError(null); })
-      .catch((err: any) => { setQuote(null); setQuoteError(err.message || t('exchange.rateError')); })
+      .catch((err: any) => {
+        if (err?.name === 'AbortError') return;
+        setQuote(null);
+        setQuoteError(getApiErrorMessage(err, t));
+      })
       .finally(() => setQuoteLoading(false));
   }, [auth.token, fromCurrency, toCurrency, amountStr, t]);
 
@@ -110,10 +119,14 @@ export default function ExchangeScreen({ route, navigation }: any) {
 
   async function handleExchange() {
     if (submitting) return;
-    const num = parseFloat(amountStr.replace(',', '.'));
+    const num = parseFloat(amountStr.replace(/,/g, ''));
     if (!num || num <= 0) return;
     if (!fromCurrency || !toCurrency || fromCurrency === toCurrency) return;
     if (!quote) return;
+    if (quote.ratesStale) {
+      Alert.alert(t('common.error'), t('exchange.ratesUnavailable'));
+      return;
+    }
 
     const amountMinor = majorToMinor(num, fromCurrency);
     const fromBal = ownedBalances.find(b => b.currency === fromCurrency);
@@ -140,7 +153,7 @@ export default function ExchangeScreen({ route, navigation }: any) {
   async function confirmExchange() {
     if (!auth.token || submitting || !quote) return;
     setSubmitting(true);
-    const num = parseFloat(amountStr.replace(',', '.'));
+    const num = parseFloat(amountStr.replace(/,/g, ''));
     const amountMinor = majorToMinor(num, fromCurrency);
     const netReceive = quote.receivedAmountMinorAfterFee ?? quote.receivedAmountMinor ?? 0;
     try {
@@ -153,7 +166,8 @@ export default function ExchangeScreen({ route, navigation }: any) {
         { text: t('common.ok'), onPress: () => navigation.goBack() },
       ]);
     } catch (err: any) {
-      Alert.alert(t('common.error'), /network|fetch|connection/i.test(err.message || '') ? t('common.networkError') : (err.message || t('common.networkError')));
+      if (err?.name === 'AbortError') return;
+      Alert.alert(t('common.error'), getApiErrorMessage(err, t));
     } finally {
       setSubmitting(false);
     }

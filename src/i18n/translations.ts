@@ -363,6 +363,9 @@ const en: TranslationMap = {
   'exchange.searchPlaceholder': 'Search currencies...',
   'exchange.noCurrencies': 'No currencies found',
   'exchange.rateError': 'Could not get exchange rate',
+  'exchange.ratesUnavailable': 'FX rates are outdated. Exchange is temporarily unavailable. Please try again shortly.',
+  'exchange.tooManyRequests': 'Too many requests. Please wait a moment and try again.',
+  'common.requestTimeout': 'Request timed out. Please try again.',
 
   // Employer dashboard
   'employer.registerTitle': 'REGISTER AS EMPLOYER',
@@ -1463,6 +1466,9 @@ const fr: TranslationMap = {
   'exchange.searchPlaceholder': 'Rechercher des devises...',
   'exchange.noCurrencies': 'Aucune devise trouvée',
   'exchange.rateError': "Impossible d'obtenir le taux de change",
+  'exchange.ratesUnavailable': 'Les taux de change sont obsolètes. Échange temporairement indisponible. Réessayez dans un instant.',
+  'exchange.tooManyRequests': 'Trop de requêtes. Patientez un instant et réessayez.',
+  'common.requestTimeout': 'La requête a expiré. Veuillez réessayer.',
 
   // Employer dashboard
   'employer.registerTitle': "S'INSCRIRE COMME EMPLOYEUR",
@@ -2523,6 +2529,9 @@ const es: TranslationMap = {
   'exchange.searchPlaceholder': 'Buscar monedas...',
   'exchange.noCurrencies': 'No se encontraron monedas',
   'exchange.rateError': 'No se pudo obtener el tipo de cambio',
+  'exchange.ratesUnavailable': 'Las tasas de cambio están desactualizadas. El cambio no está disponible temporalmente. Inténtalo de nuevo en unos momentos.',
+  'exchange.tooManyRequests': 'Demasiadas solicitudes. Espera un momento e inténtalo de nuevo.',
+  'common.requestTimeout': 'La solicitud tardó demasiado. Inténtalo de nuevo.',
 
   // Employer dashboard
   'employer.registerTitle': 'REGISTRARSE COMO EMPLEADOR',
@@ -3584,6 +3593,9 @@ const pt: TranslationMap = {
   'exchange.searchPlaceholder': 'Pesquisar moedas...',
   'exchange.noCurrencies': 'Nenhuma moeda encontrada',
   'exchange.rateError': 'Não foi possível obter a taxa de câmbio',
+  'exchange.ratesUnavailable': 'As taxas de câmbio estão desatualizadas. A troca está temporariamente indisponível. Tente novamente em instantes.',
+  'exchange.tooManyRequests': 'Muitas solicitações. Aguarde um momento e tente novamente.',
+  'common.requestTimeout': 'A solicitação expirou. Tente novamente.',
 
   // Employer dashboard
   'employer.registerTitle': 'REGISTRAR COMO EMPREGADOR',
@@ -4645,6 +4657,9 @@ const ar: TranslationMap = {
   'exchange.searchPlaceholder': 'البحث عن العملات...',
   'exchange.noCurrencies': 'لا توجد عملات',
   'exchange.rateError': 'تعذر الحصول على سعر الصرف',
+  'exchange.ratesUnavailable': 'أسعار الصرف قديمة. التحويل غير متاح مؤقتاً. يرجى المحاولة بعد قليل.',
+  'exchange.tooManyRequests': 'طلبات كثيرة جداً. انتظر لحظة ثم حاول مجدداً.',
+  'common.requestTimeout': 'انتهت مهلة الطلب. يرجى المحاولة مجدداً.',
 
   // Employer dashboard
   'employer.registerTitle': 'التسجيل كصاحب عمل',
@@ -5706,6 +5721,9 @@ const zh: TranslationMap = {
   'exchange.searchPlaceholder': '搜索货币...',
   'exchange.noCurrencies': '未找到货币',
   'exchange.rateError': '无法获取汇率',
+  'exchange.ratesUnavailable': '汇率已过期，暂时无法兑换。请稍后再试。',
+  'exchange.tooManyRequests': '请求过于频繁，请稍后再试。',
+  'common.requestTimeout': '请求超时，请重试。',
 
   // Employer dashboard
   'employer.registerTitle': '注册为雇主',
@@ -6767,6 +6785,9 @@ const ja: TranslationMap = {
   'exchange.searchPlaceholder': '通貨を検索...',
   'exchange.noCurrencies': '通貨が見つかりません',
   'exchange.rateError': '為替レートを取得できませんでした',
+  'exchange.ratesUnavailable': '為替レートが古いため、両替は一時的に利用できません。しばらくしてから再度お試しください。',
+  'exchange.tooManyRequests': 'リクエストが多すぎます。少し待ってから再度お試しください。',
+  'common.requestTimeout': 'リクエストがタイムアウトしました。もう一度お試しください。',
 
   // Employer dashboard
   'employer.registerTitle': '雇用主として登録',

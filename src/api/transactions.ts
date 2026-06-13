@@ -39,20 +39,55 @@ export interface FxQuote {
   ratesStale?: boolean;
 }
 
+function throwApiError(
+  err: { error?: string; message?: string; code?: string; limitType?: string },
+  fallback: string,
+  status: number,
+): never {
+  const error = new Error(err.error || err.message || fallback) as Error & {
+    code?: string;
+    limitType?: string;
+    status?: number;
+  };
+  error.code = err.code;
+  error.limitType = err.limitType;
+  error.status = status;
+  throw error;
+}
+
 /** Get a real-time FX quote for a cross-currency transfer preview. */
 export async function fetchFxQuote(
   token: string,
   from: string,
   to: string,
-  amountMinor: number
+  amountMinor: number,
+  signal?: AbortSignal,
 ): Promise<FxQuote> {
-  const res = await fetchWithTokenRefresh(
-    `${API_BASE}/fx-quote?from=${from}&to=${to}&amount=${amountMinor}`,
-    { headers: { 'Accept-Language': getApiLanguage() } }
-  );
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  const onAbort = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener('abort', onAbort);
+  }
+
+  let res: Response;
+  try {
+    res = await fetchWithTokenRefresh(
+      `${API_BASE}/fx-quote?from=${from}&to=${to}&amount=${amountMinor}`,
+      { headers: { 'Accept-Language': getApiLanguage() }, signal: controller.signal },
+    );
+  } catch (err: any) {
+    if (err?.name === 'AbortError') throw err;
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+    if (signal) signal.removeEventListener('abort', onAbort);
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Quote unavailable');
+    throwApiError(err, 'Quote unavailable', res.status);
   }
   return res.json();
 }
@@ -451,7 +486,7 @@ export async function exchangeCurrency(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Exchange failed');
+    throwApiError(err, 'Exchange failed', res.status);
   }
 
   return res.json();

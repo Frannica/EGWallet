@@ -24,7 +24,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.francisco1953.egwalletmobile",
-      "versionCode": 69
+      "versionCode": 71
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -51,6 +51,13 @@
         {
           "photosPermission": "Allow EGWallet to access your photos to upload KYC identity documents.",
           "cameraPermission": "Allow EGWallet to use your camera to photograph your identity documents for verification."
+        }
+      ],
+      [
+        "@sentry/react-native/expo",
+        {
+          "organization": "egwallet-hu",
+          "project": "react-native"
         }
       ]
     ]
