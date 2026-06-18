@@ -112,30 +112,49 @@ export async function sendTransaction(
 ) {
   const idempotencyKey = callerIdempotencyKey || generateId();
 
+  const body = JSON.stringify({
+    fromWalletId,
+    toWalletId,
+    amount,
+    currency,
+    memo,
+    idempotencyKey,
+  });
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'Idempotency-Key': idempotencyKey,
+    'Accept-Language': getApiLanguage(),
+  };
+
+  async function postOnce(signal?: AbortSignal) {
+    return fetchWithTokenRefresh(`${API_BASE}/transactions`, {
+      method: 'POST',
+      headers,
+      body,
+      signal,
+    });
+  }
+
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
 
   let res: Response;
   try {
-    res = await fetchWithTokenRefresh(`${API_BASE}/transactions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': idempotencyKey,
-        'Accept-Language': getApiLanguage(),
-      },
-      body: JSON.stringify({
-        fromWalletId,
-        toWalletId,
-        amount,
-        currency,
-        memo,
-        idempotencyKey,
-      }),
-      signal: controller.signal,
-    });
+    res = await postOnce(controller.signal);
   } catch (err: any) {
-    if (err?.name === 'AbortError') throw new Error('Request timed out. Please try again.');
+    // Reconcile: server may have succeeded before the client saw the response.
+    if (err?.name === 'AbortError') {
+      try {
+        const retry = await postOnce();
+        if (retry.ok) return retry.json();
+      } catch { /* fall through */ }
+      throw new Error('Request timed out. Please try again.');
+    }
+    try {
+      const retry = await postOnce();
+      if (retry.ok) return retry.json();
+    } catch { /* fall through */ }
     throw err;
   } finally {
     clearTimeout(timeoutId);

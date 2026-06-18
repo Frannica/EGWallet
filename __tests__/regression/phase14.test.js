@@ -13,7 +13,7 @@ module.exports = function phase14(check) {
 
   // A: Balance not updating after withdrawal
   check('[LocalBalance] Zero-reset guard present in syncLocalBalancesFromBackend',
-    lb.includes('b.amount === 0 && localAmt !== undefined && localAmt > 0'));
+    lb.includes('b.amount === 0 && localAmt !== undefined && localAmt > 0 && hasDebitRecord'));
   check('[LocalBalance] Zero-reset guard uses continue before debitTimes logic',
     lb.includes('synced[b.currency] = localAmt;') &&
     lb.includes('continue;') &&
@@ -93,8 +93,8 @@ module.exports = function phase14(check) {
     be.includes('description.trim().length < 10 || description.trim().length > 2000'));
   check('[Backend /disputes] transactionId length-capped',
     be.includes('String(transactionId).slice(0, 100)'));
-  check('[Backend /disputes] notifyEmail hardcoded',
-    be.includes("notifyEmail: 'support@egwalletfinance.com'"));
+  check('[Backend /disputes] notifyEmail uses env/config support address',
+    be.includes('process.env.SUPPORT_NOTIFY_EMAIL') || be.includes('process.env.SUPPORT_EMAIL'));
   check('[Backend /disputes] response omits full record',
     be.includes('dispute: { id: dispute.id, ticketNumber: dispute.ticketNumber, status: dispute.status }'));
 

@@ -48,15 +48,22 @@ module.exports = function phase10(check) {
     LOCAL_BALANCE.includes('b.amount <= local'),
   );
 
-  // ── 4. Backend withdrawalInFlight mutex prevents concurrent withdrawals ────
+  // ── 4. Backend withBalanceMutex serialises money mutations ───────────────
   check(
-    'withdrawalInFlight Set used as concurrency mutex in backend',
-    BACKEND.includes('withdrawalInFlight') &&
-    (BACKEND.includes('withdrawalInFlight.has(') || BACKEND.includes('withdrawalInFlight.add(')),
+    'withBalanceMutex used as concurrency mutex for money operations',
+    BACKEND.includes('function withBalanceMutex') &&
+    BACKEND.includes('await withBalanceMutex'),
   );
   check(
-    'Backend returns 409 when concurrent withdrawal detected',
-    BACKEND.includes('409') && BACKEND.includes('withdrawalInFlight'),
+    'POST /withdrawals runs inside withBalanceMutex (not withdrawalInFlight Set)',
+    BACKEND.includes("app.post('/withdrawals'") &&
+    !BACKEND.includes('withdrawalInFlight.has(') &&
+    !BACKEND.includes('withdrawalInFlight.add(') &&
+    (() => {
+      const start = BACKEND.indexOf("app.post('/withdrawals'");
+      const end = BACKEND.indexOf("app.post('/withdrawals/:id/cancel'", start);
+      return BACKEND.slice(start, end > start ? end : start + 12000).includes('withBalanceMutex');
+    })(),
   );
 
   // ── 5. withdrawalEngine refund is idempotent ──────────────────────────────

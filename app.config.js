@@ -23,7 +23,7 @@ export default ({ config }) => ({
     },
     edgeToEdgeEnabled: true,
     package: "com.francisco1953.egwalletmobile",
-    versionCode: 73
+    versionCode: 74
   },
   web: {
     favicon: "./assets/favicon.png"
@@ -38,7 +38,9 @@ export default ({ config }) => ({
   },
   owner: "francisco1953",
   plugins: [
+    "expo-font",
     "expo-notifications",
+    "expo-localization",
     [
       "expo-camera",
       {

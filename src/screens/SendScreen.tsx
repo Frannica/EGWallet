@@ -347,6 +347,7 @@ export default function SendScreen() {
       Alert.alert(t('send.transactionFailed'), getApiErrorMessage(e, t));
     } finally {
       setLoading(false);
+      try { await loadWallets(); } catch { /* best-effort sync */ }
     }
   }
   
@@ -385,6 +386,8 @@ export default function SendScreen() {
       // Lock funds locally before the network request (pending deduction prevents double-spend)
       await addPendingWithdrawal(currency, amountMinor);
 
+      const cardLast4 = withdrawalCardNumber.replace(/\s/g, '').slice(-4);
+
       const response = await fetchWithTokenRefresh(`${API_BASE}/withdrawals`, {
         method: 'POST',
         headers: {
@@ -398,12 +401,11 @@ export default function SendScreen() {
           method: withdrawalMethod,
           isInternational: isIntlWithdrawal,
           bankName: withdrawalMethod === 'credit' ? 'Credit Card' : withdrawalMethod === 'debit' ? 'Debit Card' : bankName,
-          // For card withdrawals send only last4 — never transmit or store the full PAN
-          accountNumber: (withdrawalMethod === 'debit' || withdrawalMethod === 'credit')
-            ? withdrawalCardNumber.replace(/\s/g, '').slice(-4)
-            : accountNumber,
+          // Card withdrawals: send last4 token only — never full PAN/CVV
+          accountNumber: (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? cardLast4 : accountNumber,
           accountHolderName: accountName,
           ...((withdrawalMethod === 'debit' || withdrawalMethod === 'credit') && { cardExpiry: withdrawalCardExpiry }),
+          ...((withdrawalMethod === 'debit' || withdrawalMethod === 'credit') && { cardLast4 }),
           ...(withdrawalMethod === 'bank' && !isIntlWithdrawal && bankCode.trim()   && { bankCode:    bankCode.trim() }),
           ...(withdrawalMethod === 'bank' && !isIntlWithdrawal && branchCode.trim() && { branchCode:  branchCode.trim() }),
           ...(withdrawalMethod === 'bank' && isIntlWithdrawal  && iban.trim()       && { iban:        iban.trim().toUpperCase() }),
@@ -450,7 +452,7 @@ export default function SendScreen() {
         fee: feeCalc?.fee ?? Math.round(amountMinor * (isIntlWithdrawal ? WITHDRAW_INTL_RATE : WITHDRAW_LOCAL_RATE)),
         feeLabel: `Withdrawal Fee (${isIntlWithdrawal ? '1.75%' : '1.28%'})`,
         recipientName: accountName || (withdrawalMethod === 'credit' ? 'Credit Card' : withdrawalMethod === 'debit' ? 'Debit Card' : bankName),
-        recipientId: (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? `Card ending ${withdrawalCardNumber.replace(/\s/g, '').slice(-4)}` : accountNumber,
+        recipientId: (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? `Card ending ${cardLast4}` : accountNumber,
         timestamp: Date.now(),
         transactionId: wData.withdrawal?.id,
         type: 'withdrawal',
@@ -578,6 +580,7 @@ export default function SendScreen() {
       return;
     } finally {
       setLoading(false);
+      try { await loadWallets(); } catch { /* best-effort sync */ }
     }
   }
 

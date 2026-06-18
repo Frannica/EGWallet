@@ -66,8 +66,10 @@ module.exports = function phase11(check) {
     SEND.includes("withdrawalMethod === 'credit' ? 'Credit Card'"),
   );
   check(
-    '[Send] onWithdrawConfirmed sends card number for credit (debit || credit branch)',
-    SEND.includes("(withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? withdrawalCardNumber"),
+    '[Send] onWithdrawConfirmed sends last4 only for credit/debit (never full PAN)',
+    SEND.includes('const cardLast4 = withdrawalCardNumber.replace') &&
+    SEND.includes('cardLast4') &&
+    !SEND.includes('? withdrawalCardNumber'),
   );
   check(
     '[Send] onWithdrawConfirmed sends cardExpiry for credit',

@@ -178,6 +178,13 @@ export async function syncLocalBalancesFromBackend(
       const hasDebitRecord = !!debitTimes[b.currency];
       const localAmt = localBals[b.currency];
 
+      // Zero-reset guard: only when debit protection is active (pending local debit).
+      // Without hasDebitRecord, trust backend zero (real empty balance).
+      if (b.amount === 0 && localAmt !== undefined && localAmt > 0 && hasDebitRecord) {
+        synced[b.currency] = localAmt;
+        continue;
+      }
+
       if (hasDebitRecord && localAmt !== undefined) {
         if (b.amount <= localAmt) {
           // Backend confirmed the debit (returned same or lower) — trust it

@@ -18,6 +18,8 @@ const SUITES = [
   ['Phase 12 — Bell/ViewAll audit + WalletScreen logs',  require('./regression/phase12.test')],
   ['Phase 13 — Critical withdrawal safety',              require('./regression/phase13.test')],
   ['Phase 14 — Balance sync, dedup & dispute security',  require('./regression/phase14.test')],
+  ['Phase 16 — Send money integrity (double-spend fix)',  require('./regression/phase16.test')],
+  ['Phase 17 — P2P send simulation (7-phone loop)',       require('../backend/__tests__/send-integrity.test.js')],
 ];
 
 // ── Runner ────────────────────────────────────────────────────────────────────

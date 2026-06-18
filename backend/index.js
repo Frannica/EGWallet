@@ -332,8 +332,31 @@ function saveDurableIdempotency(db, clientKey, response, userId) {
   );
   db.idempotencyRecords.push({ key: clientKey, userId, response, timestamp: Date.now() });
 }
-// Global write serializer — replaces the old per-wallet balanceInFlight and
-// withdrawalInFlight Sets.
+
+/** Coerce wallet amounts to integer minor units (guards against string amounts in db.json). */
+function coerceMinorAmount(val) {
+  const n = Number(val);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n);
+}
+
+/** Return a balance entry that lives inside wallet.balances (never a detached object). */
+function getWalletBalanceEntry(wallet, currency, { create = false } = {}) {
+  if (!wallet.balances) wallet.balances = [];
+  let entry = wallet.balances.find(b => b.currency === currency);
+  if (!entry && create) {
+    entry = { currency, amount: 0 };
+    wallet.balances.push(entry);
+  }
+  if (entry) entry.amount = coerceMinorAmount(entry.amount);
+  return entry || null;
+}
+
+function normalizeWalletBalances(wallet) {
+  if (!wallet?.balances) return;
+  for (const b of wallet.balances) b.amount = coerceMinorAmount(b.amount);
+}
+// Global write serializer — replaces legacy per-wallet balanceInFlight Sets.
 //
 // Promise-chain pattern: every call to withBalanceMutex() is appended to
 // _dbMutex so only one balance-mutating handler runs at a time inside this
@@ -3670,12 +3693,49 @@ app.post('/transactions', authMiddleware, async (req, res) => {
   if (!fromWallet) return res.status(404).json({ error: t('error_source_wallet_not_found', req.lang || 'en') });
   const toWallet = db.wallets.find(w => w.id === toWalletId);
   if (!toWallet) return res.status(404).json({ error: t('error_destination_wallet_not_found', req.lang || 'en') });
-  
-  // find balance entries (amount stored in minor units)
-  const fromBalance = fromWallet.balances.find(b=>b.currency===currency) || { currency, amount: 0 };
-  if (fromBalance.amount < amount) return res.status(400).json({ error: t('error_insufficient_funds', lang) });
-  
+
+  // Block self-transfers — including same wallet id (debit+credit same bucket nets to zero).
+  if (fromWalletId === toWalletId || fromWallet.userId === toWallet.userId) {
+    return res.status(400).json({ error: t('error_cannot_send_to_self', lang) });
+  }
+
+  normalizeWalletBalances(fromWallet);
+  normalizeWalletBalances(toWallet);
+
   const rates = db.rates.values;
+
+  // Resolve debit bucket — must be a real entry in fromWallet.balances (never a detached object).
+  let debitEntry = getWalletBalanceEntry(fromWallet, currency);
+  let debitCurrency = currency;
+  let debitAmount = amount;
+  let senderCrossCurrency = false;
+
+  if (!debitEntry || debitEntry.amount < amount) {
+    const richest = (fromWallet.balances || []).reduce((best, b) => {
+      const valUSD = minorToMajor(b.amount, b.currency) / (rates[b.currency] || 1);
+      const bestUSD = best ? minorToMajor(best.amount, best.currency) / (rates[best.currency] || 1) : 0;
+      return valUSD > bestUSD ? b : best;
+    }, null);
+    if (!richest) return res.status(400).json({ error: t('error_insufficient_funds', lang) });
+
+    const sendMajor = minorToMajor(amount, currency);
+    const sendUSD = sendMajor / (rates[currency] || 1);
+    const debitMajor = sendUSD * (rates[richest.currency] || 1);
+    debitAmount = majorToMinor(debitMajor, richest.currency);
+    const fxGuard = fxSafetyCheck(debitAmount, richest.currency);
+    if (!fxGuard.safe) {
+      logger.error('[/transactions] FX safety check failed for cross-currency send', {
+        currency, richest: richest.currency, amount, debitAmount, reason: fxGuard.reason,
+      });
+      return res.status(500).json({ error: 'FX conversion error — please retry' });
+    }
+    if (richest.amount < debitAmount) {
+      return res.status(400).json({ error: t('error_insufficient_funds', lang) });
+    }
+    debitEntry = richest;
+    debitCurrency = richest.currency;
+    senderCrossCurrency = true;
+  }
   const amountMajor = minorToMajor(amount, currency);
   const toAmountInUSD = amountMajor / (rates[currency] || 1);
 
@@ -3728,12 +3788,13 @@ app.post('/transactions', authMiddleware, async (req, res) => {
   
   // Block cross-currency sends in production when FX rates are stale — before any
   // balance mutation so no rollback is needed.
-  if (shouldAutoConvert && receiverCurrency !== currency && NODE_ENV === 'production') {
+  if ((shouldAutoConvert && receiverCurrency !== currency || senderCrossCurrency) && NODE_ENV === 'production') {
     const txRatesAgeMs = Date.now() - (db.rates?.updatedAt || 0);
     if (txRatesAgeMs > FX_STALE_THRESHOLD_MS) {
       logger.error('[/transactions] Stale FX rates — blocking cross-currency send in production', {
         ageHours: (txRatesAgeMs / 3600000).toFixed(1),
         fromCurrency: currency,
+        debitCurrency,
         receiverCurrency,
       });
       return res.status(503).json({
@@ -3742,13 +3803,17 @@ app.post('/transactions', authMiddleware, async (req, res) => {
     }
   }
 
-  // Deduct from sender in original currency (send is FREE — only FX fee on conversion)
-  // Save original amounts for rollback if saveDB fails
-  const originalFromAmount = fromBalance.amount;
-  const destBalance = toWallet.balances.find(b=>b.currency===receiverCurrency);
+  // Deduct from sender — save originals for rollback if saveDB fails
+  const originalFromAmount = debitEntry.amount;
+  let destBalance = getWalletBalanceEntry(toWallet, receiverCurrency);
   const originalDestAmount = destBalance ? destBalance.amount : null;
 
-  fromBalance.amount -= amount;
+  // Same balance object on same wallet would net to zero (money created from nothing).
+  if (fromWallet === toWallet && debitEntry === destBalance) {
+    return res.status(400).json({ error: t('error_cannot_send_to_self', lang) });
+  }
+
+  debitEntry.amount -= debitAmount;
   
   // Convert to receiver's preferred currency if different AND auto-convert is enabled
   let receivedAmount = amount;
@@ -3771,15 +3836,38 @@ app.post('/transactions', authMiddleware, async (req, res) => {
   }
   
   // Add to receiver in their preferred currency
-  if (destBalance) destBalance.amount += receivedAmount; 
-  else toWallet.balances.push({ currency: receivedCurrency, amount: receivedAmount });
-  
+  if (destBalance) destBalance.amount += receivedAmount;
+  else {
+    destBalance = { currency: receivedCurrency, amount: receivedAmount };
+    toWallet.balances.push(destBalance);
+  }
+
+  // Integrity: sender must actually lose funds; receiver must gain funds.
+  if (debitEntry.amount >= originalFromAmount) {
+    logger.error('[/transactions] INTEGRITY FAIL — sender balance did not decrease', {
+      fromWalletId, toWalletId, debitCurrency, originalFromAmount, debitAmount,
+    });
+    debitEntry.amount = originalFromAmount;
+    if (destBalance && originalDestAmount !== null) destBalance.amount = originalDestAmount;
+    else if (destBalance) toWallet.balances = toWallet.balances.filter(b => b !== destBalance);
+    return res.status(500).json({ error: t('error_transaction_persist', lang) });
+  }
+  if (receivedAmount <= 0) {
+    logger.error('[/transactions] INTEGRITY FAIL — receiver credit is non-positive', { receivedAmount });
+    debitEntry.amount = originalFromAmount;
+    if (destBalance && originalDestAmount !== null) destBalance.amount = originalDestAmount;
+    return res.status(500).json({ error: t('error_transaction_persist', lang) });
+  }
+
   const tx = { 
     id: uuidv4(), 
     fromWalletId, 
     toWalletId, 
     amount, 
-    currency, 
+    currency,
+    debitAmount,
+    debitCurrency,
+    senderCrossCurrency,
     receivedAmount, 
     receivedCurrency,
     wasConverted,
@@ -3822,9 +3910,9 @@ app.post('/transactions', authMiddleware, async (req, res) => {
     saveDB(db); // commits balances + tx + limit tracking + idempotency atomically
   } catch (saveErr) {
     // Rollback in-memory changes so state stays consistent before rethrowing
-    fromBalance.amount = originalFromAmount;
-    if (destBalance) destBalance.amount = originalDestAmount;
-    else toWallet.balances = toWallet.balances.filter(b => b.currency !== receivedCurrency);
+    debitEntry.amount = originalFromAmount;
+    if (destBalance && originalDestAmount !== null) destBalance.amount = originalDestAmount;
+    else if (destBalance) toWallet.balances = toWallet.balances.filter(b => b.currency !== receivedCurrency);
     db.transactions.pop();
     if (clientKey && db.idempotencyRecords?.length) db.idempotencyRecords.pop();
     console.error('[/transactions] saveDB failed — rolled back in-memory state:', saveErr);
@@ -7666,7 +7754,7 @@ app.post('/disputes', authMiddleware, (req, res) => {
     ticketNumber,
     userId: req.user.userId,
     userEmail: resolvedEmail,
-    notifyEmail: 'SUPPORT@EGWALLETFINANCE.COM',
+    notifyEmail: (process.env.SUPPORT_NOTIFY_EMAIL || process.env.SUPPORT_EMAIL || 'support@egwalletfinance.com').toLowerCase(),
     transactionId: String(transactionId).slice(0, 100), // cap length
     reason,
     description: description.trim(),
