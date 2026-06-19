@@ -540,7 +540,7 @@ export async function exchangeCurrency(
       (error as any).idempotencyKey = idempotencyKey;
       if (isAbort) (error as any).status = 408;
     }
-    console.warn('[Exchange] transport error', {
+    if (__DEV__) console.warn('[Exchange] transport error', {
       message: error?.message,
       status: (error as any)?.status,
       aborted: controller.signal.aborted,
@@ -554,7 +554,7 @@ export async function exchangeCurrency(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    console.warn('[Exchange] API error', {
+    if (__DEV__) console.warn('[Exchange] API error', {
       message: err.error || err.message || 'Exchange failed',
       status: res.status,
       endpoint,

@@ -167,7 +167,7 @@ export default function ExchangeScreen({ route, navigation }: any) {
       ]);
     } catch (err: any) {
       if (err?.name === 'AbortError') return;
-      console.warn('[ExchangeScreen] confirmExchange failed', {
+      if (__DEV__) console.warn('[ExchangeScreen] confirmExchange failed', {
         message: err?.message,
         status: err?.status,
         code: err?.code,

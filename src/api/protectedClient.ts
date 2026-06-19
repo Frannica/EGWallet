@@ -35,7 +35,7 @@ async function checkOnlineStatus(): Promise<boolean> {
     return state.isConnected === true && state.isInternetReachable !== false;
   } catch (error) {
     // If NetInfo fails, assume offline to be safe
-    console.warn('NetInfo check failed:', error);
+    if (__DEV__) console.warn('NetInfo check failed:', error);
     return false;
   }
 }

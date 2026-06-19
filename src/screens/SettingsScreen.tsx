@@ -48,6 +48,9 @@ export default function SettingsScreen() {
   const [walletInfo, setWalletInfo] = useState<{ id: string; maxLimitUSD: number; usdValue: number } | null>(null);
   const [bugDescription, setBugDescription] = useState('');
   const [showBugModal, setShowBugModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deletePending, setDeletePending] = useState(false);
   const [showWalletIdModal, setShowWalletIdModal] = useState(false);
   const { language: appLanguage, setLanguage: setContextLanguage, t } = useLanguage();
   const [showLanguagePicker, setShowLanguagePicker] = useState(false);
@@ -130,25 +133,46 @@ export default function SettingsScreen() {
     ]);
   };
 
-  const handleDeleteAccount = async () => {
-    if (__DEV__) console.log('[Settings] Delete Account pressed');
-    Alert.alert(
-      t('settings.deleteAccount'),
-      t('settings.deleteAccountConfirmFull'),
-      [
-        { text: t('common.cancel'), style: 'cancel' },
-        {
-          text: t('common.delete'),
-          style: 'destructive',
-          onPress: () => {
-            Alert.alert(
-              t('settings.accountDeletionTitle'),
-              t('settings.accountDeletionMessage')
-            );
-          },
+  const handleDeleteAccount = () => {
+    setDeletePassword('');
+    setShowDeleteModal(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletePassword.trim()) {
+      Alert.alert(t('common.error'), t('settings.deletePasswordRequired'));
+      return;
+    }
+    setDeletePending(true);
+    try {
+      const res = await fetchWithTokenRefresh(`${API_BASE}/gdpr/delete-account`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${auth.token}`,
+          'Accept-Language': getApiLanguage(),
         },
-      ]
-    );
+        body: JSON.stringify({
+          confirmEmail: auth.user?.email,
+          confirmPassword: deletePassword,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        Alert.alert(t('common.error'), getApiErrorMessage({ message: data.error, status: res.status }, t));
+        return;
+      }
+      setShowDeleteModal(false);
+      Alert.alert(
+        t('settings.accountDeletedTitle'),
+        t('settings.accountDeletedMessage'),
+        [{ text: t('common.ok'), onPress: () => auth.signOut() }],
+      );
+    } catch (e: any) {
+      Alert.alert(t('common.error'), getApiErrorMessage(e, t));
+    } finally {
+      setDeletePending(false);
+    }
   };
 
   const handleAbout = () => {
@@ -813,6 +837,39 @@ export default function SettingsScreen() {
               );
             }}
           />
+        </View>
+      </View>
+    </Modal>
+
+    {/* Delete Account Confirmation Modal */}
+    <Modal visible={showDeleteModal} transparent animationType="fade" onRequestClose={() => setShowDeleteModal(false)}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.usernameModal}>
+          <Ionicons name="warning" size={32} color="#d32f2f" style={{ alignSelf: 'center', marginBottom: 8 }} />
+          <Text style={[styles.usernameModalTitle, { color: '#d32f2f' }]}>{t('settings.deleteAccount')}</Text>
+          <Text style={styles.usernameModalSub}>{t('settings.deleteAccountConfirmFull')}</Text>
+          <TextInput
+            style={[styles.usernameInput, { marginBottom: 16, marginTop: 12, width: '100%' }]}
+            value={deletePassword}
+            onChangeText={setDeletePassword}
+            placeholder={t('settings.deletePasswordPlaceholder')}
+            placeholderTextColor="#9BAEC8"
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <View style={styles.usernameModalBtns}>
+            <TouchableOpacity style={styles.umCancelBtn} onPress={() => { setShowDeleteModal(false); setDeletePassword(''); }}>
+              <Text style={styles.umCancelText}>{t('common.cancel')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.umSaveBtn, { backgroundColor: '#d32f2f' }]}
+              onPress={handleConfirmDelete}
+              disabled={deletePending}
+            >
+              <Text style={styles.umSaveText}>{deletePending ? t('common.loading') : t('common.delete')}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Modal>

@@ -905,7 +905,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
                       body: JSON.stringify({ language: newLang }),
                     });
                   } catch (error) {
-                    console.log('Failed to save language preference');
+                    if (__DEV__) console.log('Failed to save language preference');
                   }
                 }}
               >

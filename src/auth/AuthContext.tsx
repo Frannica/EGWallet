@@ -289,7 +289,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
       }
     } catch (e) {
-      console.warn('Logout revoke failed:', e);
+      if (__DEV__) console.warn('Logout revoke failed:', e);
     }
     
     await SecureStore.deleteItemAsync(TOKEN_KEY);
@@ -308,7 +308,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         body: JSON.stringify({ preferredCurrency: currency }),
       });
     } catch (e) {
-      console.warn('updatePreferredCurrency backend call failed:', e);
+      if (__DEV__) console.warn('updatePreferredCurrency backend call failed:', e);
     }
     if (user) setUser({ ...user, preferredCurrency: currency });
   }
@@ -322,7 +322,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         body: JSON.stringify({ autoConvertIncoming: enabled }),
       });
     } catch (e) {
-      console.warn('updateAutoConvert backend call failed:', e);
+      if (__DEV__) console.warn('updateAutoConvert backend call failed:', e);
     }
     if (user) setUser({ ...user, autoConvertIncoming: enabled });
   }

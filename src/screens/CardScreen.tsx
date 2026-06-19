@@ -74,7 +74,7 @@ export default function CardScreen() {
   };
 
   const handleCreateCard = async () => {
-    console.log('[Card] Create Card button pressed');
+    if (__DEV__) console.log('[Card] Create Card button pressed');
     if (isCreating) return;
 
     Alert.alert(
@@ -91,7 +91,7 @@ export default function CardScreen() {
               setLoading(true);
               const walletId = wallets[0]?.id || 'demo';
               await createVirtualCard(auth.token!, walletId, 'USD', 'My Virtual Card');
-              console.log('[Card] Created via API');
+              if (__DEV__) console.log('[Card] Created via API');
               toast.show(t('card.cardCreated'));
               loadCards();
             } catch (error: any) {

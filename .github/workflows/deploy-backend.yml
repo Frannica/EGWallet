@@ -15,9 +15,6 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     container: ghcr.io/railwayapp/cli:latest
-    defaults:
-      run:
-        working-directory: backend
     env:
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
       RAILWAY_SERVICE_ID: 906bb9d4-483a-47aa-a42c-59443af064e8
@@ -32,7 +29,7 @@ jobs:
             --service="$RAILWAY_SERVICE_ID" \
             --environment="$RAILWAY_ENVIRONMENT_ID"
 
-      - name: Record deployed commit on service
+      - name: Record deployed commit
         run: |
           railway variables --set "GIT_COMMIT=${{ github.sha }}" \
             --service="$RAILWAY_SERVICE_ID" \

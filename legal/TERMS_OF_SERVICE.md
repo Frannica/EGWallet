@@ -2,7 +2,7 @@
 
 **EGWallet**
 **Effective Date:** April 15, 2026
-**Last Updated:** April 15, 2026
+**Last Updated:** June 19, 2026
 
 ---
 

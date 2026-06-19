@@ -25,7 +25,7 @@ try {
       return event;
     },
   });
-  console.log('✅ Sentry initialized successfully');
+  if (__DEV__) console.log('✅ Sentry initialized successfully');
 } catch (error) {
   console.error('❌ Sentry initialization failed:', error);
 }
@@ -53,9 +53,9 @@ if (__DEV__) {
 // Wrap in try-catch to capture any import/module errors
 let App;
 try {
-  console.log('📦 Loading App module...');
+  if (__DEV__) console.log('📦 Loading App module...');
   App = require('./App').default;
-  console.log('✅ App module loaded successfully');
+  if (__DEV__) console.log('✅ App module loaded successfully');
 } catch (error) {
   console.error('❌ Failed to load App module:', error);
   Sentry.captureException(error);
