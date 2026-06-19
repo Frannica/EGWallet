@@ -62,6 +62,7 @@ async function registerUser(label) {
   const password = 'AuditTest123!';
   const reg = await api('/auth/register', {
     method: 'POST',
+    headers: { 'x-device-id': `audit-device-${label}-${RUN_ID}` },
     body: { email, password, region: 'US' },
   });
   if (reg.status !== 200) {
@@ -125,12 +126,12 @@ async function sendMoney(token, fromWalletId, toWalletId, amountMinor, currency,
   });
 }
 
-function printScorecard() {
+function printScorecard(localResults = null) {
   console.log('\n═══════════════════════════════════════════════════════════════');
   console.log(' AUDIT SCORECARD');
   console.log(` API: ${API_BASE}`);
   console.log('═══════════════════════════════════════════════════════════════');
-  console.log('#\tFlow\t\t\t\tProduction\tLocal code');
+  console.log('#\tFlow\t\t\t\tResult');
   const rows = [
     ['1', 'Send by @username', '1. Send by @username'],
     ['2', 'Send by Wallet ID', '2. Send by Wallet ID'],
@@ -147,9 +148,9 @@ function printScorecard() {
   ];
   for (const [num, label, key] of rows) {
     const r = results.find(x => x.flow.startsWith(key) || x.flow === key);
-    const prod = r ? r.status : '—';
-    const local = '✅';
-    console.log(`${num}\t${label.padEnd(28)}\t${prod}\t\t${local}`);
+    const status = r ? r.status : '—';
+    const localHint = localResults ? '' : '';
+    console.log(`${num}\t${label.padEnd(28)}\t${status}${localHint}`);
   }
   const pass = results.filter(r => r.status === 'PASS').length;
   const fail = results.filter(r => r.status === 'FAIL').length;
@@ -257,7 +258,7 @@ async function main() {
     receiverBal = afterUnameReceiver;
   }
 
-  // 4–5. Request Money + Pay Request
+  // 4. Request Money
   const reqCreate = await api('/payment-requests', {
     method: 'POST',
     token: receiver.token,
@@ -283,11 +284,15 @@ async function main() {
   const afterPaySender = walletBalance(await getWallets(sender.token));
   const afterPayReceiver = walletBalance(await getWallets(receiver.token));
   const payOk = reqCreate.status === 200 && payReq.status === 200;
-  record('4–5. Request Money + Pay Request', payOk ? 'PASS' : 'FAIL', {
-    createEndpoint: 'POST /payment-requests',
-    payEndpoint: requestId ? `POST /payment-requests/${requestId}/pay` : 'n/a',
-    createStatus: reqCreate.status,
-    payStatus: payReq.status,
+  record('4. Request Money', reqCreate.status === 200 ? 'PASS' : 'FAIL', {
+    endpoint: 'POST /payment-requests',
+    httpStatus: reqCreate.status,
+    requestId,
+    memo: 'audit request',
+  });
+  record('5. Pay Request', payReq.status === 200 ? 'PASS' : 'FAIL', {
+    endpoint: requestId ? `POST /payment-requests/${requestId}/pay` : 'n/a',
+    httpStatus: payReq.status,
     senderStartUSD: major(senderBal),
     senderEndUSD: major(afterPaySender),
     receiverStartUSD: major(receiverBal),
@@ -300,43 +305,7 @@ async function main() {
     receiverBal = afterPayReceiver;
   }
 
-  // 11. Idempotent pay retry
-  let payReplay = { status: 0, data: {} };
-  if (requestId) {
-    payReplay = await api(`/payment-requests/${requestId}/pay`, {
-      method: 'POST',
-      token: sender.token,
-      body: { fromWalletId: sender.walletId },
-      headers: { 'Idempotency-Key': payKey },
-    });
-  }
-  const afterReplaySender = walletBalance(await getWallets(sender.token));
-  const afterReplayReceiver = walletBalance(await getWallets(receiver.token));
-  record('11. Duplicate/idempotent payment retry', payReplay.status === 200 && afterReplaySender === senderBal ? 'PASS' : 'FAIL', {
-    endpoint: 'POST /payment-requests/:id/pay (replay)',
-    httpStatus: payReplay.status,
-    alreadyProcessed: payReplay.data?.idempotentReplay ?? payReplay.data?.request?.status === 'paid',
-    senderBalanceUnchanged: afterReplaySender === senderBal,
-    receiverBalanceUnchanged: afterReplayReceiver === receiverBal,
-    falseFailure: payReplay.status >= 400 ? 'YES' : 'no',
-  });
-
-  // 12. Send idempotency replay (same key as first wallet-ID send)
-  const sendReplay = await sendMoney(sender.token, sender.walletId, receiver.walletId, 10000, 'USD', idKeyWid);
-  const afterSendReplaySender = walletBalance(await getWallets(sender.token));
-  const replayTxId = sendReplay.data?.transaction?.id;
-  const sameTx = replayTxId && txWid && replayTxId === txWid;
-  record('12. Send idempotency / timeout recovery', sendReplay.status === 200 && afterSendReplaySender === senderBal && (sameTx || sendReplay.data?.alreadyProcessed) ? 'PASS' : 'FAIL', {
-    endpoint: 'POST /transactions (Idempotency-Key replay)',
-    httpStatus: sendReplay.status,
-    originalTxId: txWid,
-    replayTxId,
-    sameTransaction: sameTx,
-    senderBalanceUnchanged: afterSendReplaySender === senderBal,
-    doubleCharge: afterSendReplaySender < senderBal ? 'YES — CRITICAL' : 'no',
-  });
-
-  // 3. Send by QR code
+  // 3. Send by QR code (before idempotency replay tests to avoid balance pollution)
   const qrStatic = await api('/qr/static', { token: receiver.token });
   const qrString = qrStatic.data?.qrCode || qrStatic.data?.qrString;
   let qrPass = false;
@@ -376,8 +345,44 @@ async function main() {
     record('3. Send by QR code', 'FAIL', { generateStatus: qrStatic.status, response: qrStatic.data });
   }
 
+  // 11. Idempotent pay retry
+  let payReplay = { status: 0, data: {} };
+  if (requestId) {
+    payReplay = await api(`/payment-requests/${requestId}/pay`, {
+      method: 'POST',
+      token: sender.token,
+      body: { fromWalletId: sender.walletId },
+      headers: { 'Idempotency-Key': payKey },
+    });
+  }
+  const afterReplaySender = walletBalance(await getWallets(sender.token));
+  const afterReplayReceiver = walletBalance(await getWallets(receiver.token));
+  record('11. Duplicate/idempotent payment retry', payReplay.status === 200 && afterReplaySender === senderBal ? 'PASS' : 'FAIL', {
+    endpoint: 'POST /payment-requests/:id/pay (replay)',
+    httpStatus: payReplay.status,
+    alreadyProcessed: payReplay.data?.idempotentReplay ?? payReplay.data?.request?.status === 'paid',
+    senderBalanceUnchanged: afterReplaySender === senderBal,
+    receiverBalanceUnchanged: afterReplayReceiver === receiverBal,
+    falseFailure: payReplay.status >= 400 ? 'YES' : 'no',
+  });
+
+  // 12. Send idempotency replay (same key as first wallet-ID send)
+  const sendReplay = await sendMoney(sender.token, sender.walletId, receiver.walletId, 10000, 'USD', idKeyWid);
+  const afterSendReplaySender = walletBalance(await getWallets(sender.token));
+  const replayTxId = sendReplay.data?.transaction?.id;
+  const sameTx = replayTxId && txWid && replayTxId === txWid;
+  record('12. Send idempotency / timeout recovery', sendReplay.status === 200 && afterSendReplaySender === senderBal && (sameTx || sendReplay.data?.alreadyProcessed) ? 'PASS' : 'FAIL', {
+    endpoint: 'POST /transactions (Idempotency-Key replay)',
+    httpStatus: sendReplay.status,
+    originalTxId: txWid,
+    replayTxId,
+    sameTransaction: sameTx,
+    senderBalanceUnchanged: afterSendReplaySender === senderBal,
+    doubleCharge: afterSendReplaySender < senderBal ? 'YES — CRITICAL' : 'no',
+  });
+
   // 8. Exchange
-  const xafDeposit = await demoDeposit(sender.token, sender.walletId, 600000, 'XAF');
+  const xafDeposit = await demoDeposit(sender.token, sender.walletId, 6000, 'XAF');
   let exchangePass = false;
   if (xafDeposit.ok) {
     const exchKey = `audit-exch-${RUN_ID}`;
@@ -388,7 +393,7 @@ async function main() {
         walletId: sender.walletId,
         fromCurrency: 'XAF',
         toCurrency: 'USD',
-        amount: 600000,
+        amount: 6000,
         idempotencyKey: exchKey,
       },
       headers: { 'Idempotency-Key': exchKey },
@@ -397,7 +402,7 @@ async function main() {
     record('8. Exchange', exchangePass ? 'PASS' : 'FAIL', {
       endpoint: 'POST /exchange',
       httpStatus: exch.status,
-      fromAmountXAF: major(600000, 'XAF'),
+      fromAmountXAF: major(6000, 'XAF'),
       receivedUSD: exch.data?.receivedAmount ? major(exch.data.receivedAmount) : 'n/a',
       transactionId: exch.data?.transaction?.id,
     });
@@ -406,6 +411,7 @@ async function main() {
   }
 
   // 7. Withdraw
+  const withdrawKey = `audit-wd-${RUN_ID}`;
   const withdraw = await api('/withdrawals', {
     method: 'POST',
     token: sender.token,
@@ -417,10 +423,10 @@ async function main() {
       accountNumber: '4242424242424242',
       bankName: 'Audit Bank',
       accountHolderName: 'Audit User',
-      cardExpiry: '12/28',
     },
+    headers: { 'Idempotency-Key': withdrawKey },
   });
-  const withdrawBlocked = withdraw.status === 503 || (IS_LOCAL && withdraw.status === 503);
+  const withdrawBlocked = withdraw.status === 503;
   record('7. Withdraw', withdrawBlocked ? 'BLOCKED' : withdraw.status === 200 ? 'PASS' : 'FAIL', {
     endpoint: 'POST /withdrawals',
     httpStatus: withdraw.status,
@@ -430,7 +436,9 @@ async function main() {
   // 9–10. Balance sync + history
   const walletsFinal = await getWallets(sender.token);
   const txHistory = await api(`/wallets/${sender.walletId}/transactions`, { token: sender.token });
-  const txList = Array.isArray(txHistory.data) ? txHistory.data : [];
+  const txList = Array.isArray(txHistory.data)
+    ? txHistory.data
+    : txHistory.data?.transactions || [];
   record('9. Pull-to-refresh balance sync', walletsFinal.status === 200 ? 'PASS' : 'FAIL', {
     endpoint: 'GET /wallets',
     backendBalanceUSD: major(walletBalance(walletsFinal)),
