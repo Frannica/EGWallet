@@ -5364,6 +5364,20 @@ app.post('/payment-requests/:id/pay', authMiddleware, async (req, res) => {
 
   const request = db.paymentRequests.find(r => r.id === req.params.id);
   if (!request) return res.status(404).json({ error: t('error_request_not_found', req.lang || 'en') });
+
+  // Idempotent replay — payment already succeeded for this payer.
+  if (request.status === 'paid') {
+    if (request.paidBy === req.user.userId && request.transactionId) {
+      const existingTx = db.transactions.find(tx => tx.id === request.transactionId);
+      const replayBody = { request, transaction: existingTx, idempotentReplay: true };
+      if (prClientKey) {
+        saveDurableIdempotency(db, prClientKey, replayBody, req.user.userId);
+        idempotencyStore.set(prClientKey, { userId: req.user.userId, response: replayBody, timestamp: Date.now() });
+      }
+      return res.status(200).json(replayBody);
+    }
+    return res.status(400).json({ error: t('error_request_processed', req.lang || 'en') });
+  }
   if (request.status !== 'pending') return res.status(400).json({ error: t('error_request_processed', req.lang || 'en') });
   
   const fromWallet = db.wallets.find(w => w.id === fromWalletId && w.userId === req.user.userId);
@@ -5372,13 +5386,15 @@ app.post('/payment-requests/:id/pay', authMiddleware, async (req, res) => {
   const toWallet = db.wallets.find(w => w.id === request.walletId);
   if (!toWallet) return res.status(404).json({ error: t('error_destination_wallet_not_found', req.lang || 'en') });
 
+  normalizeWalletBalances(fromWallet);
+  normalizeWalletBalances(toWallet);
+
   const rates = db.rates && db.rates.values ? db.rates.values : {};
   const reqCurrency = request.currency;
   const reqAmount = request.amount; // in minor units
 
   // Determine which balance the payer will debit from.
-  // Prefer exact-currency match; otherwise find the largest balance and convert.
-  let payFromBalance = fromWallet.balances.find(b => b.currency === reqCurrency);
+  let payFromBalance = getWalletBalanceEntry(fromWallet, reqCurrency);
   let debitCurrency = reqCurrency;
   let debitAmount = reqAmount; // minor units in debitCurrency
   let wasConverted = false;
@@ -5388,7 +5404,7 @@ app.post('/payment-requests/:id/pay', authMiddleware, async (req, res) => {
   // Cross-currency FX is not permitted for payroll — bulk-payment (POST /employer/bulk-payment)
   // enforces the same rule, and mixing paths must produce consistent compliance records.
   if (request.type === 'payroll_request') {
-    const exactPayrollBalance = fromWallet.balances.find(b => b.currency === reqCurrency);
+    const exactPayrollBalance = getWalletBalanceEntry(fromWallet, reqCurrency);
     if (!exactPayrollBalance || exactPayrollBalance.amount < reqAmount) {
       logger.warn('[/payment-requests/pay] Payroll pay rejected — no exact-currency balance on funding wallet', {
         requestId: request.id, reqCurrency, reqAmount,
@@ -5433,16 +5449,13 @@ app.post('/payment-requests/:id/pay', authMiddleware, async (req, res) => {
     debitCurrency = richest.currency;
     wasConverted = true;
     // FX fee (1.15%) is charged ON TOP of the debit — sender pays more, receiver gets full amount.
-    // Fee is calculated in the sender's currency proportionally.
     const fxFeeRate = 0.0115;
     fxFeeAmount = Math.round(debitAmount * fxFeeRate); // in sender's currency minor units
     debitAmount = debitAmount + fxFeeAmount; // sender pays reqAmount equivalent + fee
-  } else {
-    payFromBalance = fromWallet.balances.find(b => b.currency === reqCurrency);
   }
 
   // Check balance (covers both exact-match and cross-currency paths)
-  if (payFromBalance.amount < debitAmount) {
+  if (!payFromBalance || payFromBalance.amount < debitAmount) {
     return res.status(400).json({ error: t('error_insufficient_funds', req.lang || 'en') });
   }
 
@@ -5630,13 +5643,30 @@ app.post('/payment-requests/:id/pay', authMiddleware, async (req, res) => {
   }
 
   // Deduct from payer (in their currency, including FX fee if converted)
+  const originalPayFromAmount = payFromBalance.amount;
+  let destBalance = getWalletBalanceEntry(toWallet, reqCurrency);
+  const originalDestAmount = destBalance ? destBalance.amount : null;
+
   payFromBalance.amount -= debitAmount;
 
   // Receiver always gets the exact requested amount — fee came from sender
   const creditAmount = reqAmount;
-  const destBalance = toWallet.balances.find(b => b.currency === reqCurrency);
   if (destBalance) destBalance.amount += creditAmount;
-  else toWallet.balances.push({ currency: reqCurrency, amount: creditAmount });
+  else {
+    destBalance = { currency: reqCurrency, amount: creditAmount };
+    toWallet.balances.push(destBalance);
+  }
+
+  // Integrity: payer must lose funds; receiver must gain funds.
+  if (payFromBalance.amount >= originalPayFromAmount || creditAmount <= 0) {
+    logger.error('[/payment-requests/pay] INTEGRITY FAIL — payer balance did not decrease', {
+      requestId: request.id, originalPayFromAmount, debitAmount,
+    });
+    payFromBalance.amount = originalPayFromAmount;
+    if (destBalance && originalDestAmount !== null) destBalance.amount = originalDestAmount;
+    else if (destBalance) toWallet.balances = toWallet.balances.filter(b => b !== destBalance);
+    return res.status(500).json({ error: t('error_transaction_persist', req.lang || 'en') });
+  }
   
   // Create transaction with proper tagging
   const tx = {
@@ -6191,8 +6221,10 @@ app.post('/qr/pay', authMiddleware, async (req, res) => {
   if (!toWallet) return res.status(404).json({ error: t('error_destination_wallet_not_found', req.lang || 'en') });
   
   // Check balance
-  const fromBalance = fromWallet.balances.find(b => b.currency === paymentCurrency) || { currency: paymentCurrency, amount: 0 };
-  if (fromBalance.amount < paymentAmount) {
+  normalizeWalletBalances(fromWallet);
+  normalizeWalletBalances(toWallet);
+  const debitEntry = getWalletBalanceEntry(fromWallet, paymentCurrency);
+  if (!debitEntry || debitEntry.amount < paymentAmount) {
     return res.status(400).json({ error: t('error_insufficient_funds', req.lang || 'en') });
   }
 
@@ -6215,13 +6247,24 @@ app.post('/qr/pay', authMiddleware, async (req, res) => {
   }
 
   // Process payment
-  fromBalance.amount -= paymentAmount;
-  
-  const destBalance = toWallet.balances.find(b => b.currency === paymentCurrency);
-  if (destBalance) {
-    destBalance.amount += paymentAmount;
-  } else {
-    toWallet.balances.push({ currency: paymentCurrency, amount: paymentAmount });
+  const originalQrFromAmount = debitEntry.amount;
+  let qrDestBalance = getWalletBalanceEntry(toWallet, paymentCurrency);
+  const originalQrDestAmount = qrDestBalance ? qrDestBalance.amount : null;
+
+  debitEntry.amount -= paymentAmount;
+
+  if (qrDestBalance) qrDestBalance.amount += paymentAmount;
+  else {
+    qrDestBalance = { currency: paymentCurrency, amount: paymentAmount };
+    toWallet.balances.push(qrDestBalance);
+  }
+
+  if (debitEntry.amount >= originalQrFromAmount) {
+    logger.error('[/qr/pay] INTEGRITY FAIL — payer balance did not decrease', { originalQrFromAmount, paymentAmount });
+    debitEntry.amount = originalQrFromAmount;
+    if (qrDestBalance && originalQrDestAmount !== null) qrDestBalance.amount = originalQrDestAmount;
+    else if (qrDestBalance) toWallet.balances = toWallet.balances.filter(b => b !== qrDestBalance);
+    return res.status(500).json({ error: t('error_transaction_persist', req.lang || 'en') });
   }
   
   // Create transaction
