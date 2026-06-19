@@ -2746,6 +2746,7 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     environment: NODE_ENV,
+    gitCommit: process.env.GIT_COMMIT || process.env.RAILWAY_GIT_COMMIT_SHA || null,
     database: fs.existsSync(DB_FILE) ? 'connected' : 'missing',
     users: db.users?.length || 0,
     tickets: db.supportTickets?.length || 0,

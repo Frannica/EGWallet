@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'backend/**'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -22,4 +24,15 @@ jobs:
       - name: Deploy to Railway
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: railway up --detach
+        run: |
+          railway up --detach \
+            --service 906bb9d4-483a-47aa-a42c-59443af064e8 \
+            --environment fd41563e-2173-42ef-aa57-579e5a9294b1
+
+      - name: Record deployed commit on service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway variables --set "GIT_COMMIT=${{ github.sha }}" \
+            --service 906bb9d4-483a-47aa-a42c-59443af064e8 \
+            --environment fd41563e-2173-42ef-aa57-579e5a9294b1
