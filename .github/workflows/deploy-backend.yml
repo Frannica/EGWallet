@@ -11,28 +11,26 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    container: ghcr.io/railwayapp/cli:latest
     defaults:
       run:
         working-directory: backend
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_SERVICE_ID: 906bb9d4-483a-47aa-a42c-59443af064e8
+      RAILWAY_ENVIRONMENT_ID: fd41563e-2173-42ef-aa57-579e5a9294b1
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
-
       - name: Deploy to Railway
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          railway up --detach \
-            --service 906bb9d4-483a-47aa-a42c-59443af064e8 \
-            --environment fd41563e-2173-42ef-aa57-579e5a9294b1
+          railway up --ci --detach \
+            --service="$RAILWAY_SERVICE_ID" \
+            --environment="$RAILWAY_ENVIRONMENT_ID"
 
       - name: Record deployed commit on service
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           railway variables --set "GIT_COMMIT=${{ github.sha }}" \
-            --service 906bb9d4-483a-47aa-a42c-59443af064e8 \
-            --environment fd41563e-2173-42ef-aa57-579e5a9294b1
+            --service="$RAILWAY_SERVICE_ID" \
+            --environment="$RAILWAY_ENVIRONMENT_ID"
