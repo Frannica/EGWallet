@@ -53,6 +53,8 @@ const stripeClient = STRIPE_SECRET_KEY ? require('stripe')(STRIPE_SECRET_KEY) : 
 if (!stripeClient) {
   console.warn('[Stripe] STRIPE_SECRET_KEY not set — deposit endpoints will run in test/demo mode');
 }
+// Closed-testing only: allow demo deposits in production when Stripe is not configured.
+const ALLOW_DEMO_DEPOSITS = process.env.ALLOW_DEMO_DEPOSITS === 'true';
 
 // ==================== FIREBASE ADMIN SDK ====================
 // Initialise once; all modules import { firebaseAdmin, firebaseAuth, firestore } from here.
@@ -100,6 +102,9 @@ if (!process.env.PORT || isNaN(PORT) || PORT <= 0) {
   process.exit(1);
 }
 const NODE_ENV = process.env.NODE_ENV || 'development';
+if (ALLOW_DEMO_DEPOSITS && NODE_ENV === 'production' && !stripeClient) {
+  console.warn('[Stripe] ALLOW_DEMO_DEPOSITS=true — demo deposit intents enabled in production (closed testing only)');
+}
 
 // Freshdesk Configuration
 const FRESHDESK_DOMAIN = process.env.FRESHDESK_DOMAIN;
@@ -4676,7 +4681,7 @@ app.post('/deposits/create-intent', authMiddleware,
     }
 
     // Demo / test mode — no Stripe key configured
-    if (NODE_ENV === 'production') {
+    if (NODE_ENV === 'production' && !ALLOW_DEMO_DEPOSITS) {
       logger.error('Deposit attempted in production without Stripe configuration', { userId: req.user.userId });
       return res.status(503).json({ error: 'Deposits require Stripe configuration in production. Contact support.' });
     }
@@ -4766,8 +4771,8 @@ app.post('/deposits/confirm', authMiddleware,
         return res.status(500).json({ error: t('error_internal', req.lang || 'en'), message: err.message });
       }
     } else {
-      // Demo mode — blocked in production
-      if (NODE_ENV === 'production') {
+      // Demo mode — blocked in production unless closed-testing flag is set
+      if (NODE_ENV === 'production' && !ALLOW_DEMO_DEPOSITS) {
         logger.error('Demo deposit confirm attempted in production', { userId: req.user.userId, intentId });
         return res.status(503).json({ error: 'Demo deposits are not permitted in production.' });
       }
