@@ -11,6 +11,7 @@ import { listWallets } from '../api/auth';
 import { fetchRates, DEMO_RATES, Rates, API_BASE, getApiLanguage } from '../api/client';
 import { useLanguage, SupportedLanguage } from '../i18n/LanguageContext';
 import { getApiErrorMessage } from '../utils/apiErrorMessage';
+import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 
 // Full list ordered: popular first, then alphabetical by code
 const CURRENCIES = Object.keys(CURRENCY_INFO).sort((a, b) => {
@@ -78,11 +79,15 @@ export default function SettingsScreen() {
   }, []);
 
   const saveUsername = async () => {
-    const clean = usernameInput.trim();
+    const clean = usernameInput.trim().replace(/^@/, '').toLowerCase();
     if (__DEV__) console.log('[Settings] Save Username pressed:', clean);
     if (!clean || !auth.token) return;
+    if (clean.length < 3 || !/^[a-z0-9_]{3,20}$/.test(clean)) {
+      Alert.alert(t('common.error'), t('apiError.usernameInvalid'));
+      return;
+    }
     try {
-      const res = await fetch(`${API_BASE}/auth/username`, {
+      const res = await fetchWithTokenRefresh(`${API_BASE}/auth/username`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -93,12 +98,19 @@ export default function SettingsScreen() {
       });
       const data = await res.json();
       if (!res.ok) {
-        Alert.alert(t('common.error'), getApiErrorMessage({ message: data.error, status: res.status }, t));
+        Alert.alert(
+          t('common.error'),
+          getApiErrorMessage({ message: data.error, errorCode: data.errorCode, status: res.status }, t),
+        );
         return;
       }
       setUsername(data.username);
+      auth.updateUsername(data.username);
       setShowUsernameModal(false);
-      Alert.alert(t('settings.usernameSetTitle'), `${t('settings.usernameSetMessage')} @${data.username}.`);
+      Alert.alert(
+        t('settings.usernameSetTitle'),
+        t('settings.usernameSetMessage').replace('{{username}}', data.username),
+      );
     } catch (e: any) {
       Alert.alert(t('common.error'), getApiErrorMessage(e, t));
     }

@@ -3123,30 +3123,34 @@ app.get('/auth/me', authMiddleware, (req, res) => {
 });
 
 // Set or update @username — persists to database, enforces uniqueness
-app.put('/auth/username', authMiddleware, (req, res) => {
+function setUsernameHandler(req, res) {
   const db = loadDB();
+  const lang = req.lang || 'en';
   const user = db.users.find(u => u.id === req.user.userId);
-  if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
+  if (!user) return res.status(404).json({ error: t('error_user_not_found', lang), errorCode: 'error_user_not_found' });
 
   const raw = req.body.username;
-  if (!raw || typeof raw !== 'string') return res.status(400).json({ error: t('error_username_required', req.lang || 'en') });
+  if (!raw || typeof raw !== 'string') {
+    return res.status(400).json({ error: t('error_username_required', lang), errorCode: 'error_username_required' });
+  }
 
   const normalized = raw.replace(/^@/, '').toLowerCase().trim();
   if (!/^[a-z0-9_]{3,20}$/.test(normalized)) {
-    return res.status(400).json({ error: t('error_username_invalid', req.lang || 'en') });
+    return res.status(400).json({ error: t('error_username_invalid', lang), errorCode: 'error_username_invalid' });
   }
 
-  // Uniqueness check — skip if user already owns this name
   const existing = db.users.find(u => u.username === normalized);
   if (existing && existing.id !== user.id) {
-    return res.status(409).json({ error: t('error_username_taken', req.lang || 'en') });
+    return res.status(409).json({ error: t('error_username_taken', lang), errorCode: 'error_username_taken' });
   }
 
   user.username = normalized;
   saveDB(db);
   logger.info('Username updated', { userId: user.id, username: normalized });
   res.json({ username: normalized });
-});
+}
+app.put('/auth/username', authMiddleware, setUsernameHandler);
+app.post('/auth/username', authMiddleware, setUsernameHandler);
 
 // Refresh-token rate limiter — mobile apps refresh frequently; 20/15 min allows
 // normal background refresh while blocking brute-force token-grinding.
@@ -9863,10 +9867,12 @@ app.use((err, req, res, next) => {
 
 // 404 handler
 app.use((req, res) => {
+  const lang = req.lang || 'en';
   logger.warn('404 Not Found', { path: req.path, method: req.method, ip: req.clientIP });
-  res.status(404).json({ 
-    error: 'Not found', 
-    path: req.path 
+  res.status(404).json({
+    error: t('error_not_found', lang),
+    errorCode: 'error_not_found',
+    path: req.path,
   });
 });
 

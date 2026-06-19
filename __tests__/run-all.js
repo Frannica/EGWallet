@@ -21,6 +21,7 @@ const SUITES = [
   ['Phase 16 — Send money integrity (double-spend fix)',  require('./regression/phase16.test')],
   ['Phase 17 — P2P send simulation (7-phone loop)',       require('../backend/__tests__/send-integrity.test.js')],
   ['Phase 18 — Money sync + idempotent pay fixes',      require('./regression/phase18.test')],
+  ['Phase 19 — Username creation + localized API errors', require('./regression/phase19.test')],
   ['Money flow — $300 split + idempotent pay',            require('../backend/__tests__/money-flow.test.js')],
 ];
 

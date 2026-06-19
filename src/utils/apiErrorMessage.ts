@@ -1,8 +1,41 @@
 export type ApiErrorLike = {
   message?: string;
   code?: string;
+  errorCode?: string;
   limitType?: string;
   status?: number;
+};
+
+const ERROR_CODE_TO_I18N: Record<string, string> = {
+  error_not_found: 'apiError.notFound',
+  error_user_not_found: 'apiError.userNotFound',
+  error_username_invalid: 'apiError.usernameInvalid',
+  error_username_taken: 'apiError.usernameTaken',
+  error_username_required: 'apiError.usernameRequired',
+  error_invalid_token: 'apiError.invalidToken',
+  error_missing_token: 'apiError.invalidToken',
+  error_wallet_not_found: 'apiError.walletNotFound',
+  error_request_not_found: 'apiError.requestNotFound',
+  error_internal: 'apiError.internalError',
+};
+
+/** Normalize backend error text for legacy responses without errorCode. */
+function normalizeMessage(msg: string): string {
+  return msg.trim().replace(/\.$/, '').toLowerCase();
+}
+
+const MESSAGE_TO_I18N: Record<string, string> = {
+  'not found': 'apiError.notFound',
+  'user not found': 'apiError.userNotFound',
+  'username must be 3-20 characters (letters, numbers, underscores only)': 'apiError.usernameInvalid',
+  'username already taken': 'apiError.usernameTaken',
+  'username is required': 'apiError.usernameRequired',
+  'invalid token': 'apiError.invalidToken',
+  'invalid token.': 'apiError.invalidToken',
+  'missing token': 'apiError.invalidToken',
+  'wallet not found': 'apiError.walletNotFound',
+  'request not found': 'apiError.requestNotFound',
+  'internal server error': 'apiError.internalError',
 };
 
 /** True only for transport-layer failures, not HTTP error bodies from the server. */
@@ -24,6 +57,15 @@ function isTransportError(message: string): boolean {
 export function getApiErrorMessage(e: ApiErrorLike, t: (key: string) => string): string {
   const msg = e?.message || '';
 
+  if (e?.errorCode && ERROR_CODE_TO_I18N[e.errorCode]) {
+    return t(ERROR_CODE_TO_I18N[e.errorCode]);
+  }
+
+  const normalized = normalizeMessage(msg);
+  if (normalized && MESSAGE_TO_I18N[normalized]) {
+    return t(MESSAGE_TO_I18N[normalized]);
+  }
+
   if (e?.code === 'LIMIT_EXCEEDED' || e?.code === 'PAYROLL_LIMIT_EXCEEDED' || (e?.status === 403 && e?.limitType)) {
     const limit = msg.match(/\$[\d,]+/)?.[0] ?? '';
     if (e.limitType === 'weekly') {
@@ -44,7 +86,7 @@ export function getApiErrorMessage(e: ApiErrorLike, t: (key: string) => string):
   if (/timed out|timeout/i.test(msg)) {
     return t('common.requestTimeout');
   }
-  // HTTP responses must never be shown as generic network failures
+
   if (e?.status && e.status >= 400) {
     if (msg === 'Create card failed') return t('card.createFailed');
     if (msg === 'Toggle freeze failed' || msg === 'Delete card failed') return t('card.actionFailed');
@@ -52,8 +94,13 @@ export function getApiErrorMessage(e: ApiErrorLike, t: (key: string) => string):
     if (msg === 'Exchange failed') return t('exchange.rateError');
     if (msg === 'Quote unavailable') return t('exchange.rateError');
     if (msg === 'Withdrawal failed') return t('send.backendUnavailable');
-    return msg || t('send.backendUnavailable');
+    if (e.status === 404) return t('apiError.notFound');
+    if (e.status === 401) return t('apiError.invalidToken');
+    if (e.status === 409 && /username/i.test(msg)) return t('apiError.usernameTaken');
+    if (e.status === 400 && /username/i.test(msg)) return t('apiError.usernameInvalid');
+    return t('apiError.requestFailed');
   }
+
   if (isTransportError(msg)) {
     return t('common.networkError');
   }
@@ -65,5 +112,5 @@ export function getApiErrorMessage(e: ApiErrorLike, t: (key: string) => string):
   if (msg === 'Quote unavailable') return t('exchange.rateError');
   if (msg === 'Withdrawal failed') return t('send.backendUnavailable');
 
-  return msg || t('send.backendUnavailable');
+  return msg ? t('apiError.requestFailed') : t('apiError.requestFailed');
 }

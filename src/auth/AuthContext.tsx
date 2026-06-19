@@ -28,7 +28,7 @@ async function syncLanguageToBackend(token: string) {
 }
 
 type AuthState = {
-  user: { id: string; email: string; preferredCurrency?: string; autoConvertIncoming?: boolean; region?: string } | null;
+  user: { id: string; email: string; username?: string | null; preferredCurrency?: string; autoConvertIncoming?: boolean; region?: string } | null;
   token: string | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
@@ -37,6 +37,7 @@ type AuthState = {
   handleTokenExpired: () => Promise<void>;
   updatePreferredCurrency: (currency: string) => Promise<void>;
   updateAutoConvert: (enabled: boolean) => Promise<void>;
+  updateUsername: (username: string) => void;
 };
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
@@ -52,7 +53,7 @@ export function useAuth() {
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { t: tl } = useLanguage();
-  const [user, setUser] = useState<{ id: string; email: string; preferredCurrency?: string; autoConvertIncoming?: boolean; region?: string } | null>(null);
+  const [user, setUser] = useState<{ id: string; email: string; username?: string | null; preferredCurrency?: string; autoConvertIncoming?: boolean; region?: string } | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -326,8 +327,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (user) setUser({ ...user, autoConvertIncoming: enabled });
   }
 
+  function updateUsername(username: string) {
+    if (user) setUser({ ...user, username });
+  }
+
   return (
-    <AuthContext.Provider value={{ user, token, loading, signIn, signUp, signOut, handleTokenExpired, updatePreferredCurrency, updateAutoConvert }}>
+    <AuthContext.Provider value={{ user, token, loading, signIn, signUp, signOut, handleTokenExpired, updatePreferredCurrency, updateAutoConvert, updateUsername }}>
       {children}
     </AuthContext.Provider>
   );
