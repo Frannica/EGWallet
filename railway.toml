@@ -1,0 +1,13 @@
+# Railway config for the EGWallet monorepo.
+# The backend service must NOT run Expo Metro — start the Express API from backend/.
+
+[build]
+builder = "NIXPACKS"
+buildCommand = "npm install --prefix backend"
+
+[deploy]
+startCommand = "npm --prefix backend start"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+healthcheckPath = "/health"
+healthcheckTimeout = 300

@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'backend/**'
+      - 'railway.toml'
+      - 'railway.json'
+      - 'Procfile'
       - '.github/workflows/deploy-backend.yml'
   workflow_dispatch:
 
