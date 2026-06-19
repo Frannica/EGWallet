@@ -9,6 +9,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { Ionicons } from '@expo/vector-icons';
 import { getLocalBalances, mergeWithLocalBalances, syncLocalBalancesFromBackend } from '../utils/localBalance';
+import { refreshWalletFromBackend } from '../utils/walletSync';
 import { useLanguage } from '../i18n/LanguageContext';
 import { getApiErrorMessage } from '../utils/apiErrorMessage';
 
@@ -54,13 +55,7 @@ export default function WalletScreen() {
     setLoading(true);
     setApiError(null);
     try {
-      const res = await listWallets(auth.token);
-      // Sync backend balances to local — backend is authoritative when reachable.
-      // This overwrites any stale local values so a server-side refund or
-      // admin correction is always reflected on the next successful fetch.
-      await syncLocalBalancesFromBackend(res.wallets || []);
-      const localBalances = await getLocalBalances();
-      const mergedWallets = mergeWithLocalBalances(res.wallets || [], localBalances);
+      const { wallets: mergedWallets } = await refreshWalletFromBackend(auth.token);
       setWallets(mergedWallets);
       setApiError(null);
     } catch (e: any) {

@@ -1,10 +1,9 @@
 /**
  * localBalance — Persistent local wallet balance via AsyncStorage.
  *
- * Railway backend runs old code that lacks /deposits and /withdrawals
- * endpoints, so all balance changes are stored locally and merged on top of
- * whatever the backend returns.  Once the backend is redeployed we take the
- * max(backend, local) per currency so nothing breaks.
+ * Backend balances are authoritative. syncLocalBalancesFromBackend() overwrites
+ * local cache on every successful fetch. Local debits are not used to override
+ * backend values — only pending-withdrawal holds affect available-balance UI.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -56,14 +55,6 @@ export async function debitLocalBalance(
   const balances = await getLocalBalances();
   balances[currency] = Math.max(0, (balances[currency] || 0) - Math.abs(minorAmount));
   await AsyncStorage.setItem(BALANCE_KEY, JSON.stringify(balances));
-  // Record debit timestamp so syncLocalBalancesFromBackend won't overwrite this
-  // with a stale (higher) backend value during the grace window.
-  try {
-    const raw = await AsyncStorage.getItem(LAST_DEBIT_KEY);
-    const times: Record<string, number> = raw ? JSON.parse(raw) : {};
-    times[currency] = Date.now();
-    await AsyncStorage.setItem(LAST_DEBIT_KEY, JSON.stringify(times));
-  } catch { /* non-critical */ }
   return balances;
 }
 
@@ -145,18 +136,7 @@ export async function clearLocalUserData(): Promise<void> {
 
 /**
  * Sync local balances from the backend-authoritative values.
- *
- * Debit-protection: once a currency has been locally debited, we NEVER let
- * the backend raise that currency's local balance until the backend confirms
- * the debit by returning a value ≤ our local amount.  This prevents a
- * backend restart (ephemeral filesystem) from silently restoring a stale
- * pre-withdrawal balance and allowing overdrafts.
- *
- * Protection clears automatically once the backend catches up (returns ≤ local),
- * or when the user signs out (clearLocalUserData).
- *
- * Currencies the user has never debited locally are trusted from the backend
- * (covers received payments, admin credits, etc.).
+ * Backend always wins — overwrites local cache and clears stale debit protection.
  */
 export async function syncLocalBalancesFromBackend(
   backendWallets: Array<{ balances: Array<{ currency: string; amount: number }> }>
@@ -165,50 +145,15 @@ export async function syncLocalBalancesFromBackend(
     const primary = backendWallets[0];
     if (!primary) return;
 
-    const [rawLocal, rawDebitTimes] = await Promise.all([
-      AsyncStorage.getItem(BALANCE_KEY),
-      AsyncStorage.getItem(LAST_DEBIT_KEY),
-    ]);
-    const localBals: LocalBalances = rawLocal ? JSON.parse(rawLocal) : {};
-    const debitTimes: Record<string, number> = rawDebitTimes ? JSON.parse(rawDebitTimes) : {};
-    let debitTimesChanged = false;
-
     const synced: LocalBalances = {};
     for (const b of primary.balances || []) {
-      const hasDebitRecord = !!debitTimes[b.currency];
-      const localAmt = localBals[b.currency];
-
-      // Zero-reset guard: only when debit protection is active (pending local debit).
-      // Without hasDebitRecord, trust backend zero (real empty balance).
-      if (b.amount === 0 && localAmt !== undefined && localAmt > 0 && hasDebitRecord) {
-        synced[b.currency] = localAmt;
-        continue;
-      }
-
-      if (hasDebitRecord && localAmt !== undefined) {
-        if (b.amount <= localAmt) {
-          // Backend confirmed the debit (returned same or lower) — trust it
-          // and clear the debit protection so future receives can flow through.
-          synced[b.currency] = b.amount;
-          delete debitTimes[b.currency];
-          debitTimesChanged = true;
-        } else {
-          // Backend is reporting MORE than our local balance.
-          // This means the backend is stale (e.g. Railway restart reset db.json).
-          // NEVER let the backend raise the balance — keep local (lower) value.
-          synced[b.currency] = localAmt;
-        }
-      } else {
-        // No prior local debit for this currency — trust backend.
-        // Covers: fresh install, first load, received payments, admin credits.
-        synced[b.currency] = b.amount;
-      }
+      const n = Number(b.amount);
+      synced[b.currency] = Number.isFinite(n) ? Math.round(n) : 0;
     }
 
     await AsyncStorage.setItem(BALANCE_KEY, JSON.stringify(synced));
-    if (debitTimesChanged) {
-      await AsyncStorage.setItem(LAST_DEBIT_KEY, JSON.stringify(debitTimes));
-    }
+    // Clear legacy debit-protection timestamps — backend is authoritative.
+    await AsyncStorage.removeItem(LAST_DEBIT_KEY);
   } catch {
     // ignore storage errors — local sync is best-effort
   }
@@ -226,10 +171,8 @@ export async function getLocalTransactions(): Promise<LocalTransaction[]> {
 
 /**
  * Merge local balances into a backend wallet array.
- * Local balance is preferred when present because it reflects optimistic
- * UI updates (deposits/withdrawals) made since the last backend sync.
- * Backend sync via syncLocalBalancesFromBackend() keeps local truthful
- * on every successful fetch, preventing permanent drift.
+ * Backend amounts are used directly; local only adds currencies absent from backend
+ * (e.g. deposit not yet reflected server-side).
  */
 export function mergeWithLocalBalances(
   wallets: any[],
@@ -238,15 +181,12 @@ export function mergeWithLocalBalances(
   if (!wallets.length) return wallets;
 
   return wallets.map((wallet, idx) => {
-    if (idx !== 0) return wallet; // only touch the primary wallet
+    if (idx !== 0) return wallet;
     const existing: Record<string, number> = {};
     const mergedBalances = (wallet.balances || []).map((b: any) => {
       existing[b.currency] = 1;
-      // Backend is the financial authority. Local balance only supplements currencies
-      // not present in the backend response (e.g. a deposit not yet reflected server-side).
       return { ...b, amount: b.amount };
     });
-    // Add currencies that exist locally but not in backend wallet
     Object.entries(localBalances).forEach(([cur, amt]) => {
       if (!existing[cur] && amt > 0) {
         mergedBalances.push({ currency: cur, amount: amt });
@@ -255,4 +195,3 @@ export function mergeWithLocalBalances(
     return { ...wallet, balances: mergedBalances };
   });
 }
-

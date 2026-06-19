@@ -41,11 +41,11 @@ module.exports = function phase10(check) {
     !LOCAL_BALANCE.includes('lastDebitTime + '),
   );
 
-  // ── 3. Event-driven protection: backend amount <= local triggers clear ─────
+  // ── 3. Backend overwrites local on every successful sync ─────────────────
   check(
-    'Protection clears when b.amount <= localAmt (backend confirmed debit)',
-    LOCAL_BALANCE.includes('b.amount <= localAmt') ||
-    LOCAL_BALANCE.includes('b.amount <= local'),
+    'syncLocalBalancesFromBackend overwrites local from backend (authoritative)',
+    LOCAL_BALANCE.includes('removeItem(LAST_DEBIT_KEY)') &&
+    LOCAL_BALANCE.includes('Backend always wins'),
   );
 
   // ── 4. Backend withBalanceMutex serialises money mutations ───────────────

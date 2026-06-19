@@ -7,11 +7,11 @@ import { useAuth } from '../auth/AuthContext';
 import { API_BASE, getApiLanguage } from '../api/client';
 import { useLanguage } from '../i18n/LanguageContext';
 import { minorToMajor, formatMajorAmount } from '../utils/currency';
-import { debitLocalBalance } from '../utils/localBalance';
+import { payPaymentRequest, generateId } from '../api/transactions';
+import { refreshWalletFromBackend } from '../utils/walletSync';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// formatAmount: format a major-unit amount with correct decimals and commas
 function formatAmount(amountMajor: number, currency: string): string {
   return formatMajorAmount(amountMajor, currency);
 }
@@ -38,6 +38,37 @@ interface FeePreview {
   fxFeeAmount: number;
 }
 
+function showPaymentSuccessAlert(
+  t: (key: string) => string,
+  navigation: any,
+  request: PaymentRequest,
+  tx: any,
+) {
+  if (tx?.wasConverted) {
+    const debitDisplay = formatAmount(minorToMajor(tx.amount, tx.currency), tx.currency);
+    const feeDisplay = formatAmount(minorToMajor(tx.fxFeeAmount, tx.currency), tx.currency);
+    const creditDisplay = formatAmount(minorToMajor(tx.receivedAmount, tx.receivedCurrency), tx.receivedCurrency);
+    Alert.alert(
+      t('payRequest.paymentSentTitle'),
+      t('payRequest.paymentSentFxMsg')
+        .replace('{debitAmount}', debitDisplay)
+        .replace('{debitCurrency}', tx.currency)
+        .replace('{creditAmount}', creditDisplay)
+        .replace('{creditCurrency}', tx.receivedCurrency)
+        .replace('{feeAmount}', feeDisplay)
+        .replace('{feeCurrency}', tx.currency),
+      [{ text: t('common.done'), onPress: () => navigation.goBack() }],
+    );
+  } else {
+    const displayAmount = formatAmount(minorToMajor(request.amount, request.currency), request.currency);
+    Alert.alert(
+      t('payRequest.paymentSentTitle'),
+      t('payRequest.paymentSentMsg').replace('{{amount}}', displayAmount).replace('{{currency}}', request.currency),
+      [{ text: t('common.done'), onPress: () => navigation.goBack() }],
+    );
+  }
+}
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export default function PayRequestScreen({ route, navigation }: any) {
@@ -52,6 +83,7 @@ export default function PayRequestScreen({ route, navigation }: any) {
   const [error, setError] = useState('');
   const [walletId, setWalletId] = useState<string | null>(null);
   const [feePreview, setFeePreview] = useState<FeePreview | null>(null);
+  const payIdempotencyKeyRef = useRef(generateId());
   const isMounted = useRef(true);
   useEffect(() => () => { isMounted.current = false; }, []);
 
@@ -77,16 +109,12 @@ export default function PayRequestScreen({ route, navigation }: any) {
       .finally(() => setLoading(false));
   }, [requestId]);
 
-  // Fetch wallet + fee preview once request is loaded and user is logged in
   useEffect(() => {
     if (!request || request.status !== 'pending' || !auth.token) return;
     (async () => {
       try {
-        const walletsRes = await fetch(`${API_BASE}/wallets`, {
-          headers: { Authorization: `Bearer ${auth.token}`, 'Accept-Language': getApiLanguage() },
-        });
-        const walletsData = await walletsRes.json();
-        const wid = walletsData.wallets?.[0]?.id;
+        const { wallets } = await refreshWalletFromBackend(auth.token!);
+        const wid = wallets?.[0]?.id;
         if (!wid) return;
         setWalletId(wid);
 
@@ -122,64 +150,32 @@ export default function PayRequestScreen({ route, navigation }: any) {
     if (!request) return;
     setPaying(true);
     try {
-      // Reuse cached walletId or fetch if needed
       let wid = walletId;
       if (!wid) {
-        const walletsRes = await fetch(`${API_BASE}/wallets`, {
-          headers: { Authorization: `Bearer ${auth.token}`, 'Accept-Language': getApiLanguage() },
-        });
-        const walletsData = await walletsRes.json();
-        wid = walletsData.wallets?.[0]?.id;
+        const { wallets } = await refreshWalletFromBackend(auth.token);
+        wid = wallets?.[0]?.id;
         if (!wid) throw new Error(t('payRequest.noWallet'));
         setWalletId(wid);
       }
 
-      const payRes = await fetch(`${API_BASE}/payment-requests/${request.id}/pay`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${auth.token}`,
-          'Accept-Language': getApiLanguage(),
-        },
-        body: JSON.stringify({ fromWalletId: wid }),
-      });
-      const payData = await payRes.json();
-      if (!payRes.ok) throw new Error(payData.error || t('payRequest.paymentFailed'));
+      const payData = await payPaymentRequest(
+        auth.token,
+        request.id,
+        wid,
+        payIdempotencyKeyRef.current,
+      );
+      payIdempotencyKeyRef.current = generateId();
 
-      setRequest(prev => prev ? { ...prev, status: 'paid' } : prev);
+      const paidRequest = payData.request || request;
+      setRequest(prev => prev ? { ...prev, ...paidRequest, status: 'paid' } : prev);
 
-      const tx = payData.transaction;
-      // Debit local balance immediately so the wallet screen shows the correct amount
-      // tx.amount/tx.currency reflect the actual debited currency (handles FX case)
-      const debitCurr = tx?.currency || request.currency;
-      const debitAmt: number = tx != null ? tx.amount : request.amount;
-      await debitLocalBalance(debitCurr, debitAmt);
-      if (tx?.wasConverted) {
-        const debitDisplay = formatAmount(minorToMajor(tx.amount, tx.currency), tx.currency);
-        const feeDisplay = formatAmount(minorToMajor(tx.fxFeeAmount, tx.currency), tx.currency);
-        const creditDisplay = formatAmount(minorToMajor(tx.receivedAmount, tx.receivedCurrency), tx.receivedCurrency);
-        Alert.alert(
-          t('payRequest.paymentSentTitle'),
-          t('payRequest.paymentSentFxMsg')
-            .replace('{debitAmount}', debitDisplay)
-            .replace('{debitCurrency}', tx.currency)
-            .replace('{creditAmount}', creditDisplay)
-            .replace('{creditCurrency}', tx.receivedCurrency)
-            .replace('{feeAmount}', feeDisplay)
-            .replace('{feeCurrency}', tx.currency),
-          [{ text: t('common.done'), onPress: () => navigation.goBack() }]
-        );
-      } else {
-        const displayAmount = formatAmount(minorToMajor(request.amount, request.currency), request.currency);
-        Alert.alert(
-          t('payRequest.paymentSentTitle'),
-          t('payRequest.paymentSentMsg').replace('{{amount}}', displayAmount).replace('{{currency}}', request.currency),
-          [{ text: t('common.done'), onPress: () => navigation.goBack() }]
-        );
-      }
+      showPaymentSuccessAlert(t, navigation, { ...request, status: 'paid' }, payData.transaction);
     } catch (e: any) {
       Alert.alert(t('payRequest.paymentFailed'), e.message || t('payRequest.couldNotProcess'));
     } finally {
+      if (auth.token) {
+        try { await refreshWalletFromBackend(auth.token); } catch { /* best-effort */ }
+      }
       if (isMounted.current) setPaying(false);
     }
   };
@@ -215,7 +211,6 @@ export default function PayRequestScreen({ route, navigation }: any) {
   const isCancelled = request.status === 'cancelled';
   const displayAmount = minorToMajor(request.amount, request.currency);
 
-  // Pay button label: show sender's actual currency/amount if conversion applies
   const payBtnLabel = feePreview?.wasConverted
     ? t('payRequest.payBtn')
         .replace('{{amount}}', formatAmount(minorToMajor(feePreview.debitAmount, feePreview.debitCurrency), feePreview.debitCurrency))
@@ -251,7 +246,6 @@ export default function PayRequestScreen({ route, navigation }: any) {
           <Text style={styles.memo}>"{request.memo}"</Text>
         )}
 
-        {/* FX fee breakdown — shown when sender's currency differs from request currency */}
         {!isPaid && !isCancelled && feePreview?.wasConverted && (
           <View style={styles.feeBox}>
             <View style={styles.feeRow}>
@@ -486,4 +480,3 @@ const styles = StyleSheet.create({
     paddingLeft: 18,
   },
 });
-

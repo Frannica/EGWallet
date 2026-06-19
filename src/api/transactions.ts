@@ -100,6 +100,60 @@ export async function fetchFxQuote(
   return res.json();
 }
 
+const MONEY_OP_TIMEOUT_MS = 30000;
+
+/** POST with idempotency key — retries once on transport failure or ambiguous non-OK. */
+async function postWithIdempotencyRetry(
+  url: string,
+  body: string,
+  idempotencyKey: string,
+  timeoutMs = MONEY_OP_TIMEOUT_MS,
+): Promise<any> {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Idempotency-Key': idempotencyKey,
+    'Accept-Language': getApiLanguage(),
+  };
+
+  async function postOnce(signal?: AbortSignal) {
+    return fetchWithTokenRefresh(url, { method: 'POST', headers, body, signal });
+  }
+
+  async function reconcile(): Promise<any | null> {
+    try {
+      const retry = await postOnce();
+      if (retry.ok) return retry.json();
+    } catch { /* fall through */ }
+    return null;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await postOnce(controller.signal);
+  } catch (err: any) {
+    const reconciled = await reconcile();
+    if (reconciled) return reconciled;
+    if (err?.name === 'AbortError') {
+      throw new Error('Request timed out. Please try again.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (!res.ok) {
+    const reconciled = await reconcile();
+    if (reconciled) return reconciled;
+    const err = await res.json().catch(() => ({}));
+    throwApiError(err, 'Request failed', res.status, { idempotencyKey });
+  }
+
+  return res.json();
+}
+
 export async function sendTransaction(
   token: string,
   fromWalletId: string,
@@ -112,63 +166,34 @@ export async function sendTransaction(
 ) {
   const idempotencyKey = callerIdempotencyKey || generateId();
 
-  const body = JSON.stringify({
-    fromWalletId,
-    toWalletId,
-    amount,
-    currency,
-    memo,
+  return postWithIdempotencyRetry(
+    `${API_BASE}/transactions`,
+    JSON.stringify({
+      fromWalletId,
+      toWalletId,
+      amount,
+      currency,
+      memo,
+      idempotencyKey,
+    }),
     idempotencyKey,
-  });
+  );
+}
 
-  const headers = {
-    'Content-Type': 'application/json',
-    'Idempotency-Key': idempotencyKey,
-    'Accept-Language': getApiLanguage(),
-  };
+/** Pay a payment request with idempotency retry (same key on double-tap / timeout). */
+export async function payPaymentRequest(
+  token: string,
+  requestId: string,
+  fromWalletId: string,
+  callerIdempotencyKey?: string,
+): Promise<any> {
+  const idempotencyKey = callerIdempotencyKey || generateId();
 
-  async function postOnce(signal?: AbortSignal) {
-    return fetchWithTokenRefresh(`${API_BASE}/transactions`, {
-      method: 'POST',
-      headers,
-      body,
-      signal,
-    });
-  }
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-  let res: Response;
-  try {
-    res = await postOnce(controller.signal);
-  } catch (err: any) {
-    // Reconcile: server may have succeeded before the client saw the response.
-    if (err?.name === 'AbortError') {
-      try {
-        const retry = await postOnce();
-        if (retry.ok) return retry.json();
-      } catch { /* fall through */ }
-      throw new Error('Request timed out. Please try again.');
-    }
-    try {
-      const retry = await postOnce();
-      if (retry.ok) return retry.json();
-    } catch { /* fall through */ }
-    throw err;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    const error = new Error(err.error || 'Send failed') as Error & { code?: string; limitType?: string };
-    error.code = err.code;
-    error.limitType = err.limitType;
-    throw error;
-  }
-
-  return res.json();
+  return postWithIdempotencyRetry(
+    `${API_BASE}/payment-requests/${encodeURIComponent(requestId)}/pay`,
+    JSON.stringify({ fromWalletId, idempotencyKey }),
+    idempotencyKey,
+  );
 }
 
 export async function fetchTransactions(

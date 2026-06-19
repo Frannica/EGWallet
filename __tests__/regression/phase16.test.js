@@ -15,10 +15,14 @@ module.exports = function phase16(check) {
     BACKEND.includes('error_cannot_send_to_self'),
   );
   check(
-    '[Send] POST /transactions uses getWalletBalanceEntry (no detached balance object)',
-    BACKEND.includes('function getWalletBalanceEntry') &&
-    BACKEND.includes('getWalletBalanceEntry(fromWallet, currency)') &&
-    !BACKEND.includes("|| { currency, amount: 0 }"),
+    '[Send] POST /transactions uses getWalletBalanceEntry (no detached balance in /transactions)',
+    (() => {
+      const start = BACKEND.indexOf("app.post('/transactions'");
+      const end = BACKEND.indexOf("app.post('/exchange'", start);
+      const block = BACKEND.slice(start, end > start ? end : start + 8000);
+      return block.includes('getWalletBalanceEntry(fromWallet, currency)') &&
+        !block.includes("|| { currency, amount: 0 }");
+    })(),
   );
   check(
     '[Send] POST /transactions integrity check — sender balance must decrease',
@@ -31,12 +35,12 @@ module.exports = function phase16(check) {
   );
   check(
     '[Send] sendTransaction reconciles with idempotency retry after transport failure',
-    TXNS.includes('const retry = await postOnce()') &&
-    TXNS.includes('30000'),
+    TXNS.includes('postWithIdempotencyRetry') &&
+    TXNS.includes('MONEY_OP_TIMEOUT_MS = 30000'),
   );
   check(
-    '[LocalBalance] zero-reset guard only applies with active debit protection',
-    LOCAL.includes('hasDebitRecord) {') &&
-    LOCAL.includes('b.amount === 0 && localAmt !== undefined && localAmt > 0 && hasDebitRecord'),
+    '[LocalBalance] backend overwrites local cache on sync (no stale local override)',
+    LOCAL.includes('removeItem(LAST_DEBIT_KEY)') &&
+    LOCAL.includes('Backend always wins'),
   );
 };

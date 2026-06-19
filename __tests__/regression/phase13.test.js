@@ -84,7 +84,7 @@ module.exports = function phase13(check) {
 
   check(
     '[Withdrawal] checkBalanceAndProceed subtracts pending withdrawals from available balance',
-    SEND.includes('getPendingWithdrawals') && SEND.includes('pendingMajor') && SEND.includes('grossMajor - pendingMajor'),
+    SEND.includes('getPendingWithdrawals') && SEND.includes('pendingMajor') && SEND.includes('backendMajor - pendingMajor'),
   );
 
   check(
@@ -162,7 +162,7 @@ module.exports = function phase13(check) {
       const fnEnd   = SEND.indexOf('\n  async function ', fnStart + 1);
       const fnBody  = fnStart !== -1 ? SEND.slice(fnStart, fnEnd !== -1 ? fnEnd : fnStart + 3000) : '';
       const loadingIdx   = fnBody.indexOf('setLoading(true)');
-      const firstAwaitIdx = fnBody.indexOf('await getLocalBalances');
+      const firstAwaitIdx = fnBody.indexOf('await refreshAndSetWallets');
       return loadingIdx !== -1 && firstAwaitIdx !== -1 && loadingIdx < firstAwaitIdx;
     })(),
   );

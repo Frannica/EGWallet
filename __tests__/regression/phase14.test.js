@@ -11,28 +11,26 @@ const be   = fs.readFileSync(path.resolve(__dirname, '../../backend/index.js'), 
 
 module.exports = function phase14(check) {
 
-  // A: Balance not updating after withdrawal
-  check('[LocalBalance] Zero-reset guard present in syncLocalBalancesFromBackend',
-    lb.includes('b.amount === 0 && localAmt !== undefined && localAmt > 0 && hasDebitRecord'));
-  check('[LocalBalance] Zero-reset guard uses continue before debitTimes logic',
-    lb.includes('synced[b.currency] = localAmt;') &&
-    lb.includes('continue;') &&
-    lb.indexOf('synced[b.currency] = localAmt;') < lb.indexOf('hasDebitRecord && localAmt !== undefined'));
-  check('[LocalBalance] debitTimes protection still fires for non-zero stale backend values',
-    lb.includes('hasDebitRecord && localAmt !== undefined') && lb.includes('b.amount <= localAmt'));
+  // A: Backend is authoritative for balance sync
+  check('[LocalBalance] syncLocalBalancesFromBackend overwrites from backend',
+    lb.includes('synced[b.currency] =') && lb.includes('removeItem(LAST_DEBIT_KEY)'));
+  check('[LocalBalance] walletSync refreshWalletFromBackend used for authoritative fetch',
+    fs.existsSync(path.resolve(__dirname, '../../src/utils/walletSync.ts')));
+  check('[SendScreen] refreshAndSetWallets syncs from backend before balance checks',
+    send.includes('refreshAndSetWallets') && send.includes('refreshWalletFromBackend'));
   check('[SendScreen] useFocusEffect imported from @react-navigation/native',
     send.includes('useFocusEffect') && send.includes('@react-navigation/native'));
-  check('[SendScreen] useFocusEffect calls syncLocalBalancesFromBackend',
-    send.includes('useFocusEffect') && send.includes('syncLocalBalancesFromBackend(res.wallets'));
+  check('[SendScreen] useFocusEffect calls refreshAndSetWallets on focus',
+    send.includes('useFocusEffect') && send.includes('refreshAndSetWallets().catch'));
   check('[SendScreen] useFocusEffect does NOT call setFromWalletId (preserves form)',
     (() => {
-      const cbStart = send.indexOf('React.useCallback(() => {', send.indexOf('Re-sync balances'));
+      const cbStart = send.indexOf('React.useCallback(() => {', send.indexOf('useFocusEffect'));
       const cbEnd   = send.indexOf('}, [auth.token])', cbStart);
       return !send.slice(cbStart, cbEnd).includes('setFromWalletId');
     })());
   check('[SendScreen] useFocusEffect does NOT call setCurrency (preserves form)',
     (() => {
-      const cbStart = send.indexOf('React.useCallback(() => {', send.indexOf('Re-sync balances'));
+      const cbStart = send.indexOf('React.useCallback(() => {', send.indexOf('useFocusEffect'));
       const cbEnd   = send.indexOf('}, [auth.token])', cbStart);
       return !send.slice(cbStart, cbEnd).includes('setCurrency');
     })());

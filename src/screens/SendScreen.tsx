@@ -2,7 +2,6 @@ import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, TextInput, Alert, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
-import { listWallets } from '../api/auth';
 import { sendTransaction, getWalletCurrency, fetchFxQuote, FxQuote, generateId } from '../api/transactions';
 import { API_BASE, fetchRates } from '../api/client';
 import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
@@ -10,7 +9,8 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { majorToMinor, minorToMajor, decimalsFor, formatCurrency, formatMajorAmount, CURRENCY_INFO, convert } from '../utils/currency';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { useToast } from '../utils/toast';
-import { getLocalBalances, debitLocalBalance, syncLocalBalancesFromBackend, mergeWithLocalBalances, logLocalTransaction, getPendingWithdrawals, addPendingWithdrawal, clearPendingWithdrawal } from '../utils/localBalance';
+import { logLocalTransaction, getPendingWithdrawals, addPendingWithdrawal, clearPendingWithdrawal } from '../utils/localBalance';
+import { refreshWalletFromBackend } from '../utils/walletSync';
 import { WITHDRAW_LOCAL_RATE, WITHDRAW_INTL_RATE, FX_CONVERSION_RATE } from '../config/fees';
 import { useLanguage } from '../i18n/LanguageContext';
 import { getApiErrorMessage } from '../utils/apiErrorMessage';
@@ -91,15 +91,7 @@ export default function SendScreen() {
   useFocusEffect(
     React.useCallback(() => {
       if (!auth.token) return;
-      (async () => {
-        try {
-          const res = await listWallets(auth.token!);
-          await syncLocalBalancesFromBackend(res.wallets || []);
-          const localBalances = await getLocalBalances();
-          const merged = mergeWithLocalBalances(res.wallets || [], localBalances);
-          setWallets(merged);
-        } catch { /* silent — stale local data is fine */ }
-      })();
+      refreshAndSetWallets().catch(() => {});
     }, [auth.token])
   );
 
@@ -130,19 +122,26 @@ export default function SendScreen() {
     return () => { cancelled = true; };
   }, [toWalletId, currency, amount, auth.token]);
 
+  async function refreshAndSetWallets(): Promise<Array<any>> {
+    if (!auth.token) return wallets;
+    try {
+      const { wallets: refreshed } = await refreshWalletFromBackend(auth.token);
+      setWallets(refreshed);
+      if (refreshed.length > 0 && !fromWalletId) setFromWalletId(refreshed[0].id);
+      return refreshed;
+    } catch (e) {
+      if (__DEV__) console.warn(e);
+      return wallets;
+    }
+  }
+
   async function loadWallets() {
     if (!auth.token) return;
     setLoading(true);
     try {
-      const res = await listWallets(auth.token);
-      await syncLocalBalancesFromBackend(res.wallets || []);
-      const localBalances = await getLocalBalances();
-      const mergedWallets = mergeWithLocalBalances(res.wallets || [], localBalances);
-      setWallets(mergedWallets);
-      if (mergedWallets.length > 0) {
-        setFromWalletId(mergedWallets[0].id);
-        // Auto-set send currency: prefer user's preferredCurrency if they have a balance, else highest balance
-        const primaryWallet = mergedWallets[0];
+      const refreshed = await refreshAndSetWallets();
+      if (refreshed.length > 0) {
+        const primaryWallet = refreshed[0];
         const balances: Array<{currency: string; amount: number}> = primaryWallet.balances || [];
         const prefCurr = auth.user?.preferredCurrency;
         const hasPref = prefCurr && balances.find((b: any) => b.currency === prefCurr && b.amount > 0);
@@ -155,7 +154,6 @@ export default function SendScreen() {
       }
     } catch (e) {
       if (__DEV__) console.warn(e);
-      // Demo fallback — show a placeholder wallet so the form is usable
       const demo = { id: 'demo', balances: [{ currency: 'XAF', amount: 0 }] };
       setWallets([demo]);
       setFromWalletId('demo');
@@ -199,21 +197,14 @@ export default function SendScreen() {
   }
 
   async function checkBalanceAndProceed(amt: number) {
-    const wallet = wallets.find(w => w.id === fromWalletId);
+    const currentWallets = auth.token ? await refreshAndSetWallets() : wallets;
+    const wallet = currentWallets.find(w => w.id === fromWalletId);
     const balance = wallet?.balances?.find((b: any) => b.currency === currency);
-    // balances are in minor units; convert to major
     const backendMajor = balance ? balance.amount / Math.pow(10, decimalsFor(currency)) : 0;
-    // Also check local balance (in minor units) — use the lower value to prevent overdraft
-    const localBalances = await getLocalBalances();
-    const localMinor = localBalances[currency] || 0;
-    const localMajor = localMinor / Math.pow(10, decimalsFor(currency));
-    // Conservative: if local balance data exists, take the minimum to prevent spending stale funds
-    const grossMajor = localMinor > 0 ? Math.min(backendMajor, localMajor) : backendMajor;
-    // Subtract any locally tracked pending withdrawals to get true available balance
     const pendingWithdrawals = await getPendingWithdrawals();
     const pendingMinor = pendingWithdrawals[currency] || 0;
     const pendingMajor = pendingMinor / Math.pow(10, decimalsFor(currency));
-    const balanceMajor = Math.max(0, grossMajor - pendingMajor);
+    const balanceMajor = Math.max(0, backendMajor - pendingMajor);
 
     // Cross-currency check: if the user has no direct balance in the send currency,
     // compute total wallet value across all balances using live FX rates.
@@ -325,8 +316,7 @@ export default function SendScreen() {
       const res = await sendTransaction(auth.token, fromWalletId, toWalletId, amountMinor, currency, undefined, sendIdempotencyKeyRef.current);
       // Reset key only after confirmed success so retries reuse the same key
       sendIdempotencyKeyRef.current = generateId();
-      await debitLocalBalance(currency, amountMinor);
-      await loadWallets();
+      await refreshAndSetWallets();
       setAmount('');
       setToWalletId('');
       setSelectedPaymentMethod(method);
@@ -347,7 +337,7 @@ export default function SendScreen() {
       Alert.alert(t('send.transactionFailed'), getApiErrorMessage(e, t));
     } finally {
       setLoading(false);
-      try { await loadWallets(); } catch { /* best-effort sync */ }
+      try { await refreshAndSetWallets(); } catch { /* best-effort sync */ }
     }
   }
   
@@ -363,15 +353,11 @@ export default function SendScreen() {
     // Any re-render from here disables the confirm button (disabled={loading}).
     setLoading(true);
     try {
-      // Client-side balance guard — defence-in-depth; backend enforces the real check.
-      const localBals = await getLocalBalances();
-      const localAvailable = localBals[currency] ?? 0;
-      const walletBalance = wallets[0]?.balances?.find((b: any) => b.currency === currency)?.amount ?? 0;
-      const effectiveBalance = localAvailable > 0 ? localAvailable : walletBalance;
-      // Subtract any already-pending local withdrawals from available balance
+      const currentWallets = await refreshAndSetWallets();
+      const walletBalance = currentWallets[0]?.balances?.find((b: any) => b.currency === currency)?.amount ?? 0;
       const pendingWithdrawals = await getPendingWithdrawals();
       const alreadyPendingMinor = pendingWithdrawals[currency] || 0;
-      const trueAvailable = Math.max(0, effectiveBalance - alreadyPendingMinor);
+      const trueAvailable = Math.max(0, walletBalance - alreadyPendingMinor);
       // Block if insufficient — note: no short-circuit on zero (zero balance must also be blocked)
       if (amountMinor > trueAvailable) {
         Alert.alert(
@@ -423,7 +409,6 @@ export default function SendScreen() {
       // in db.withdrawals, NOT db.transactions, so we must log here)
       // Reset key only after confirmed success so retries reuse the same key
       withdrawalIdempotencyKeyRef.current = generateId();
-      await debitLocalBalance(currency, amountMinor);
       await clearPendingWithdrawal(currency, amountMinor);
       await logLocalTransaction({
         type: 'withdrawal',
@@ -434,7 +419,7 @@ export default function SendScreen() {
       });
       const wData = await response.json();
       const feeCalc = wData.feeBreakdown;
-      await loadWallets();
+      await refreshAndSetWallets();
       setAmount('');
       setBankName('');
       setAccountNumber('');
@@ -554,8 +539,7 @@ export default function SendScreen() {
       const res = await sendTransaction(auth.token, fromWalletId, toWalletId, amountMinor, currency, undefined, sendIdempotencyKeyRef.current);
       // Reset only after confirmed success — retries reuse the same key
       sendIdempotencyKeyRef.current = generateId();
-      await debitLocalBalance(currency, amountMinor);
-      await loadWallets();
+      await refreshAndSetWallets();
       setAmount('');
       setShowConfirmation(false);
       toast.show(t('send.paymentSentToast'));
@@ -580,7 +564,7 @@ export default function SendScreen() {
       return;
     } finally {
       setLoading(false);
-      try { await loadWallets(); } catch { /* best-effort sync */ }
+      try { await refreshAndSetWallets(); } catch { /* best-effort sync */ }
     }
   }
 
