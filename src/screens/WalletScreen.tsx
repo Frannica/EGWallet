@@ -214,11 +214,6 @@ export default function WalletScreen() {
           </TouchableOpacity>
         </LinearGradient>
 
-        {/* Test Mode Label */}
-        <Text style={{ textAlign: 'center', fontSize: 11, color: '#94a3b8', marginTop: 6, marginBottom: 2, letterSpacing: 0.5 }}>
-          {t('wallet.testMode')}
-        </Text>
-
         {/* Currency Picker */}
         {showCurrencyPicker && (
           <View style={styles.currencySelector}>
