@@ -658,14 +658,12 @@ export default function DepositScreen() {
           <Text style={styles.heroSubtitle}>{t('deposit.fundWallet')}</Text>
         </View>
 
-        {/* Mode Banner */}
-        {mode === null && !stripeIntent && (
+        {/* Mode Banner — Stripe only */}
+        {mode === null && !stripeIntent && StripeProvider && (
           <View style={styles.infoBanner}>
             <Ionicons name="information-circle-outline" size={18} color="#1565C0" />
             <Text style={styles.infoBannerText}>
-              {StripeProvider
-                ? t('deposit.stripeAvailable')
-                : t('deposit.demoMode')}
+              {t('deposit.stripeAvailable')}
             </Text>
           </View>
         )}
@@ -955,12 +953,8 @@ export default function DepositScreen() {
             </>
           ) : (
             <>
-              <View style={styles.demoTag}>
-                <Text style={styles.demoTagText}>{t('deposit.demoMode')}</Text>
-              </View>
               <View style={styles.howItem}><View style={styles.howDot} /><Text style={styles.howItemText}>{t('deposit.demoHow1')}</Text></View>
               <View style={styles.howItem}><View style={styles.howDot} /><Text style={styles.howItemText}>{t('deposit.demoHow2')}</Text></View>
-              <View style={styles.howItem}><View style={styles.howDot} /><Text style={styles.howItemText}>{t('deposit.demoHow3')}</Text></View>
             </>
           )}
         </View>
