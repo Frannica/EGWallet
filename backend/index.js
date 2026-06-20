@@ -2149,7 +2149,58 @@ function sanitizeWithdrawalForResponse(w) {
   };
 }
 
+function emptyDB() {
+  return {
+    users: [], wallets: [], transactions: [], paymentRequests: [],
+    virtualCards: [], budgets: [], devices: [], supportTickets: [],
+    fraudAlerts: [], savedContacts: [], qrCodes: [], refreshTokens: [],
+    auditLog: [], employers: [], employerEmployees: [], payrollBatches: [],
+    demoIntents: [], notifications: [], passwordResetTokens: [],
+    idempotencyRecords: [], withdrawals: [], ledger: [], kycIdentityClaims: {},
+    payoutLocks: [],
+    rates: {
+      base: 'USD',
+      values: {
+        USD: 1, EUR: 0.93, GBP: 0.79, CHF: 0.90, CAD: 1.35,
+        AUD: 1.52, NZD: 1.63,
+        CNY: 7.25, JPY: 149, KRW: 1340, HKD: 7.82, SGD: 1.34,
+        TWD: 31, THB: 34, MYR: 4.65, IDR: 15600, PHP: 56,
+        VND: 24500, INR: 83, PKR: 278, BDT: 110, LKR: 320,
+        SEK: 10.5, NOK: 10.7, DKK: 6.89, PLN: 3.95, CZK: 22.7,
+        HUF: 360, RON: 4.62, RUB: 90, TRY: 32, UAH: 37,
+        SAR: 3.75, AED: 3.67, QAR: 3.64, KWD: 0.31, BHD: 0.38,
+        OMR: 0.38, ILS: 3.71,
+        BRL: 5.2, MXN: 17, ARS: 850, CLP: 910, COP: 3900, PEN: 3.7,
+        NGN: 1540, GHS: 12, XAF: 600, XOF: 600, ZAR: 19,
+        KES: 130, TZS: 2650, UGX: 3800, RWF: 1300, ETB: 52,
+        EGP: 50, TND: 3.1, MAD: 10, LYD: 4.8, DZD: 135,
+        BWP: 14, ZWL: 360, MZN: 65, NAD: 19, LSL: 19,
+        ERN: 15, AOA: 835, SOS: 570, SDG: 550, GMD: 65,
+        MUR: 45, SCR: 13, ZMW: 25, MWK: 1700, GNF: 8600,
+        SLE: 22, CDF: 2800, CVE: 103, HTG: 132,
+      },
+      updatedAt: Date.now(),
+    },
+  };
+}
+
 function loadDB() {
+  // Fresh install or new volume mount — db.json does not exist yet.
+  // This is NOT corruption; create the directory and seed an empty database.
+  if (!fs.existsSync(DB_FILE)) {
+    const dbDir = path.dirname(DB_FILE);
+    try { fs.mkdirSync(dbDir, { recursive: true }); } catch (_) {}
+    const fresh = emptyDB();
+    try {
+      fs.writeFileSync(DB_FILE, JSON.stringify(fresh, null, 2), 'utf8');
+      console.log('[loadDB] db.json not found — created fresh database at', DB_FILE);
+    } catch (writeErr) {
+      console.error('[loadDB] Could not write initial db.json:', writeErr.message,
+        '— running in-memory only until disk is writable.');
+    }
+    return fresh;
+  }
+
   try {
     const raw = fs.readFileSync(DB_FILE, 'utf8');
     const db = JSON.parse(raw);
@@ -2234,37 +2285,7 @@ function loadDB() {
     // Dev/staging only — return empty database in-memory without writing to disk.
     // The file was quarantined above; let the operator decide what to restore.
     console.warn('[loadDB] Dev mode: returning empty in-memory database (no disk write).');
-    return {
-      users: [], wallets: [], transactions: [], paymentRequests: [],
-      virtualCards: [], budgets: [], devices: [], supportTickets: [],
-      fraudAlerts: [], savedContacts: [], qrCodes: [], refreshTokens: [],
-      auditLog: [], employers: [], employerEmployees: [], payrollBatches: [],
-      demoIntents: [], notifications: [], passwordResetTokens: [],
-      idempotencyRecords: [], withdrawals: [], kycIdentityClaims: {},
-      rates: {
-        base: 'USD',
-        values: {
-          USD: 1, EUR: 0.93, GBP: 0.79, CHF: 0.90, CAD: 1.35,
-          AUD: 1.52, NZD: 1.63,
-          CNY: 7.25, JPY: 149, KRW: 1340, HKD: 7.82, SGD: 1.34,
-          TWD: 31, THB: 34, MYR: 4.65, IDR: 15600, PHP: 56,
-          VND: 24500, INR: 83, PKR: 278, BDT: 110, LKR: 320,
-          SEK: 10.5, NOK: 10.7, DKK: 6.89, PLN: 3.95, CZK: 22.7,
-          HUF: 360, RON: 4.62, RUB: 90, TRY: 32, UAH: 37,
-          SAR: 3.75, AED: 3.67, QAR: 3.64, KWD: 0.31, BHD: 0.38,
-          OMR: 0.38, ILS: 3.71,
-          BRL: 5.2, MXN: 17, ARS: 850, CLP: 910, COP: 3900, PEN: 3.7,
-          NGN: 1540, GHS: 12, XAF: 600, XOF: 600, ZAR: 19,
-          KES: 130, TZS: 2650, UGX: 3800, RWF: 1300, ETB: 52,
-          EGP: 50, TND: 3.1, MAD: 10, LYD: 4.8, DZD: 135,
-          BWP: 14, ZWL: 360, MZN: 65, NAD: 19, LSL: 19,
-          ERN: 15, AOA: 835, SOS: 570, SDG: 550, GMD: 65,
-          MUR: 45, SCR: 13, ZMW: 25, MWK: 1700, GNF: 8600,
-          SLE: 22, CDF: 2800, CVE: 103, HTG: 132,
-        },
-        updatedAt: Date.now(),
-      },
-    };
+    return emptyDB();
   }
 }
 
