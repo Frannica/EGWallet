@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
 import { useLanguage } from '../i18n/LanguageContext';
+import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 
 type Device = {
   id: string;
@@ -47,7 +48,7 @@ export default function TrustedDevicesScreen() {
   async function loadDevices() {
     if (!auth.token) { setDevices(DEMO_DEVICES); setLoading(false); return; }
     try {
-      const res = await fetch(`${API_BASE}/devices`, {
+      const res = await fetchWithTokenRefresh(`${API_BASE}/devices`, {
         headers: {
           'Authorization': `Bearer ${auth.token}`,
         },
@@ -88,7 +89,7 @@ export default function TrustedDevicesScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const res = await fetch(`${API_BASE}/devices/${device.id}`, {
+              const res = await fetchWithTokenRefresh(`${API_BASE}/devices/${device.id}`, {
                 method: 'DELETE',
                 headers: {
                   'Authorization': `Bearer ${auth.token}`,
@@ -114,7 +115,7 @@ export default function TrustedDevicesScreen() {
 
   async function handleTrustDevice(device: Device) {
     try {
-      const res = await fetch(`${API_BASE}/devices/${device.id}/trust`, {
+      const res = await fetchWithTokenRefresh(`${API_BASE}/devices/${device.id}/trust`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${auth.token}`,

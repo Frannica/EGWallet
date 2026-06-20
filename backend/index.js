@@ -2416,7 +2416,7 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Idempotency-Key']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Idempotency-Key', 'Accept-Language']
 };
 
 app.use(cors(corsOptions));
@@ -4038,7 +4038,7 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
   }
 
   // ── Client-supplied idempotency key (required) ────────────────────────────
-  const clientKey = req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
+  const clientKey = req.body.idempotencyKey || req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
   if (!clientKey) return res.status(400).json({ error: 'Idempotency-Key header is required' });
   const cached0 = idempotencyStore.get(clientKey);
   if (cached0 && cached0.userId === req.user.userId && Date.now() - cached0.timestamp < IDEMPOTENCY_EXPIRY)
@@ -5377,7 +5377,7 @@ app.post('/payment-requests/:id/pay', authMiddleware, async (req, res) => {
   if (!fromWalletId) return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
 
   // Idempotency — prevents double-charge on timeout + client retry.
-  const prClientKey = req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
+  const prClientKey = req.body.idempotencyKey || req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
   if (!prClientKey) return res.status(400).json({ error: 'Idempotency-Key header is required' });
   const prCached0 = idempotencyStore.get(prClientKey);
   if (prCached0 && prCached0.userId === req.user.userId && Date.now() - prCached0.timestamp < IDEMPOTENCY_EXPIRY)

@@ -9,6 +9,7 @@ import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
 import { useLanguage } from '../i18n/LanguageContext';
 import { formatMinorAmount } from '../utils/currency';
+import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 
 type Notif = {
   id: string;
@@ -154,7 +155,7 @@ export default function NotificationsScreen() {
     setLoading(true);
     setFetchError(null);
     try {
-      const res = await fetch(`${API_BASE}/notifications`, {
+      const res = await fetchWithTokenRefresh(`${API_BASE}/notifications`, {
         headers: { Authorization: `Bearer ${auth.token}` },
       });
       if (res.ok) {
@@ -174,7 +175,7 @@ export default function NotificationsScreen() {
   async function markAllRead() {
     if (!auth.token) return;
     try {
-      await fetch(`${API_BASE}/notifications/read-all`, {
+      await fetchWithTokenRefresh(`${API_BASE}/notifications/read-all`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${auth.token}` },
       });
@@ -185,7 +186,7 @@ export default function NotificationsScreen() {
   async function markOneRead(id: string) {
     if (!auth.token) return;
     try {
-      await fetch(`${API_BASE}/notifications/${id}/read`, {
+      await fetchWithTokenRefresh(`${API_BASE}/notifications/${id}/read`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${auth.token}` },
       });

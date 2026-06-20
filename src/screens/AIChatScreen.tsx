@@ -8,6 +8,7 @@ import { useNetworkStatus } from '../utils/OfflineError';
 import { useNavigation } from '@react-navigation/native';
 import { getLocalBalances, getPendingWithdrawals } from '../utils/localBalance';
 import { formatMinorAmount } from '../utils/currency';
+import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 
 const SUPPORTED_LANGUAGES = ['en', 'es', 'fr', 'pt', 'zh', 'ja', 'ru', 'de'];
 
@@ -411,7 +412,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
       const tid = setTimeout(() => controller.abort(), 8000);
       let resp: Response | null = null;
       try {
-        resp = await fetch(`${API_BASE}/ai-assistant`, {
+        resp = await fetchWithTokenRefresh(`${API_BASE}/ai-assistant`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...(auth.token ? { 'Authorization': `Bearer ${auth.token}` } : {}) },
           body: JSON.stringify({ language, event, eventContext: params, userContext: userCtx }),
@@ -526,7 +527,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
       let usedAssistant = false;
       try {
         // First try /ai-assistant with user context for smart responses
-        response = await fetch(`${API_BASE}/ai-assistant`, {
+        response = await fetchWithTokenRefresh(`${API_BASE}/ai-assistant`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -569,7 +570,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
       if (!usedAssistant) {
         // Fall back to /ai/chat for general queries
         try {
-          response = await fetch(`${API_BASE}/ai/chat`, {
+          response = await fetchWithTokenRefresh(`${API_BASE}/ai/chat`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',

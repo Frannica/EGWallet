@@ -9,6 +9,7 @@ import { useLanguage } from '../i18n/LanguageContext';
 import { minorToMajor, formatMajorAmount } from '../utils/currency';
 import { payPaymentRequest, generateId } from '../api/transactions';
 import { refreshWalletFromBackend } from '../utils/walletSync';
+import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -118,7 +119,7 @@ export default function PayRequestScreen({ route, navigation }: any) {
         if (!wid) return;
         setWalletId(wid);
 
-        const previewRes = await fetch(`${API_BASE}/payment-requests/${request.id}/preview`, {
+        const previewRes = await fetchWithTokenRefresh(`${API_BASE}/payment-requests/${request.id}/preview`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

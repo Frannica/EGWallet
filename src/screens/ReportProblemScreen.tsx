@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
 import { useLanguage } from '../i18n/LanguageContext';
+import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 
 type ProblemCategory = 'bug' | 'payment' | 'account' | 'feature' | 'other';
 
@@ -43,7 +44,7 @@ export default function ReportProblemScreen() {
       let ticketId: string | null = null;
       if (auth.token) {
         try {
-          const res = await fetch(`${API_BASE}/support/ticket`, {
+          const res = await fetchWithTokenRefresh(`${API_BASE}/support/ticket`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',

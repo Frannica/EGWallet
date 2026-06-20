@@ -94,14 +94,14 @@ export default function RequestScreen() {
     useCallback(() => {
       if (!auth.token) return;
       // Load incoming requests (others requesting money from me)
-      fetch(`${API_BASE}/payment-requests/incoming`, {
+      fetchWithTokenRefresh(`${API_BASE}/payment-requests/incoming`, {
         headers: { Authorization: `Bearer ${auth.token}`, 'Accept-Language': getApiLanguage() },
       })
         .then(r => r.ok ? r.json() : null)
         .then(d => { if (d?.requests) setIncomingRequests(d.requests); })
         .catch(() => {});
       // Sync status of my sent requests so cards show PAID/CANCELLED when recipient pays
-      fetch(`${API_BASE}/payment-requests`, {
+      fetchWithTokenRefresh(`${API_BASE}/payment-requests`, {
         headers: { Authorization: `Bearer ${auth.token}`, 'Accept-Language': getApiLanguage() },
       })
         .then(r => r.ok ? r.json() : null)
@@ -239,7 +239,7 @@ export default function RequestScreen() {
     // Persist to backend so the share link resolves when recipient taps it
     if (auth.token && realWalletId !== DEMO_WALLET_ID) {
       try {
-        const res = await fetch(`${API_BASE}/payment-requests`, {
+        const res = await fetchWithTokenRefresh(`${API_BASE}/payment-requests`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

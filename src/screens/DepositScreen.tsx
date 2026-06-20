@@ -28,6 +28,7 @@ import { getApiErrorMessage } from '../utils/apiErrorMessage';
 import { majorToMinor, formatCurrency, getCurrencySymbol, getCurrencyName, CURRENCY_INFO } from '../utils/currency';
 import { creditLocalBalance } from '../utils/localBalance';
 import { TOPUP_FREE_LIMIT, TOPUP_FEE_RATE } from '../config/fees';
+import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 
 // ---------------------------------------------------------------------------
 // Stripe PaymentSheet — guarded import so the app still compiles without the
@@ -294,7 +295,7 @@ export default function DepositScreen() {
   useEffect(() => {
     if (!auth.token) return;
     if (!walletId) {
-      fetch(`${API_BASE}/wallets`, { headers })
+      fetchWithTokenRefresh(`${API_BASE}/wallets`, { headers })
         .then(r => r.json())
         .then(data => {
           const first = data.wallets?.[0]?.id;
@@ -302,7 +303,7 @@ export default function DepositScreen() {
         })
         .catch(() => {});
     }
-    fetch(`${API_BASE}/deposits/fee-info`, { headers })
+    fetchWithTokenRefresh(`${API_BASE}/deposits/fee-info`, { headers })
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data) setFeeInfo(data); })
       .catch(() => {});
@@ -332,7 +333,7 @@ export default function DepositScreen() {
     setLoading(true);
     try {
       // Step 1 — create intent
-      const res = await fetch(`${API_BASE}/deposits/create-intent`, {
+      const res = await fetchWithTokenRefresh(`${API_BASE}/deposits/create-intent`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ amount: amountMinor, currency, walletId }),
@@ -379,7 +380,7 @@ export default function DepositScreen() {
   async function confirmDeposit(intentId: string, resolvedWalletId: string) {
     const wid = resolvedWalletId;
     if (!wid) throw new Error('confirmDeposit called without a resolved wallet ID');
-    const res = await fetch(`${API_BASE}/deposits/confirm`, {
+    const res = await fetchWithTokenRefresh(`${API_BASE}/deposits/confirm`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ intentId, walletId: wid }),
@@ -393,7 +394,7 @@ export default function DepositScreen() {
     // Note: backend already records the deposit transaction — do NOT log locally to avoid duplicates
 
     // Refresh fee tier
-    fetch(`${API_BASE}/deposits/fee-info`, { headers })
+    fetchWithTokenRefresh(`${API_BASE}/deposits/fee-info`, { headers })
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setFeeInfo(d); })
       .catch(() => {});

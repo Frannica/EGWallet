@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
 import { formatCurrency } from '../utils/currency';
 import { useLanguage } from '../i18n/LanguageContext';
+import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 
 const SUPPORT_EMAIL = 'support@egwalletfinance.com';
 const ALT_SUPPORT_EMAIL = 'egwallet.business@gmail.com';
@@ -61,7 +62,7 @@ export default function DisputeTransactionScreen() {
     ];
     try {
       if (!auth.token) { setTransactions(demoTxs); setLoading(false); return; }
-      const res = await fetch(`${API_BASE}/transactions`, {
+      const res = await fetchWithTokenRefresh(`${API_BASE}/transactions`, {
         headers: { 'Authorization': `Bearer ${auth.token}` },
       });
       if (res.ok) {
@@ -125,7 +126,7 @@ export default function DisputeTransactionScreen() {
     // if the backend is unreachable so the email can still be sent.
     let finalTicket = ticketNum;
     try {
-      const resp = await fetch(`${API_BASE}/disputes`, {
+      const resp = await fetchWithTokenRefresh(`${API_BASE}/disputes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${auth.token}` },
         body: JSON.stringify({

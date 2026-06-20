@@ -8,6 +8,7 @@ import { formatCurrency, convert } from '../utils/currency';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import { Ionicons } from '@expo/vector-icons';
+import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 import { getLocalBalances, mergeWithLocalBalances, syncLocalBalancesFromBackend } from '../utils/localBalance';
 import { refreshWalletFromBackend } from '../utils/walletSync';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -103,7 +104,7 @@ export default function WalletScreen() {
     React.useCallback(() => {
       let cancelled = false;
       if (auth.token) {
-        fetch(`${API_BASE}/notifications`, { headers: { Authorization: `Bearer ${auth.token}` } })
+        fetchWithTokenRefresh(`${API_BASE}/notifications`, { headers: { Authorization: `Bearer ${auth.token}` } })
           .then(r => r.ok ? r.json() : null)
           .then(d => { if (d && !cancelled) setUnreadNotifCount(d.unreadCount ?? 0); })
           .catch(() => {});

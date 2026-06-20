@@ -57,7 +57,7 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     if (!auth.token) return;
-    fetch(`${API_BASE}/auth/me`, { headers: { Authorization: `Bearer ${auth.token}` } })
+    fetchWithTokenRefresh(`${API_BASE}/auth/me`, { headers: { Authorization: `Bearer ${auth.token}` } })
       .then(r => r.json())
       .then(d => { if (d.username) setUsername(d.username); })
       .catch(() => {});

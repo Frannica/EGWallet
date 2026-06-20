@@ -6,6 +6,7 @@ import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
 import { useLanguage } from '../i18n/LanguageContext';
 import { getApiErrorMessage } from '../utils/apiErrorMessage';
+import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 
 type KYCStatus = 'not_started' | 'pending' | 'under_review' | 'approved' | 'rejected';
 
@@ -33,7 +34,7 @@ export default function KYCVerificationScreen() {
   async function loadKYCStatus() {
     if (!auth.token) { setLoading(false); return; }
     try {
-      const res = await fetch(`${API_BASE}/kyc/status`, {
+      const res = await fetchWithTokenRefresh(`${API_BASE}/kyc/status`, {
         headers: {
           'Authorization': `Bearer ${auth.token}`,
         },
@@ -133,7 +134,7 @@ export default function KYCVerificationScreen() {
       // Use validated type from allowlist — never trust raw user input
       formData.append('documentType', type);
 
-      const res = await fetch(`${API_BASE}/kyc/upload`, {
+      const res = await fetchWithTokenRefresh(`${API_BASE}/kyc/upload`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${auth.token}` },
         body: formData,
