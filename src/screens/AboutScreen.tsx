@@ -2,14 +2,19 @@ import React from 'react';
 import { View, Text, ScrollView, Linking, Alert, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
+import * as Application from 'expo-application';
 import config from '../config/env';
 import { FEE_SCHEDULE } from '../config/fees';
 import { useLanguage } from '../i18n/LanguageContext';
 
 export default function AboutScreen() {
   const { t } = useLanguage();
-  const appVersion = Constants.expoConfig?.version ?? '1.2.1';
-  const buildNumber = String(Constants.expoConfig?.android?.versionCode ?? 74);
+  // Native APK/AAB version — always matches what Play Store installed (not stale JS config).
+  const appVersion = Application.nativeApplicationVersion
+    ?? Constants.expoConfig?.version
+    ?? '?';
+  const buildNumber = Application.nativeBuildVersion
+    ?? String(Constants.expoConfig?.android?.versionCode ?? '?');
   const environment = __DEV__ ? t('about.development') : t('about.production');
   const apiUrl = config.API_BASE_URL;
 
