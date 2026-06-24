@@ -45,7 +45,11 @@ const { parse } = require('csv-parse/sync');
 const { createWithdrawal, advanceToProcessing, markWithdrawalFailed, markWithdrawalPaid } = require('./withdrawalEngine');
 const { router: adminWithdrawalsRouter, adminLoginHandler, adminLogoutHandler } = require('./adminWithdrawals');
 const { executePayout, payoutRouter } = require('./payoutProviders');
-const nodemailer = require('nodemailer');
+const {
+  isPasswordResetEmailConfigured,
+  getPasswordResetEmailMode,
+  sendPasswordResetEmail,
+} = require('./passwordResetEmail');
 
 // Stripe — only initialise when secret key is present
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || null;
@@ -226,6 +230,12 @@ if (NODE_ENV === 'production') {
 
   if (!FRESHDESK_DOMAIN || !FRESHDESK_API_KEY) {
     console.warn('⚠️  WARNING: Freshdesk not configured. Tickets will be stored locally only.');
+  }
+  if (!isPasswordResetEmailConfigured()) {
+    console.warn(
+      '⚠️  WARNING: Password reset email is NOT configured. Forgot-password will save tokens but never deliver email. ' +
+      'Set SMTP_HOST/SMTP_USER/SMTP_PASS (or GMAIL_USER/GMAIL_APP_PASSWORD, or RESEND_API_KEY) on Railway.'
+    );
   }
   if (!process.env.GOOGLE_SERVICE_ACCOUNT) {
     console.warn('⚠️  WARNING: GOOGLE_SERVICE_ACCOUNT is not set. Firebase Auth and Firestore will be unavailable.');
@@ -2778,7 +2788,9 @@ app.get('/health', (req, res) => {
     database: fs.existsSync(DB_FILE) ? 'connected' : 'missing',
     users: db.users?.length || 0,
     tickets: db.supportTickets?.length || 0,
-    freshdeskConfigured: !!(FRESHDESK_DOMAIN && FRESHDESK_API_KEY)
+    freshdeskConfigured: !!(FRESHDESK_DOMAIN && FRESHDESK_API_KEY),
+    passwordResetEmailConfigured: isPasswordResetEmailConfigured(),
+    passwordResetEmailMode: getPasswordResetEmailMode(),
   };
   res.status(200).json(healthStatus);
 });
@@ -3349,118 +3361,21 @@ app.post('/auth/forgot-password', forgotPasswordLimiter, async (req, res) => {
       const frontendUrl = process.env.APP_FRONTEND_URL || 'egwallet://reset-password';
       const resetLink = `${frontendUrl}?token=${rawToken}`;
 
-      // ── Email delivery ────────────────────────────────────────────────────
-      // Supports SendGrid, Mailgun, or any SMTP provider via env vars.
-      //
-      //  Provider   | SMTP_HOST                        | SMTP_PORT | SMTP_SECURE
-      //  -----------|----------------------------------|-----------|------------
-      //  SendGrid   | smtp.sendgrid.net                | 587       | false
-      //  Mailgun    | smtp.mailgun.org                 | 587       | false
-      //  Gmail      | smtp.gmail.com                   | 465       | true
-      //  Custom     | your-smtp-host                   | 587/465   | true/false
-      //
-      // Set on Railway:
-      //   SMTP_HOST        smtp.sendgrid.net
-      //   SMTP_PORT        587
-      //   SMTP_USER        apikey               (SendGrid literal string "apikey")
-      //   SMTP_PASS        SG.xxxxxxxxxxxx      (your SendGrid API key)
-      //   SMTP_FROM        EGWallet <no-reply@yourdomain.com>
-      //   SMTP_SECURE      false
-      //   APP_FRONTEND_URL egwallet://reset-password
-      // ─────────────────────────────────────────────────────────────────────
-      const smtpHost = process.env.SMTP_HOST;
-      if (smtpHost) {
-        try {
-          const smtpPort = parseInt(process.env.SMTP_PORT || '587');
-          const smtpSecure = process.env.SMTP_SECURE === 'true'; // true only for port 465
-          const transporter = nodemailer.createTransport({
-            host: smtpHost,
-            port: smtpPort,
-            secure: smtpSecure,
-            auth: {
-              user: process.env.SMTP_USER,
-              pass: process.env.SMTP_PASS,
-            },
-            // Enforce TLS upgrade on STARTTLS connections (port 587)
-            requireTLS: !smtpSecure,
-            tls: { rejectUnauthorized: true },
-          });
-
-          const fromAddress = process.env.SMTP_FROM || 'EGWallet <egwallet.business@gmail.com>';
-
-          // Mobile-optimised HTML email (table-based, widely compatible)
-          const htmlEmail = `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reset your EGWallet password</title></head>
-<body style="margin:0;padding:0;background:#F5F7FA;font-family:Arial,Helvetica,sans-serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F5F7FA;padding:32px 16px;">
-    <tr><td align="center">
-      <table role="presentation" width="100%" style="max-width:480px;background:#FFFFFF;border-radius:16px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,0.08);" cellpadding="0" cellspacing="0">
-        <!-- Header -->
-        <tr><td style="background:#1565C0;padding:28px 32px;text-align:center;">
-          <p style="margin:0;font-size:28px;">💳</p>
-          <h1 style="margin:8px 0 0;color:#FFFFFF;font-size:22px;font-weight:700;letter-spacing:-0.3px;">EGWallet</h1>
-        </td></tr>
-        <!-- Body -->
-        <tr><td style="padding:32px;">
-          <h2 style="margin:0 0 12px;font-size:20px;color:#14171A;">Reset your password</h2>
-          <p style="margin:0 0 24px;font-size:15px;color:#657786;line-height:1.6;">
-            We received a request to reset the password for your EGWallet account.<br>
-            Tap the button below — this link is valid for <strong>20 minutes</strong>.
-          </p>
-          <!-- CTA button -->
-          <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;">
-            <tr><td align="center">
-              <a href="${resetLink}" target="_blank"
-                style="display:inline-block;background:#1565C0;color:#FFFFFF;text-decoration:none;font-size:16px;font-weight:700;padding:14px 36px;border-radius:10px;letter-spacing:0.2px;">
-                Reset Password
-              </a>
-            </td></tr>
-          </table>
-          <!-- Manual link fallback -->
-          <p style="margin:0 0 8px;font-size:13px;color:#657786;">Or copy this link into your browser / app:</p>
-          <p style="margin:0 0 24px;font-size:12px;color:#1565C0;word-break:break-all;">${resetLink}</p>
-          <hr style="border:none;border-top:1px solid #E1E8ED;margin:0 0 24px;">
-          <p style="margin:0;font-size:13px;color:#AAB8C2;line-height:1.6;">
-            If you didn't request a password reset, you can safely ignore this email — your password will not change.<br><br>
-            — The EGWallet Team
-          </p>
-        </td></tr>
-        <!-- Footer -->
-        <tr><td style="background:#F5F7FA;padding:16px 32px;text-align:center;">
-          <p style="margin:0;font-size:11px;color:#AAB8C2;">© 2026 EGWallet. All rights reserved.</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`;
-
-          const plainText = `Reset your EGWallet password\n\nWe received a request to reset your password.\n\nReset link (valid 20 minutes):\n${resetLink}\n\nIf you didn't request this, ignore this email — your password won't change.\n\n— The EGWallet Team`;
-
-          await transporter.sendMail({
-            from: fromAddress,
-            to: user.email,
-            subject: 'Reset your EGWallet password',
-            text: plainText,
-            html: htmlEmail,
-          });
-
-          logger.info('[Email] Password reset email sent', { userId: user.id, smtpHost });
-        } catch (emailErr) {
-          // SMTP failure: log full error for Railway visibility but DO NOT surface to client
-          logger.error('[Email] FAILED to send password reset email', {
-            userId: user.id,
-            smtpHost,
-            error: emailErr.message,
-            code: emailErr.code,
-            response: emailErr.response,
-          });
-          // Token is still saved — user can request again or check logs in dev
-        }
-      } else {
-        // No SMTP configured — log reset token so it can be tested via Railway logs
-        logger.warn('[Email] SMTP not configured — token saved to DB but not delivered. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM to enable email delivery.', { userId: user.id });
+      try {
+        await sendPasswordResetEmail({
+          to: user.email,
+          resetLink,
+          userId: user.id,
+          logger,
+        });
+      } catch (emailErr) {
+        logger.error('[Email] FAILED to send password reset email', {
+          userId: user.id,
+          mode: getPasswordResetEmailMode(),
+          error: emailErr.message,
+          code: emailErr.code,
+          response: emailErr.response?.data || emailErr.response,
+        });
       }
     }
 
