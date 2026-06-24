@@ -40,6 +40,7 @@ const helmet = require('helmet');
 const axios = require('axios');
 const winston = require('winston');
 const { body, validationResult } = require('express-validator');
+const { normalizeEmail } = require('validator');
 const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const { createWithdrawal, advanceToProcessing, markWithdrawalFailed, markWithdrawalPaid } = require('./withdrawalEngine');
@@ -2841,8 +2842,19 @@ app.get('/firebase/health', async (req, res) => {
 
 // ==================== AUTHENTICATION MIDDLEWARE ====================
 
+// Match register/login: express-validator normalizeEmail() defaults (Gmail dots/plus/googlemail).
+function normalizeAuthEmail(email) {
+  if (email == null || typeof email !== 'string') return '';
+  const trimmed = email.trim();
+  if (!trimmed) return '';
+  const normalized = normalizeEmail(trimmed);
+  return (normalized || trimmed).toLowerCase();
+}
+
 function findUserByEmail(db, email) {
-  return db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+  const normalized = normalizeAuthEmail(email);
+  if (!normalized) return undefined;
+  return db.users.find(u => u.email && u.email.toLowerCase() === normalized);
 }
 
 function authMiddleware(req, res, next) {
@@ -3342,7 +3354,7 @@ app.post('/auth/forgot-password', forgotPasswordLimiter, async (req, res) => {
     if (!email || typeof email !== 'string') return res.json({ success: true });
 
     const db = loadDB();
-    const user = db.users.find(u => u.email && u.email.toLowerCase() === email.trim().toLowerCase());
+    const user = findUserByEmail(db, email);
 
     if (user) {
       // Clean up any old tokens for this user
