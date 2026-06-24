@@ -235,7 +235,7 @@ if (NODE_ENV === 'production') {
   if (!isPasswordResetEmailConfigured()) {
     console.warn(
       '⚠️  WARNING: Password reset email is NOT configured. Forgot-password will save tokens but never deliver email. ' +
-      'Set SMTP_HOST/SMTP_USER/SMTP_PASS (or GMAIL_USER/GMAIL_APP_PASSWORD, or RESEND_API_KEY) on Railway.'
+      'Set RESEND_API_KEY (recommended), or SMTP/Gmail credentials on Railway.'
     );
   }
   if (!process.env.GOOGLE_SERVICE_ACCOUNT) {

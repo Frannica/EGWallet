@@ -1,15 +1,24 @@
 const nodemailer = require('nodemailer');
 const axios = require('axios');
 
+const RESEND_API_BASE = process.env.RESEND_API_BASE || 'https://api.resend.com';
+
 function getPasswordResetFromAddress() {
-  const from = process.env.SMTP_FROM || process.env.EMAIL_FROM;
+  const from = process.env.RESEND_FROM || process.env.SMTP_FROM || process.env.EMAIL_FROM;
   if (from && !from.includes('<')) {
     return `EGWallet <${from}>`;
   }
-  return from || 'EGWallet <egwallet.business@gmail.com>';
+  if (from) return from;
+  if (process.env.RESEND_API_KEY) {
+    return 'EGWallet <onboarding@resend.dev>';
+  }
+  return 'EGWallet <egwallet.business@gmail.com>';
 }
 
 function getPasswordResetEmailMode() {
+  if (process.env.RESEND_API_KEY) {
+    return 'resend';
+  }
   if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
     return 'smtp';
   }
@@ -17,9 +26,6 @@ function getPasswordResetEmailMode() {
   const gmailPass = process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASS;
   if (gmailUser && gmailPass && (process.env.GMAIL_USER || process.env.SMTP_HOST === 'smtp.gmail.com')) {
     return 'gmail';
-  }
-  if (process.env.RESEND_API_KEY) {
-    return 'resend';
   }
   return 'none';
 }
@@ -29,10 +35,9 @@ function isPasswordResetEmailConfigured() {
 }
 
 function buildSmtpTransport() {
-  const mode = getPasswordResetEmailMode();
-  if (mode === 'smtp') {
-    const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
-    const smtpSecure = process.env.SMTP_SECURE === 'true';
+  const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
+  const smtpSecure = process.env.SMTP_SECURE === 'true';
+  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
     return nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port: smtpPort,
@@ -45,14 +50,14 @@ function buildSmtpTransport() {
       tls: { rejectUnauthorized: true },
     });
   }
-  if (mode === 'gmail') {
-    const user = process.env.GMAIL_USER || process.env.SMTP_USER;
-    const pass = process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASS;
+  const gmailUser = process.env.GMAIL_USER || process.env.SMTP_USER;
+  const gmailPass = process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASS;
+  if (gmailUser && gmailPass) {
     return nodemailer.createTransport({
       host: 'smtp.gmail.com',
       port: 465,
       secure: true,
-      auth: { user, pass },
+      auth: { user: gmailUser, pass: gmailPass },
     });
   }
   return null;
@@ -115,23 +120,9 @@ async function sendPasswordResetEmail({ to, resetLink, userId, logger }) {
   const { subject, htmlEmail, plainText } = buildPasswordResetEmailContent(resetLink);
   const fromAddress = getPasswordResetFromAddress();
 
-  if (mode === 'smtp' || mode === 'gmail') {
-    const transporter = buildSmtpTransport();
-    const info = await transporter.sendMail({
-      from: fromAddress,
-      to,
-      subject,
-      text: plainText,
-      html: htmlEmail,
-    });
-    const previewUrl = nodemailer.getTestMessageUrl(info) || null;
-    logger.info('[Email] Password reset email sent', { userId, mode, messageId: info.messageId, previewUrl: previewUrl || undefined });
-    return { ok: true, mode, previewUrl };
-  }
-
   if (mode === 'resend') {
-    await axios.post(
-      'https://api.resend.com/emails',
+    const response = await axios.post(
+      `${RESEND_API_BASE}/emails`,
       {
         from: fromAddress,
         to: [to],
@@ -147,12 +138,27 @@ async function sendPasswordResetEmail({ to, resetLink, userId, logger }) {
         timeout: 30000,
       }
     );
-    logger.info('[Email] Password reset email sent via Resend', { userId });
-    return { ok: true, mode: 'resend' };
+    const resendId = response.data?.id || null;
+    logger.info('[Email] Password reset email sent via Resend', { userId, resendId });
+    return { ok: true, mode: 'resend', resendId };
+  }
+
+  if (mode === 'smtp' || mode === 'gmail') {
+    const transporter = buildSmtpTransport();
+    const info = await transporter.sendMail({
+      from: fromAddress,
+      to,
+      subject,
+      text: plainText,
+      html: htmlEmail,
+    });
+    const previewUrl = nodemailer.getTestMessageUrl(info) || null;
+    logger.info('[Email] Password reset email sent', { userId, mode, messageId: info.messageId, previewUrl: previewUrl || undefined });
+    return { ok: true, mode, previewUrl };
   }
 
   logger.warn(
-    '[Email] Password reset email NOT sent — configure SMTP_HOST/SMTP_USER/SMTP_PASS, GMAIL_USER/GMAIL_APP_PASSWORD, or RESEND_API_KEY on Railway.',
+    '[Email] Password reset email NOT sent — configure RESEND_API_KEY (recommended), or SMTP/Gmail credentials on Railway.',
     { userId }
   );
   return { ok: false, mode: 'none' };

@@ -118,6 +118,7 @@ async function runStaticChecks() {
   check('Email module supports SMTP mode', emailModule.includes("return 'smtp'"));
   check('Email module supports Gmail app password mode', emailModule.includes("return 'gmail'"));
   check('Email module supports Resend API mode', emailModule.includes("return 'resend'"));
+  check('Resend preferred over Gmail when RESEND_API_KEY set', emailModule.indexOf('RESEND_API_KEY') < emailModule.indexOf('SMTP_HOST'));
 }
 
 async function checkProductionHealth() {
@@ -142,6 +143,113 @@ async function checkProductionHealth() {
     check('Production forgot-password returns success envelope', forgotRes.status === 200 && forgotJson?.success === true, `status=${forgotRes.status}`);
   } catch (err) {
     check('Production diagnostic reachable', false, err.message);
+  }
+}
+
+async function runResendProof() {
+  console.log('\n=== RESEND PROOF (mock Resend API) ===\n');
+
+  let capturedEmail = null;
+  let resendAuthHeader = null;
+  const mockPort = 4900 + Math.floor(Math.random() * 200);
+  const mockServer = http.createServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/emails') {
+      resendAuthHeader = req.headers.authorization || null;
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        try { capturedEmail = JSON.parse(body); } catch (_) { capturedEmail = null; }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ id: `re_proof_mock_${Date.now()}` }));
+      });
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+
+  await new Promise((resolve) => mockServer.listen(mockPort, '127.0.0.1', resolve));
+
+  const dbPath = path.join(BACKEND, `db.resend-proof.${Date.now()}.json`);
+  const port = 4500 + Math.floor(Math.random() * 200);
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  const env = {
+    ...process.env,
+    NODE_ENV: 'development',
+    PORT: String(port),
+    JWT_SECRET: process.env.JWT_SECRET || 'proof_jwt_secret_minimum_32_characters_long',
+    ADMIN_SECRET: process.env.ADMIN_SECRET || 'proof_admin_secret_minimum_32_chars',
+    PII_ENCRYPTION_KEY: process.env.PII_ENCRYPTION_KEY || 'a'.repeat(64),
+    DB_FILE_PATH: dbPath,
+    DB_BACKUP_PATH: `${dbPath}.bak`,
+    RESEND_API_KEY: 're_proof_test_key',
+    RESEND_API_BASE: `http://127.0.0.1:${mockPort}`,
+    RESEND_FROM: 'EGWallet Proof <proof@egwallet.test>',
+    APP_FRONTEND_URL: 'egwallet://reset-password',
+  };
+  delete env.SMTP_HOST;
+  delete env.SMTP_USER;
+  delete env.SMTP_PASS;
+  delete env.GMAIL_USER;
+  delete env.GMAIL_APP_PASSWORD;
+
+  const server = spawn(process.execPath, ['index.js'], {
+    cwd: BACKEND,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  let serverLog = '';
+  server.stdout.on('data', (d) => { serverLog += d.toString(); });
+  server.stderr.on('data', (d) => { serverLog += d.toString(); });
+
+  try {
+    const health = await waitForHealth(baseUrl);
+    check('/health passwordResetEmailMode is resend', health.passwordResetEmailMode === 'resend');
+    check('/health passwordResetEmailConfigured is true', health.passwordResetEmailConfigured === true);
+
+    const email = `resend-proof-${Date.now()}@example.com`;
+    const deviceId = `resend-proof-${Date.now()}`;
+    const password = 'ResendProof123!';
+
+    const register = await postJson(`${baseUrl}/auth/register`, {
+      email,
+      password,
+      region: 'US',
+    }, { 'x-device-id': deviceId });
+    check('Register user for Resend proof succeeds', register.status === 200 || register.status === 201, `status=${register.status}`);
+
+    const forgot = await postJson(`${baseUrl}/auth/forgot-password`, { email });
+    check('Forgot-password succeeds for registered user', forgot.status === 200 && forgot.json?.success === true);
+
+    await new Promise((r) => setTimeout(r, 1000));
+
+    check('Resend API was called', !!capturedEmail, capturedEmail ? '' : 'mock /emails received no payload');
+    check('Resend Authorization header uses RESEND_API_KEY', resendAuthHeader === 'Bearer re_proof_test_key');
+    check('Resend send includes recipient', capturedEmail?.to?.[0] === email);
+
+    const resendLog = serverLog.match(/Password reset email sent via Resend.*resendId":"([^"]+)"/);
+    check('Server logged Resend success with resendId', !!resendLog, resendLog ? '' : 'missing Resend success log');
+
+    const tokenMatch = (capturedEmail?.html || capturedEmail?.text || '').match(/token=([a-f0-9]{64})/i);
+    check('Reset token included in Resend email payload', !!tokenMatch);
+
+    const reset = await postJson(`${baseUrl}/auth/reset-password`, {
+      token: tokenMatch[1],
+      newPassword: 'NewResendProof123!',
+    });
+    check('Reset-password works with token from Resend email', reset.status === 200 && reset.json?.success === true, `status=${reset.status}`);
+
+    const loginNew = await postJson(`${baseUrl}/auth/login`, { email, password: 'NewResendProof123!' }, { 'x-device-id': deviceId });
+    check('Login succeeds with new password after Resend reset', loginNew.status === 200 && !!loginNew.json?.token, `status=${loginNew.status}`);
+
+    console.log('\n  🎯 RESEND PROOF: registered user → forgot-password → Resend API success → reset token works');
+  } finally {
+    server.kill('SIGTERM');
+    await new Promise((resolve) => mockServer.close(resolve));
+    try { fs.unlinkSync(dbPath); } catch (_) {}
+    try { fs.unlinkSync(`${dbPath}.bak`); } catch (_) {}
   }
 }
 
@@ -170,6 +278,9 @@ async function runGmailNormalizationProof() {
     SMTP_FROM: 'EGWallet Proof <proof@egwallet.test>',
     APP_FRONTEND_URL: 'egwallet://reset-password',
   };
+  delete env.RESEND_API_KEY;
+  delete env.GMAIL_USER;
+  delete env.GMAIL_APP_PASSWORD;
 
   const server = spawn(process.execPath, ['index.js'], {
     cwd: BACKEND,
@@ -259,6 +370,9 @@ async function runLiveProof() {
     SMTP_FROM: 'EGWallet Proof <proof@egwallet.test>',
     APP_FRONTEND_URL: 'egwallet://reset-password',
   };
+  delete env.RESEND_API_KEY;
+  delete env.GMAIL_USER;
+  delete env.GMAIL_APP_PASSWORD;
 
   const server = spawn(process.execPath, ['index.js'], {
     cwd: BACKEND,
@@ -338,6 +452,7 @@ async function runLiveProof() {
   console.log('EGWallet Forgot Password Proof');
   await runStaticChecks();
   await checkProductionHealth();
+  await runResendProof();
   await runGmailNormalizationProof();
   await runLiveProof();
 
