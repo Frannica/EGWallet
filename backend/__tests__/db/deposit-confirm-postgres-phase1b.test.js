@@ -229,3 +229,55 @@ test('phase1b-d deposit rollback on transaction insert failure', async () => {
     client.release();
   }
 });
+
+test('phase1b-d deposit confirm upserts missing relational user wallet rows from runtime state', async () => {
+  requireDb();
+  const client = await pool.connect();
+  const ids = { users: [uuidv4()], wallets: [uuidv4()], transactions: [uuidv4()] };
+  const intentId = `demo_intent_${uuidv4()}`;
+  try {
+    // Intentionally seed only user row in runtime state, not relational tables.
+    const runtimeStateDb = {
+      _dbVersion: 0,
+      users: [{
+        id: ids.users[0],
+        email: `${ids.users[0]}@runtime-only.test`,
+        passwordHash: 'x',
+        region: 'US',
+        role: 'individual',
+        createdAt: Date.now(),
+      }],
+      wallets: [{
+        id: ids.wallets[0],
+        userId: ids.users[0],
+        balances: [{ currency: 'USD', amount: 0 }],
+        createdAt: Date.now(),
+      }],
+      transactions: [],
+      ledger: [],
+    };
+
+    const result = await commitDepositConfirmPostgres({
+      walletId: ids.wallets[0],
+      currency: 'USD',
+      netCredited: 1500,
+      tx: buildDepositTx(ids.transactions[0], ids.wallets[0], 1500, 'USD', intentId, 'Demo Mode'),
+      userId: ids.users[0],
+      intentId,
+      runtimeStateDb,
+    });
+
+    assert.equal(result.replay, false);
+    assert.equal(result.newBalance, 1500);
+    const user = await client.query('SELECT id FROM users WHERE id = $1', [ids.users[0]]);
+    const wallet = await client.query('SELECT id FROM wallets WHERE id = $1 AND user_id = $2', [ids.wallets[0], ids.users[0]]);
+    const bal = await client.query('SELECT amount FROM wallet_balances WHERE wallet_id = $1 AND currency = $2', [ids.wallets[0], 'USD']);
+    assert.equal(user.rowCount, 1);
+    assert.equal(wallet.rowCount, 1);
+    assert.equal(Number(bal.rows[0].amount), 1500);
+  } finally {
+    try { await client.query('DELETE FROM runtime_db_state WHERE id = 1'); } catch (_) {}
+    await cleanup(client, ids);
+    client.release();
+  }
+});

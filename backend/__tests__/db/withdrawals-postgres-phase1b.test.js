@@ -130,6 +130,7 @@ test('phase1b-e create + idempotency replay', async () => {
       clientKey: 'wd-key-1',
       responseBody,
       userLimitTracking: db.users[0].limitTracking,
+      skipRuntimeStateSync: true,
     });
     assert.equal(first.replay, false);
 
@@ -140,6 +141,7 @@ test('phase1b-e create + idempotency replay', async () => {
       clientKey: 'wd-key-1',
       responseBody,
       userLimitTracking: db.users[0].limitTracking,
+      skipRuntimeStateSync: true,
     });
     assert.equal(replay.replay, true);
 
@@ -168,10 +170,10 @@ test('phase1b-e approve transition', async () => {
       walletId: ids.wallets[0], amount: 1000, currency: 'USD', method: 'bank', isInternational: false, feeAmount: 0, feeRate: 0, netPayout: 1000,
     });
     ids.withdrawals.push(w.id);
-    await commitCreateWithdrawalPostgres({ runtimeStateDb: db, withdrawal: w, userId: ids.users[0], clientKey: 'wd-key-2', responseBody: { withdrawal: w }, userLimitTracking: {} });
+    await commitCreateWithdrawalPostgres({ runtimeStateDb: db, withdrawal: w, userId: ids.users[0], clientKey: 'wd-key-2', responseBody: { withdrawal: w }, userLimitTracking: {}, skipRuntimeStateSync: true });
 
     const updated = adminTransition(db, w.id, 'approved', 'admin-1', null);
-    const t = await commitWithdrawalTransitionPostgres({ runtimeStateDb: db, withdrawal: updated, expectedStatus: 'pending_review' });
+    const t = await commitWithdrawalTransitionPostgres({ runtimeStateDb: db, withdrawal: updated, expectedStatus: 'pending_review', skipRuntimeStateSync: true });
     assert.equal(t.notFound, false);
     const row = await client.query('SELECT status, approved_at FROM withdrawals WHERE id = $1', [w.id]);
     assert.equal(row.rows[0].status, 'approved');
@@ -193,17 +195,17 @@ test('phase1b-e paid transition releases hold only', async () => {
       walletId: ids.wallets[0], amount: 900, currency: 'USD', method: 'bank', isInternational: false, feeAmount: 0, feeRate: 0, netPayout: 900,
     });
     ids.withdrawals.push(w.id);
-    await commitCreateWithdrawalPostgres({ runtimeStateDb: db, withdrawal: w, userId: ids.users[0], clientKey: 'wd-key-3', responseBody: { withdrawal: w }, userLimitTracking: {} });
+    await commitCreateWithdrawalPostgres({ runtimeStateDb: db, withdrawal: w, userId: ids.users[0], clientKey: 'wd-key-3', responseBody: { withdrawal: w }, userLimitTracking: {}, skipRuntimeStateSync: true });
 
     const approved = adminTransition(db, w.id, 'approved', 'admin-1', null);
-    await commitWithdrawalTransitionPostgres({ runtimeStateDb: db, withdrawal: approved, expectedStatus: 'pending_review' });
+    await commitWithdrawalTransitionPostgres({ runtimeStateDb: db, withdrawal: approved, expectedStatus: 'pending_review', skipRuntimeStateSync: true });
     const processing = adminTransition(db, w.id, 'processing', 'admin-1', null);
-    await commitWithdrawalTransitionPostgres({ runtimeStateDb: db, withdrawal: processing, expectedStatus: 'approved' });
+    await commitWithdrawalTransitionPostgres({ runtimeStateDb: db, withdrawal: processing, expectedStatus: 'approved', skipRuntimeStateSync: true });
     w.payoutSettled = true;
     w.payoutProvider = 'stripe';
     w.payoutReference = `po_${uuidv4().replace(/-/g, '')}`;
     const paid = adminTransition(db, w.id, 'paid', 'admin-1', null);
-    await commitWithdrawalTransitionPostgres({ runtimeStateDb: db, withdrawal: paid, expectedStatus: 'processing' });
+    await commitWithdrawalTransitionPostgres({ runtimeStateDb: db, withdrawal: paid, expectedStatus: 'processing', skipRuntimeStateSync: true });
 
     const hold = await client.query('SELECT amount FROM wallet_holds WHERE wallet_id = $1 AND currency = $2', [ids.wallets[0], 'USD']);
     const bal = await client.query('SELECT amount FROM wallet_balances WHERE wallet_id = $1 AND currency = $2', [ids.wallets[0], 'USD']);
@@ -229,10 +231,10 @@ test('phase1b-e failed transition refunds once (rollback/refund)', async () => {
       walletId: ids.wallets[0], amount: 1100, currency: 'USD', method: 'bank', isInternational: false, feeAmount: 0, feeRate: 0, netPayout: 1100,
     });
     ids.withdrawals.push(w.id);
-    await commitCreateWithdrawalPostgres({ runtimeStateDb: db, withdrawal: w, userId: ids.users[0], clientKey: 'wd-key-4', responseBody: { withdrawal: w }, userLimitTracking: {} });
+    await commitCreateWithdrawalPostgres({ runtimeStateDb: db, withdrawal: w, userId: ids.users[0], clientKey: 'wd-key-4', responseBody: { withdrawal: w }, userLimitTracking: {}, skipRuntimeStateSync: true });
 
     const failed = adminTransition(db, w.id, 'failed', 'admin-1', 'manual failure');
-    await commitWithdrawalTransitionPostgres({ runtimeStateDb: db, withdrawal: failed, expectedStatus: 'pending_review' });
+    await commitWithdrawalTransitionPostgres({ runtimeStateDb: db, withdrawal: failed, expectedStatus: 'pending_review', skipRuntimeStateSync: true });
 
     const bal = await client.query('SELECT amount FROM wallet_balances WHERE wallet_id = $1 AND currency = $2', [ids.wallets[0], 'USD']);
     const hold = await client.query('SELECT amount FROM wallet_holds WHERE wallet_id = $1 AND currency = $2', [ids.wallets[0], 'USD']);
@@ -258,7 +260,7 @@ test('phase1b-e concurrent transition prevention', async () => {
       walletId: ids.wallets[0], amount: 1000, currency: 'USD', method: 'bank', isInternational: false, feeAmount: 0, feeRate: 0, netPayout: 1000,
     });
     ids.withdrawals.push(w.id);
-    await commitCreateWithdrawalPostgres({ runtimeStateDb: db, withdrawal: w, userId: ids.users[0], clientKey: 'wd-key-5', responseBody: { withdrawal: w }, userLimitTracking: {} });
+    await commitCreateWithdrawalPostgres({ runtimeStateDb: db, withdrawal: w, userId: ids.users[0], clientKey: 'wd-key-5', responseBody: { withdrawal: w }, userLimitTracking: {}, skipRuntimeStateSync: true });
 
     const aDb = cloneDb(db);
     const bDb = cloneDb(db);
@@ -266,8 +268,8 @@ test('phase1b-e concurrent transition prevention', async () => {
     const bW = adminTransition(bDb, w.id, 'failed', 'admin-B', null);
 
     const [a, b] = await Promise.allSettled([
-      commitWithdrawalTransitionPostgres({ runtimeStateDb: aDb, withdrawal: aW, expectedStatus: 'pending_review' }),
-      commitWithdrawalTransitionPostgres({ runtimeStateDb: bDb, withdrawal: bW, expectedStatus: 'pending_review' }),
+      commitWithdrawalTransitionPostgres({ runtimeStateDb: aDb, withdrawal: aW, expectedStatus: 'pending_review', skipRuntimeStateSync: true }),
+      commitWithdrawalTransitionPostgres({ runtimeStateDb: bDb, withdrawal: bW, expectedStatus: 'pending_review', skipRuntimeStateSync: true }),
     ]);
     const applied = [a, b].filter((r) => r.status === 'fulfilled' && r.value && !r.value.conflict).length;
     const conflict = [a, b].filter((r) => r.status === 'fulfilled' && r.value && r.value.conflict).length;

@@ -62,6 +62,59 @@ function mapTransactionRow(row) {
   };
 }
 
+async function syncRuntimeWalletGraph(client, { runtimeStateDb, userId, walletId }) {
+  if (!runtimeStateDb) return;
+  const users = runtimeStateDb.users || [];
+  const wallets = runtimeStateDb.wallets || [];
+  const user = users.find((u) => u.id === userId);
+  const wallet = wallets.find((w) => w.id === walletId && w.userId === userId);
+  if (!user || !wallet) return;
+
+  const email = user.email || `${userId}@runtime.local`;
+  const passwordHash = user.passwordHash || user.password_hash || 'x';
+  const region = user.region || 'US';
+  const role = user.role || 'individual';
+  const preferredCurrency = user.preferredCurrency || null;
+  const limitTracking = user.limitTracking ? JSON.stringify(user.limitTracking) : '{}';
+  const createdAt = msToDate(user.createdAt || Date.now());
+
+  await client.query(
+    `INSERT INTO users (
+      id, email, password_hash, region, role, preferred_currency, limit_tracking, created_at
+    ) VALUES (
+      $1, $2, $3, $4, $5, $6, $7::jsonb, $8
+    )
+    ON CONFLICT (id) DO NOTHING`,
+    [userId, email, passwordHash, region, role, preferredCurrency, limitTracking, createdAt]
+  );
+
+  await client.query(
+    `INSERT INTO wallets (
+      id, user_id, type, employer_id, max_limit_usd, created_at
+    ) VALUES (
+      $1, $2, $3, $4, $5, $6
+    )
+    ON CONFLICT (id) DO NOTHING`,
+    [
+      wallet.id,
+      wallet.userId,
+      wallet.type || null,
+      wallet.employerId || null,
+      wallet.maxLimitUSD === undefined ? null : Number(wallet.maxLimitUSD),
+      msToDate(wallet.createdAt || Date.now()),
+    ]
+  );
+
+  for (const bal of wallet.balances || []) {
+    await client.query(
+      `INSERT INTO wallet_balances(wallet_id, currency, amount)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (wallet_id, currency) DO UPDATE SET amount = EXCLUDED.amount`,
+      [wallet.id, bal.currency, Number(bal.amount || 0)]
+    );
+  }
+}
+
 async function fetchReplayByIntent(intentId, currencyHint) {
   if (!intentId) return null;
   const txResult = await pool.query(
@@ -94,6 +147,8 @@ async function commitDepositConfirmPostgres({
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    await syncRuntimeWalletGraph(client, { runtimeStateDb, userId, walletId });
 
     const wallet = await client.query(
       'SELECT id FROM wallets WHERE id = $1 AND user_id = $2 FOR UPDATE',

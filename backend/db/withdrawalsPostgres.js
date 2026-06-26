@@ -197,6 +197,7 @@ async function commitCreateWithdrawalPostgres({
   clientKey,
   responseBody,
   userLimitTracking,
+  skipRuntimeStateSync = false,
 }) {
   const client = await pool.connect();
   try {
@@ -272,7 +273,9 @@ async function commitCreateWithdrawalPostgres({
       );
     }
 
-    await upsertRuntimeState(client, runtimeStateDb);
+    if (!skipRuntimeStateSync) {
+      await upsertRuntimeState(client, runtimeStateDb);
+    }
     await client.query('COMMIT');
     return { replay: false, insufficientFunds: false };
   } catch (error) {
@@ -291,6 +294,7 @@ async function commitWithdrawalTransitionPostgres({
   runtimeStateDb,
   withdrawal,
   expectedStatus,
+  skipRuntimeStateSync = false,
 }) {
   const client = await pool.connect();
   try {
@@ -345,7 +349,9 @@ async function commitWithdrawalTransitionPostgres({
       );
     }
 
-    await upsertRuntimeState(client, runtimeStateDb);
+    if (!skipRuntimeStateSync) {
+      await upsertRuntimeState(client, runtimeStateDb);
+    }
     await client.query('COMMIT');
     return { notFound: false, conflict: false };
   } catch (error) {
