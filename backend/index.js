@@ -48,6 +48,7 @@ const { router: adminWithdrawalsRouter, adminLoginHandler, adminLogoutHandler } 
 const { executePayout, payoutRouter } = require('./payoutProviders');
 const { getRuntimeStateSync, setRuntimeStateSync, getRuntimeStatusSync } = require('./db/runtimeStateSync');
 const { getDurableP2PIdempotency, commitP2PSendPostgres } = require('./db/p2pSendPostgres');
+const { getDurablePaymentRequestIdempotency, commitPaymentRequestPayPostgres } = require('./db/paymentRequestPayPostgres');
 const {
   isPasswordResetEmailConfigured,
   getPasswordResetEmailMode,
@@ -5382,7 +5383,9 @@ app.post('/payment-requests/:id/pay', authMiddleware, async (req, res) => {
 
   // Durable idempotency — survives restart (check DB after acquiring mutex).
   if (prClientKey) {
-    const prDurableHit = checkDurableIdempotency(db, prClientKey, req.user.userId);
+    const prDurableHit = USE_POSTGRES_RUNTIME
+      ? await getDurablePaymentRequestIdempotency(prClientKey, req.user.userId)
+      : checkDurableIdempotency(db, prClientKey, req.user.userId);
     if (prDurableHit) {
       idempotencyStore.set(prClientKey, { userId: req.user.userId, response: prDurableHit, timestamp: Date.now() });
       return res.status(200).json(prDurableHit);
@@ -5751,9 +5754,50 @@ app.post('/payment-requests/:id/pay', authMiddleware, async (req, res) => {
   // Build response and save idempotency record atomically with the balance mutation.
   // A crash after saveDB leaves a durable record — replay returns cached response.
   const prResponseBody = { request, transaction: tx };
-  if (prClientKey) saveDurableIdempotency(db, prClientKey, prResponseBody, req.user.userId);
+  if (!USE_POSTGRES_RUNTIME && prClientKey) {
+    saveDurableIdempotency(db, prClientKey, prResponseBody, req.user.userId);
+  }
 
-  saveDB(db); // commits balances + transaction + request.status + idempotency atomically
+  if (USE_POSTGRES_RUNTIME) {
+    try {
+      const pgResult = await commitPaymentRequestPayPostgres({
+        requestId: request.id,
+        fromWalletId,
+        toWalletId: request.walletId,
+        debitCurrency,
+        debitAmount,
+        requestCurrency: reqCurrency,
+        requestAmount: reqAmount,
+        tx,
+        clientKey: prClientKey,
+        userId: req.user.userId,
+        responseBody: prResponseBody,
+        payerLimitTracking: prPayerUser.limitTracking,
+        employerPayrollLimitTracking: prPayrollEmployer?.payrollLimitTracking || null,
+        employerId: prPayrollEmployer?.id || null,
+        runtimeStateDb: db,
+      });
+
+      if (pgResult.replay && pgResult.response) {
+        idempotencyStore.set(prClientKey, { userId: req.user.userId, response: pgResult.response, timestamp: Date.now() });
+        return res.status(200).json(pgResult.response);
+      }
+      if (pgResult.requestNotFound) {
+        return res.status(404).json({ error: t('error_request_not_found', req.lang || 'en') });
+      }
+      if (pgResult.alreadyProcessed) {
+        return res.status(400).json({ error: t('error_request_processed', req.lang || 'en') });
+      }
+      if (pgResult.insufficientFunds) {
+        return res.status(400).json({ error: t('error_insufficient_funds', req.lang || 'en') });
+      }
+    } catch (saveErr) {
+      logger.error('[/payment-requests/pay] PostgreSQL commit failed', { error: saveErr.message, requestId: request.id });
+      return res.status(500).json({ error: t('error_transaction_persist', req.lang || 'en') });
+    }
+  } else {
+    saveDB(db); // commits balances + transaction + request.status + idempotency atomically
+  }
 
   if (prClientKey) idempotencyStore.set(prClientKey, { userId: req.user.userId, response: prResponseBody, timestamp: Date.now() });
 
