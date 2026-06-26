@@ -62,10 +62,10 @@ function mapTransactionRow(row) {
   };
 }
 
-async function syncRuntimeWalletGraph(client, { runtimeStateDb, userId, walletId }) {
-  if (!runtimeStateDb) return;
-  const users = runtimeStateDb.users || [];
-  const wallets = runtimeStateDb.wallets || [];
+async function syncRuntimeWalletGraph(client, { stateDb, userId, walletId }) {
+  if (!stateDb) return;
+  const users = stateDb.users || [];
+  const wallets = stateDb.wallets || [];
   const user = users.find((u) => u.id === userId);
   const wallet = wallets.find((w) => w.id === walletId && w.userId === userId);
   if (!user || !wallet) return;
@@ -140,7 +140,7 @@ async function commitDepositConfirmPostgres({
   tx,
   userId,
   intentId,
-  runtimeStateDb,
+  stateDb,
   clientKey,
   idempotencyResponse,
   skipRuntimeStateSync = false,
@@ -149,7 +149,7 @@ async function commitDepositConfirmPostgres({
   try {
     await client.query('BEGIN');
 
-    await syncRuntimeWalletGraph(client, { runtimeStateDb, userId, walletId });
+    await syncRuntimeWalletGraph(client, { stateDb, userId, walletId });
 
     const wallet = await client.query(
       'SELECT id FROM wallets WHERE id = $1 AND user_id = $2 FOR UPDATE',

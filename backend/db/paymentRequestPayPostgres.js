@@ -194,11 +194,11 @@ async function upsertRuntimePaymentRequest(client, request) {
   );
 }
 
-async function syncRuntimePaymentRequestGraph(client, { runtimeStateDb, requestId, payerUserId, fromWalletId, toWalletId }) {
-  if (!runtimeStateDb) return;
-  const users = runtimeStateDb.users || [];
-  const wallets = runtimeStateDb.wallets || [];
-  const requests = runtimeStateDb.paymentRequests || [];
+async function syncRuntimePaymentRequestGraph(client, { stateDb, requestId, payerUserId, fromWalletId, toWalletId }) {
+  if (!stateDb) return;
+  const users = stateDb.users || [];
+  const wallets = stateDb.wallets || [];
+  const requests = stateDb.paymentRequests || [];
   const request = requests.find((r) => r.id === requestId);
   const fromWallet = wallets.find((w) => w.id === fromWalletId);
   const payeeWallet = wallets.find((w) => w.id === toWalletId) || (request ? wallets.find((w) => w.id === request.walletId) : null);
@@ -237,14 +237,14 @@ async function commitPaymentRequestPayPostgres({
   payerLimitTracking,
   employerPayrollLimitTracking,
   employerId,
-  runtimeStateDb,
+  stateDb,
   skipRuntimeStateSync = false,
 }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     await syncRuntimePaymentRequestGraph(client, {
-      runtimeStateDb,
+      stateDb,
       requestId,
       payerUserId: userId,
       fromWalletId,

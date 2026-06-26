@@ -83,7 +83,7 @@ test('phase1b-d deposit normal confirm', async () => {
       tx: buildDepositTx(ids.transactions[0], ids.wallets[0], 500, 'USD', intentId),
       userId: ids.users[0],
       intentId,
-      runtimeStateDb: null,
+      stateDb: null,
     });
 
     assert.equal(result.replay, false);
@@ -120,7 +120,7 @@ test('phase1b-d deposit duplicate confirm replay', async () => {
       tx: buildDepositTx(ids.transactions[0], ids.wallets[0], 700, 'USD', intentId),
       userId: ids.users[0],
       intentId,
-      runtimeStateDb: null,
+      stateDb: null,
     });
     assert.equal(first.replay, false);
 
@@ -131,7 +131,7 @@ test('phase1b-d deposit duplicate confirm replay', async () => {
       tx: buildDepositTx(ids.transactions[1], ids.wallets[0], 700, 'USD', intentId),
       userId: ids.users[0],
       intentId,
-      runtimeStateDb: null,
+      stateDb: null,
     });
 
     assert.equal(replay.replay, true);
@@ -167,7 +167,7 @@ test('phase1b-d deposit provider unavailable demo confirm path', async () => {
       tx: buildDepositTx(ids.transactions[0], ids.wallets[0], 1200, 'USD', intentId, 'Demo Mode'),
       userId: ids.users[0],
       intentId,
-      runtimeStateDb: null,
+      stateDb: null,
     });
 
     assert.equal(result.replay, false);
@@ -209,7 +209,7 @@ test('phase1b-d deposit rollback on transaction insert failure', async () => {
         tx: buildDepositTx(conflictTxId, ids.wallets[0], 400, 'USD', intentId),
         userId: ids.users[0],
         intentId,
-        runtimeStateDb: null,
+        stateDb: null,
       }),
       /duplicate key|violates unique constraint/i
     );
@@ -237,7 +237,7 @@ test('phase1b-d deposit confirm upserts missing relational user wallet rows from
   const intentId = `demo_intent_${uuidv4()}`;
   try {
     // Intentionally seed only user row in runtime state, not relational tables.
-    const runtimeStateDb = {
+    const stateDb = {
       _dbVersion: 0,
       users: [{
         id: ids.users[0],
@@ -264,7 +264,7 @@ test('phase1b-d deposit confirm upserts missing relational user wallet rows from
       tx: buildDepositTx(ids.transactions[0], ids.wallets[0], 1500, 'USD', intentId, 'Demo Mode'),
       userId: ids.users[0],
       intentId,
-      runtimeStateDb,
+      stateDb,
       skipRuntimeStateSync: true,
     });
 

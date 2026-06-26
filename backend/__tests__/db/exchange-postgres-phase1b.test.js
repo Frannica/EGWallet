@@ -86,7 +86,7 @@ test('phase1b-c exchange normal', async () => {
       userId: ids.users[0],
       responseBody: { ok: true },
       senderLimitTracking: null,
-      runtimeStateDb: null,
+      stateDb: null,
     });
 
     assert.equal(result.insufficientFunds, false);
@@ -122,7 +122,7 @@ test('phase1b-c exchange insufficient funds', async () => {
       userId: ids.users[0],
       responseBody: { ok: true },
       senderLimitTracking: null,
-      runtimeStateDb: null,
+      stateDb: null,
     });
 
     assert.equal(result.insufficientFunds, true);
@@ -161,7 +161,7 @@ test('phase1b-c exchange rounding parity', async () => {
       userId: ids.users[0],
       responseBody: { netReceived, fxFeeAmount },
       senderLimitTracking: null,
-      runtimeStateDb: null,
+      stateDb: null,
     });
 
     assert.equal(result.insufficientFunds, false);
@@ -199,7 +199,7 @@ test('phase1b-c exchange concurrent double-spend prevention', async () => {
       userId: ids.users[0],
       responseBody: { ok: 1 },
       senderLimitTracking: null,
-      runtimeStateDb: null,
+      stateDb: null,
     });
     const p2 = commitExchangePostgres({
       walletId: ids.wallets[0],
@@ -212,7 +212,7 @@ test('phase1b-c exchange concurrent double-spend prevention', async () => {
       userId: ids.users[0],
       responseBody: { ok: 2 },
       senderLimitTracking: null,
-      runtimeStateDb: null,
+      stateDb: null,
     });
 
     const [a, b] = await Promise.all([p1, p2]);

@@ -140,7 +140,7 @@ router.post('/:id/transition', adminAuth, async (req, res) => {
         ? updated.statusHistory[updated.statusHistory.length - 2].status
         : null;
       const pgResult = await commitWithdrawalTransitionPostgres({
-        runtimeStateDb: db,
+        stateDb: db,
         withdrawal: updated,
         expectedStatus: previousStatus || undefined,
       });
@@ -287,7 +287,7 @@ router.post('/:id/reconcile', adminAuth, async (req, res) => {
                 wSave.payoutProvider  = 'stripe';
                 if (USE_POSTGRES_RUNTIME) {
           const pgResult = await commitWithdrawalTransitionPostgres({
-                    runtimeStateDb: dbSave,
+                    stateDb: dbSave,
                     withdrawal: wSave,
             expectedStatus: 'processing',
                   });
@@ -416,7 +416,7 @@ router.post('/:id/reconcile', adminAuth, async (req, res) => {
         markWithdrawalPaid(dbR, w.id, paidRef, provider);
         if (USE_POSTGRES_RUNTIME) {
           const pgResult = await commitWithdrawalTransitionPostgres({
-            runtimeStateDb: dbR,
+            stateDb: dbR,
             withdrawal: (dbR.withdrawals || []).find((x) => x.id === w.id),
             expectedStatus: 'processing',
           });
@@ -485,7 +485,7 @@ router.post('/:id/reconcile', adminAuth, async (req, res) => {
         markWithdrawalFailed(dbR, w.id, `Reconciled by admin ${adminId}: provider status = failed`);
         if (USE_POSTGRES_RUNTIME) {
           const pgResult = await commitWithdrawalTransitionPostgres({
-            runtimeStateDb: dbR,
+            stateDb: dbR,
             withdrawal: (dbR.withdrawals || []).find((x) => x.id === w.id),
             expectedStatus: 'processing',
           });

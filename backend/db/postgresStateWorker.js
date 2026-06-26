@@ -2,6 +2,8 @@
 
 const { Client } = require('pg');
 
+const APP_STATE_KEY = 'app_state';
+
 function shouldUseSsl() {
   if (!process.env.DATABASE_URL) return false;
   if (process.env.PGSSLMODE === 'disable') return false;
@@ -11,10 +13,9 @@ function shouldUseSsl() {
 
 async function ensureTable(client) {
   await client.query(`
-    CREATE TABLE IF NOT EXISTS runtime_db_state (
-      id INT PRIMARY KEY CHECK (id = 1),
-      version BIGINT NOT NULL DEFAULT 0,
-      data JSONB NOT NULL,
+    CREATE TABLE IF NOT EXISTS app_metadata (
+      key TEXT PRIMARY KEY,
+      value JSONB NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
@@ -24,9 +25,7 @@ function readStdin() {
   return new Promise((resolve, reject) => {
     let buf = '';
     process.stdin.setEncoding('utf8');
-    process.stdin.on('data', (chunk) => {
-      buf += chunk;
-    });
+    process.stdin.on('data', (chunk) => { buf += chunk; });
     process.stdin.on('end', () => resolve(buf));
     process.stdin.on('error', reject);
   });
@@ -47,15 +46,16 @@ async function run() {
   await ensureTable(client);
 
   if (command === 'get') {
-    const row = await client.query('SELECT version, data FROM runtime_db_state WHERE id = 1');
+    const row = await client.query('SELECT value FROM app_metadata WHERE key = $1', [APP_STATE_KEY]);
     if (row.rowCount === 0) {
       writeResult({ ok: true, missing: true });
     } else {
+      const db = row.rows[0].value || {};
       writeResult({
         ok: true,
         missing: false,
-        version: Number(row.rows[0].version || 0),
-        db: row.rows[0].data,
+        version: Number(db._dbVersion || 0),
+        db,
       });
     }
     await client.end();
@@ -63,7 +63,7 @@ async function run() {
   }
 
   if (command === 'status') {
-    const row = await client.query('SELECT 1 FROM runtime_db_state WHERE id = 1');
+    const row = await client.query('SELECT 1 FROM app_metadata WHERE key = $1', [APP_STATE_KEY]);
     writeResult({ ok: true, connected: true, initialized: row.rowCount > 0 });
     await client.end();
     return;
@@ -78,9 +78,11 @@ async function run() {
     await client.query('BEGIN');
     try {
       const existing = await client.query(
-        'SELECT version FROM runtime_db_state WHERE id = 1 FOR UPDATE'
+        'SELECT value FROM app_metadata WHERE key = $1 FOR UPDATE',
+        [APP_STATE_KEY]
       );
-      const currentVersion = existing.rowCount > 0 ? Number(existing.rows[0].version || 0) : 0;
+      const current = existing.rowCount > 0 ? (existing.rows[0].value || {}) : {};
+      const currentVersion = Number(current._dbVersion || 0);
       const expectedVersion = Number(db._dbVersion || 0);
 
       if (!skipVersionCheck && existing.rowCount > 0 && currentVersion !== expectedVersion) {
@@ -92,13 +94,13 @@ async function run() {
 
       if (existing.rowCount === 0) {
         await client.query(
-          'INSERT INTO runtime_db_state (id, version, data, updated_at) VALUES (1, $1, $2::jsonb, NOW())',
-          [nextVersion, JSON.stringify(dbToSave)]
+          'INSERT INTO app_metadata(key, value, updated_at) VALUES ($1, $2::jsonb, NOW())',
+          [APP_STATE_KEY, JSON.stringify(dbToSave)]
         );
       } else {
         await client.query(
-          'UPDATE runtime_db_state SET version = $1, data = $2::jsonb, updated_at = NOW() WHERE id = 1',
-          [nextVersion, JSON.stringify(dbToSave)]
+          'UPDATE app_metadata SET value = $1::jsonb, updated_at = NOW() WHERE key = $2',
+          [JSON.stringify(dbToSave), APP_STATE_KEY]
         );
       }
 

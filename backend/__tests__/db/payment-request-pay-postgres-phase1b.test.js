@@ -130,7 +130,7 @@ test('phase1b-b payment request pay normal', async () => {
       payerLimitTracking: null,
       employerPayrollLimitTracking: null,
       employerId: null,
-      runtimeStateDb: null,
+      stateDb: null,
     });
 
     assert.equal(res.replay, false);
@@ -185,7 +185,7 @@ test('phase1b-b payment request already processed replay', async () => {
       payerLimitTracking: null,
       employerPayrollLimitTracking: null,
       employerId: null,
-      runtimeStateDb: null,
+      stateDb: null,
     });
 
     const replay = await commitPaymentRequestPayPostgres({
@@ -203,7 +203,7 @@ test('phase1b-b payment request already processed replay', async () => {
       payerLimitTracking: null,
       employerPayrollLimitTracking: null,
       employerId: null,
-      runtimeStateDb: null,
+      stateDb: null,
     });
 
     assert.equal(replay.replay, true);
@@ -251,7 +251,7 @@ test('phase1b-b payment request insufficient funds', async () => {
       payerLimitTracking: null,
       employerPayrollLimitTracking: null,
       employerId: null,
-      runtimeStateDb: null,
+      stateDb: null,
     });
 
     assert.equal(res.insufficientFunds, true);
@@ -299,7 +299,7 @@ test('phase1b-b payment request concurrent double-pay prevention', async () => {
       payerLimitTracking: null,
       employerPayrollLimitTracking: null,
       employerId: null,
-      runtimeStateDb: null,
+      stateDb: null,
     });
     const send2 = commitPaymentRequestPayPostgres({
       requestId: ids.requests[0],
@@ -316,7 +316,7 @@ test('phase1b-b payment request concurrent double-pay prevention', async () => {
       payerLimitTracking: null,
       employerPayrollLimitTracking: null,
       employerId: null,
-      runtimeStateDb: null,
+      stateDb: null,
     });
 
     const results = await Promise.all([send1, send2]);
@@ -345,7 +345,7 @@ test('phase1b-b payment request runtime-state sync upserts missing relational gr
     requests: [uuidv4()],
     transactions: [uuidv4()],
   };
-  const runtimeStateDb = {
+  const stateDb = {
     _dbVersion: 0,
     users: [
       { id: ids.users[0], email: `${ids.users[0]}@runtime.test`, passwordHash: 'x', region: 'US', role: 'individual', createdAt: Date.now() },
@@ -387,7 +387,7 @@ test('phase1b-b payment request runtime-state sync upserts missing relational gr
       payerLimitTracking: null,
       employerPayrollLimitTracking: null,
       employerId: null,
-      runtimeStateDb,
+      stateDb,
       skipRuntimeStateSync: true,
     });
 

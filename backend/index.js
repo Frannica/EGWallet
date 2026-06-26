@@ -46,7 +46,7 @@ const { parse } = require('csv-parse/sync');
 const { createWithdrawal, advanceToProcessing, markWithdrawalFailed, markWithdrawalPaid } = require('./withdrawalEngine');
 const { router: adminWithdrawalsRouter, adminLoginHandler, adminLogoutHandler } = require('./adminWithdrawals');
 const { executePayout, payoutRouter } = require('./payoutProviders');
-const { getRuntimeStateSync, setRuntimeStateSync, getRuntimeStatusSync } = require('./db/runtimeStateSync');
+const { getPostgresStateSync, setPostgresStateSync, getPostgresStatusSync } = require('./db/postgresStateSync');
 const { getDurableP2PIdempotency, commitP2PSendPostgres } = require('./db/p2pSendPostgres');
 const { getDurablePaymentRequestIdempotency, commitPaymentRequestPayPostgres } = require('./db/paymentRequestPayPostgres');
 const { getDurableExchangeIdempotency, commitExchangePostgres } = require('./db/exchangePostgres');
@@ -103,9 +103,11 @@ let firestore     = null;
 })();
 
 // Environment Configuration
-const DB_FILE = process.env.DB_FILE_PATH || path.join(__dirname, 'db.json');
-const DB_BACKUP = process.env.DB_BACKUP_PATH || path.join(__dirname, 'db.json.bak');
-const USE_POSTGRES_RUNTIME = !!process.env.DATABASE_URL;
+if (!process.env.DATABASE_URL) {
+  console.error('❌ FATAL: DATABASE_URL is required. PostgreSQL is the only supported runtime database.');
+  process.exit(1);
+}
+const USE_POSTGRES_RUNTIME = true;
 if (!process.env.JWT_SECRET) {
   console.error('❌ FATAL: JWT_SECRET is not set. All tokens would be forgeable. Set JWT_SECRET in your environment.');
   process.exit(1);
@@ -155,7 +157,7 @@ if (NODE_ENV === 'production') {
   if (!process.env.PII_ENCRYPTION_KEY) {
     console.error(
       '❌ FATAL: PII_ENCRYPTION_KEY is missing. Bank account numbers, IBANs, and holder ' +
-      'names would be stored in plaintext in db.json. Generate a 32-byte key (openssl rand -hex 32) ' +
+      'names would be stored in plaintext in persistent storage. Generate a 32-byte key (openssl rand -hex 32) ' +
       'and set it in your Railway environment variables.'
     );
     process.exit(1);
@@ -187,7 +189,7 @@ if (NODE_ENV === 'production') {
     }
   }
 
-  // C6: Single-instance guard — db.json is not safe for concurrent multi-process writes.
+  // C6: Single-instance guard — runtime state writes are single-writer by design.
   // Set WEB_CONCURRENCY=1 and RAILWAY_REPLICAS=1 in your deployment environment.
   const _webConcurrency   = parseInt(process.env.WEB_CONCURRENCY   || '1', 10);
   const _railwayReplicas  = parseInt(process.env.RAILWAY_REPLICAS   || '1', 10);
@@ -195,7 +197,7 @@ if (NODE_ENV === 'production') {
     console.error(
       `❌ FATAL: Multi-instance deployment detected ` +
       `(WEB_CONCURRENCY=${_webConcurrency}, RAILWAY_REPLICAS=${_railwayReplicas}). ` +
-      `EGWallet uses a single-file database (db.json) that is not safe for concurrent ` +
+      `EGWallet uses single-writer runtime state persistence that is not safe for concurrent ` +
       `writes across processes. Set WEB_CONCURRENCY=1 and RAILWAY_REPLICAS=1 before deploying.`
     );
     process.exit(1);
@@ -328,7 +330,7 @@ const IDEMPOTENCY_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
 
 // ── Durable idempotency helpers ───────────────────────────────────────────────
 // The in-memory Map is a fast-path cache. These helpers persist records to
-// db.json so that retries after a process restart cannot double-charge.
+// persistent storage so that retries after a process restart cannot double-charge.
 // Both helpers must be called inside withBalanceMutex on a freshly-loaded db.
 
 /**
@@ -360,7 +362,7 @@ function saveDurableIdempotency(db, clientKey, response, userId) {
   db.idempotencyRecords.push({ key: clientKey, userId, response, timestamp: Date.now() });
 }
 
-/** Coerce wallet amounts to integer minor units (guards against string amounts in db.json). */
+/** Coerce wallet amounts to integer minor units (guards against string amounts in persisted state). */
 function coerceMinorAmount(val) {
   const n = Number(val);
   if (!Number.isFinite(n)) return 0;
@@ -586,7 +588,7 @@ function maskCardNumber(cardNumber) {
 function sanitizeCard(card) {
   if (!card) return card;
   // Strip full PAN/CVV. New cards never have these fields in the DB;
-  // legacy cards in db.json still have them and must be masked here.
+  // legacy cards may still have them and must be masked here.
   const { cvv, cardNumber, ...rest } = card;
   // Prefer stored last4; fall back to computing it from a legacy cardNumber
   const last4 = rest.last4 || (cardNumber ? cardNumber.slice(-4) : '****');
@@ -2233,155 +2235,27 @@ function hydrateDbShape(db) {
 }
 
 function loadDB() {
-  if (USE_POSTGRES_RUNTIME) {
-    const state = getRuntimeStateSync();
-    if (state.missing) {
-      const seeded = emptyDB();
-      const saved = setRuntimeStateSync(seeded, { skipVersionCheck: true });
-      return hydrateDbShape(saved.db);
-    }
-    return hydrateDbShape(state.db || emptyDB());
+  const state = getPostgresStateSync();
+  if (state.missing) {
+    const seeded = emptyDB();
+    const saved = setPostgresStateSync(seeded, { skipVersionCheck: true });
+    return hydrateDbShape(saved.db);
   }
-
-  // Fresh install or new volume mount — db.json does not exist yet.
-  // This is NOT corruption; create the directory and seed an empty database.
-  if (!fs.existsSync(DB_FILE)) {
-    const dbDir = path.dirname(DB_FILE);
-    try { fs.mkdirSync(dbDir, { recursive: true }); } catch (_) {}
-    const fresh = emptyDB();
-    try {
-      fs.writeFileSync(DB_FILE, JSON.stringify(fresh, null, 2), 'utf8');
-      console.log('[loadDB] db.json not found — created fresh database at', DB_FILE);
-    } catch (writeErr) {
-      console.error('[loadDB] Could not write initial db.json:', writeErr.message,
-        '— running in-memory only until disk is writable.');
-    }
-    return fresh;
-  }
-
-  try {
-    const raw = fs.readFileSync(DB_FILE, 'utf8');
-    const db = JSON.parse(raw);
-    return hydrateDbShape(db);
-  } catch (e) {
-    // Never overwrite a potentially-recoverable corrupt file with an empty database.
-    // Quarantine it, attempt backup restore, and fail safely.
-    const corruptPath = DB_FILE + '.corrupt.' + Date.now();
-    try { fs.renameSync(DB_FILE, corruptPath); } catch (_) { /* rename failed — disk issue */ }
-    console.error('[loadDB] db.json failed to parse — quarantined to', corruptPath, e.message);
-
-    // Attempt to restore from the last known-good backup.
-    if (fs.existsSync(DB_BACKUP)) {
-      try {
-        const backupRaw = fs.readFileSync(DB_BACKUP, 'utf8');
-        const backupDb  = JSON.parse(backupRaw);
-        // Copy backup over so subsequent loadDB calls (and saveDB) use the restored file.
-        fs.copyFileSync(DB_BACKUP, DB_FILE);
-        console.warn('[loadDB] Restored db.json from backup');
-        // Apply the same migrations as the happy path above.
-        if (!backupDb.paymentRequests)   backupDb.paymentRequests   = [];
-        if (!backupDb.virtualCards)      backupDb.virtualCards      = [];
-        if (!backupDb.budgets)           backupDb.budgets           = [];
-        if (!backupDb.devices)           backupDb.devices           = [];
-        if (!backupDb.supportTickets)    backupDb.supportTickets    = [];
-        if (!backupDb.fraudAlerts)       backupDb.fraudAlerts       = [];
-        if (!backupDb.savedContacts)     backupDb.savedContacts     = [];
-        if (!backupDb.qrCodes)           backupDb.qrCodes           = [];
-        if (!backupDb.refreshTokens)     backupDb.refreshTokens     = [];
-        if (!backupDb.auditLog)          backupDb.auditLog          = [];
-        if (!backupDb.employers)         backupDb.employers         = [];
-        if (!backupDb.employerEmployees) backupDb.employerEmployees = [];
-        if (!backupDb.payrollBatches)    backupDb.payrollBatches    = [];
-        if (!backupDb.demoIntents)       backupDb.demoIntents       = [];
-        if (!backupDb.notifications)     backupDb.notifications     = [];
-        if (!backupDb.passwordResetTokens) backupDb.passwordResetTokens = [];
-        return hydrateDbShape(backupDb);
-      } catch (backupErr) {
-        console.error('[loadDB] Backup restore also failed', backupErr.message);
-      }
-    }
-
-    // No recovery possible.
-    if (process.env.NODE_ENV === 'production') {
-      console.error('[loadDB] FATAL: db.json is corrupt and backup restore failed. Refusing to continue with empty database.');
-      process.exit(1);
-    }
-
-    // Dev/staging only — return empty database in-memory without writing to disk.
-    // The file was quarantined above; let the operator decide what to restore.
-    console.warn('[loadDB] Dev mode: returning empty in-memory database (no disk write).');
-    return emptyDB();
-  }
+  return hydrateDbShape(state.db || emptyDB());
 }
 
 function saveDB(db, { skipVersionCheck = false } = {}) {
-  if (USE_POSTGRES_RUNTIME) {
-    const saved = setRuntimeStateSync(db, { skipVersionCheck });
-    db._dbVersion = saved.version;
-    logger.debug('Database saved', { timestamp: Date.now(), version: db._dbVersion });
-    return;
-  }
-
-  // Create backup before saving.
-  // In production a backup failure is fatal — proceeding without it risks
-  // permanent data loss if the subsequent write fails or is interrupted.
-  if (fs.existsSync(DB_FILE)) {
-    try {
-      fs.copyFileSync(DB_FILE, DB_BACKUP);
-    } catch (err) {
-      if (NODE_ENV === 'production') {
-        logger.error('FATAL: db.json backup failed — aborting save to prevent unrecoverable data loss', {
-          error: err.message,
-        });
-        throw new Error('BACKUP_FAILED');
-      }
-      logger.warn('Failed to create backup (non-production — continuing)', { error: err.message });
-    }
-  }
-  // Multi-instance collision guard.
-  // Re-read _dbVersion from disk; if it has advanced since loadDB() was called,
-  // another process wrote to the file while we held our in-memory copy.
-  // We refuse to overwrite silently and throw so the route handler can return 503.
-  // Pass skipVersionCheck:true for async payout jobs that run outside the mutex.
-  if (!skipVersionCheck && fs.existsSync(DB_FILE)) {
-    try {
-      const onDisk = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-      if ((onDisk._dbVersion || 0) !== (db._dbVersion || 0)) {
-        logger.error('FATAL: db.json _dbVersion conflict — multi-instance write collision', {
-          expected: db._dbVersion, actual: onDisk._dbVersion,
-        });
-        throw new Error('DB_VERSION_CONFLICT');
-      }
-    } catch (e) {
-      if (e.message === 'DB_VERSION_CONFLICT') throw e;
-      // I/O error or JSON parse failure — we cannot confirm the on-disk version is safe
-      // to overwrite.  Fail closed: throw so the caller gets a retryable error rather
-      // than silently clobbering a potentially newer version written by another process.
-      logger.error('saveDB: version check unverifiable — aborting write to prevent data loss', {
-        error: e.message,
-      });
-      throw new Error(`DB_VERSION_UNVERIFIABLE: ${e.message}`);
-    }
-  }
-  db._dbVersion = (db._dbVersion || 0) + 1;
-  // Atomic write: write to a temp file then rename so a mid-write crash cannot
-  // corrupt the live db.json. fs.renameSync on the same filesystem is an atomic
-  // directory-entry swap on both Linux and Windows (NTFS MoveFileEx w/ replace).
-  const DB_TMP = DB_FILE + '.tmp';
-  fs.writeFileSync(DB_TMP, JSON.stringify(db, null, 2), 'utf8');
-  fs.renameSync(DB_TMP, DB_FILE);
+  const saved = setPostgresStateSync(db, { skipVersionCheck });
+  db._dbVersion = saved.version;
   logger.debug('Database saved', { timestamp: Date.now(), version: db._dbVersion });
 }
 
 function isDatabaseConnected() {
-  if (USE_POSTGRES_RUNTIME) {
-    try {
-      return !!getRuntimeStatusSync().connected;
-    } catch (_) {
-      return false;
-    }
+  try {
+    return !!getPostgresStatusSync().connected;
+  } catch (_) {
+    return false;
   }
-  return fs.existsSync(DB_FILE);
 }
 
 // ==================== LIVE FX RATE REFRESH ====================
@@ -2598,7 +2472,7 @@ app.post('/webhooks/stripe',
         }
         if (USE_POSTGRES_RUNTIME) {
           await commitWithdrawalTransitionPostgres({
-            runtimeStateDb: db,
+            stateDb: db,
             withdrawal: (db.withdrawals || []).find((x) => x.id === withdrawalId),
             expectedStatus: 'processing',
           });
@@ -2691,7 +2565,7 @@ app.post('/webhooks/kora',
         }
         if (USE_POSTGRES_RUNTIME) {
           await commitWithdrawalTransitionPostgres({
-            runtimeStateDb: db,
+            stateDb: db,
             withdrawal: (db.withdrawals || []).find((x) => x.id === withdrawalId),
             expectedStatus: 'processing',
           });
@@ -3932,7 +3806,7 @@ app.post('/transactions', authMiddleware, async (req, res) => {
         userId: req.user.userId,
         responseBody,
         senderLimitTracking: senderUser.limitTracking,
-        runtimeStateDb: db,
+        stateDb: db,
         recipientUserId: toWallet.userId,
       });
       if (pgResult.replay && pgResult.response) {
@@ -4025,7 +3899,7 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
   // ── Card PAN server-side sanitization ────────────────────────────────────
   // Clients are untrusted. When method is debit/credit, strip everything but
   // the last 4 digits here — before the value ever reaches createWithdrawal
-  // or db.json. Full PANs must never be persisted or returned via any API.
+  // or persisted runtime state. Full PANs must never be persisted or returned via any API.
   let sanitizedAccountNumber = accountNumber || null;
   if ((method === 'debit' || method === 'credit') && sanitizedAccountNumber) {
     sanitizedAccountNumber = String(sanitizedAccountNumber).replace(/\D/g, '').slice(-4) || null;
@@ -4143,7 +4017,7 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
   // Build response before saveDB so idempotency is committed atomically with the
   // financial mutation — a crash after saveDB always leaves a replay-safe record.
   // sanitizeWithdrawalForResponse strips encrypted PII from the response and cache;
-  // the db.json record keeps the ciphertext for the payout provider to decrypt.
+  // the persisted record keeps the ciphertext for the payout provider to decrypt.
   const responseBody = {
     withdrawal: sanitizeWithdrawalForResponse(withdrawal),
     feeBreakdown: {
@@ -4162,7 +4036,7 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
   if (USE_POSTGRES_RUNTIME) {
     try {
       const pgResult = await commitCreateWithdrawalPostgres({
-        runtimeStateDb: db,
+        stateDb: db,
         withdrawal,
         userId: req.user.userId,
         clientKey,
@@ -4248,7 +4122,7 @@ app.post('/withdrawals/:id/cancel', authMiddleware, async (req, res) => {
       markWithdrawalFailed(db, w.id, 'Cancelled by user');
       if (USE_POSTGRES_RUNTIME) {
         const pgResult = await commitWithdrawalTransitionPostgres({
-          runtimeStateDb: db,
+          stateDb: db,
           withdrawal: w,
           expectedStatus: 'pending_review',
         });
@@ -4641,7 +4515,7 @@ app.post('/exchange', authMiddleware, async (req, res) => {
         userId: req.user.userId,
         responseBody,
         senderLimitTracking: senderUser.limitTracking,
-        runtimeStateDb: db,
+        stateDb: db,
       });
       if (pgResult.replay && pgResult.response) {
         idempotencyStore.set(clientKey, { userId: req.user.userId, response: pgResult.response, timestamp: Date.now() });
@@ -4959,7 +4833,7 @@ app.post('/deposits/confirm', authMiddleware,
           tx,
           userId: req.user.userId,
           intentId,
-          runtimeStateDb: db,
+          stateDb: db,
         });
         if (pgResult.walletNotFound) {
           return res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
@@ -5916,7 +5790,7 @@ app.post('/payment-requests/:id/pay', authMiddleware, async (req, res) => {
         payerLimitTracking: prPayerUser.limitTracking,
         employerPayrollLimitTracking: prPayrollEmployer?.payrollLimitTracking || null,
         employerId: prPayrollEmployer?.id || null,
-        runtimeStateDb: db,
+        stateDb: db,
       });
 
       if (pgResult.replay && pgResult.response) {
@@ -6000,7 +5874,7 @@ app.post('/virtual-cards', authMiddleware, (req, res) => {
   const userCards = (db.virtualCards || []).filter(c => c.userId === req.user.userId && c.status !== 'deleted');
   if (userCards.length >= 5) return res.status(400).json({ error: t('error_max_cards', req.lang || 'en') });
   
-  // Generate card details — full PAN/CVV are NEVER written to db.json
+  // Generate card details — full PAN/CVV are NEVER written to persistent storage
   const cardNumber = '4' + Math.floor(Math.random() * 1e15).toString().padStart(15, '0');
   const cvv = Math.floor(Math.random() * 900 + 100).toString();
   const last4 = cardNumber.slice(-4);
@@ -6905,7 +6779,7 @@ app.post('/kyc/verify',
     // ── Phase 2: Call Smile Identity API — mutex NOT held ────────────────────
     // The kycMutex is intentionally released before this await so unrelated KYC
     // requests are not blocked for the full 30-second Smile timeout.
-    // The reservation written in Phase 1 is already durable in db.json.
+    // The reservation written in Phase 1 is already durable in persistent storage.
     const timestamp = new Date().toISOString();
     const signature = computeSmileSignature(timestamp, SMILE_PARTNER_ID, SMILE_API_KEY);
     const smilePayload = {
@@ -8577,7 +8451,7 @@ const upload = multer({
 //
 // All limits are stored and enforced in USD.
 //
-// Storage:  user.limitTracking  — persisted to db.json per user.
+// Storage:  user.limitTracking  — persisted per user.
 //   {
 //     dailyUsedUSD:    number,   // USD sent in current calendar day (UTC)
 //     weeklyUsedUSD:   number,   // USD sent in current Mon-Sun week (UTC)

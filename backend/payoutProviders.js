@@ -536,7 +536,7 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
         markWithdrawalFailed(dbCap, withdrawalId, 'payout attempt cap reached');
         if (USE_POSTGRES_RUNTIME) {
           const pgResult = await commitWithdrawalTransitionPostgres({
-            runtimeStateDb: dbCap,
+              stateDb: dbCap,
             withdrawal: (dbCap.withdrawals || []).find((x) => x.id === withdrawalId),
             expectedStatus: 'processing',
           });
@@ -557,7 +557,7 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
           markWithdrawalFailed(dbCapRetry, withdrawalId, 'payout attempt cap reached');
           if (USE_POSTGRES_RUNTIME) {
             const pgResult = await commitWithdrawalTransitionPostgres({
-              runtimeStateDb: dbCapRetry,
+                stateDb: dbCapRetry,
               withdrawal: (dbCapRetry.withdrawals || []).find((x) => x.id === withdrawalId),
               expectedStatus: 'processing',
             });
@@ -632,7 +632,7 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
       markWithdrawalPaid(dbDemo, withdrawalId, `DEMO-${withdrawalId.slice(0, 8)}`, 'demo');
       if (USE_POSTGRES_RUNTIME) {
         const pgResult = await commitWithdrawalTransitionPostgres({
-          runtimeStateDb: dbDemo,
+            stateDb: dbDemo,
           withdrawal: (dbDemo.withdrawals || []).find((x) => x.id === withdrawalId),
           expectedStatus: 'processing',
         });
@@ -910,7 +910,7 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
         markWithdrawalPaid(dbSuccess, withdrawalId, result.reference, result.provider);
         if (USE_POSTGRES_RUNTIME) {
           const pgResult = await commitWithdrawalTransitionPostgres({
-            runtimeStateDb: dbSuccess,
+              stateDb: dbSuccess,
             withdrawal: (dbSuccess.withdrawals || []).find((x) => x.id === withdrawalId),
             expectedStatus: 'processing',
           });
@@ -943,8 +943,8 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
           }
           markWithdrawalPaid(dbRetry, withdrawalId, result.reference, result.provider);
           if (USE_POSTGRES_RUNTIME) {
-            const pgResult = await commitWithdrawalTransitionPostgres({
-              runtimeStateDb: dbRetry,
+              const pgResult = await commitWithdrawalTransitionPostgres({
+                stateDb: dbRetry,
               withdrawal: (dbRetry.withdrawals || []).find((x) => x.id === withdrawalId),
               expectedStatus: 'processing',
             });
@@ -1101,7 +1101,7 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
 
       if (USE_POSTGRES_RUNTIME) {
         const pgResult = await commitWithdrawalTransitionPostgres({
-          runtimeStateDb: dbFail,
+            stateDb: dbFail,
           withdrawal: (dbFail.withdrawals || []).find((x) => x.id === withdrawalId),
           expectedStatus: 'processing',
         });
@@ -1156,8 +1156,8 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
         }
         markWithdrawalFailed(dbRetry, withdrawalId, failReason);
         if (USE_POSTGRES_RUNTIME) {
-          const pgResult = await commitWithdrawalTransitionPostgres({
-            runtimeStateDb: dbRetry,
+            const pgResult = await commitWithdrawalTransitionPostgres({
+              stateDb: dbRetry,
             withdrawal: (dbRetry.withdrawals || []).find((x) => x.id === withdrawalId),
             expectedStatus: 'processing',
           });

@@ -83,7 +83,7 @@ test('phase1b p2p normal send', async () => {
       userId: ids.users[0],
       responseBody: { ok: true },
       senderLimitTracking: null,
-      runtimeStateDb: null,
+      stateDb: null,
       recipientUserId: ids.users[1],
     });
 
@@ -147,7 +147,7 @@ test('phase1b p2p insufficient funds', async () => {
       userId: ids.users[0],
       responseBody: { ok: true },
       senderLimitTracking: null,
-      runtimeStateDb: null,
+      stateDb: null,
       recipientUserId: ids.users[1],
     });
 
@@ -205,7 +205,7 @@ test('phase1b p2p idempotency replay', async () => {
       userId: ids.users[0],
       responseBody: { tx: ids.transactions[0] },
       senderLimitTracking: null,
-      runtimeStateDb: null,
+      stateDb: null,
       recipientUserId: ids.users[1],
     });
 
@@ -238,7 +238,7 @@ test('phase1b p2p idempotency replay', async () => {
       userId: ids.users[0],
       responseBody: { tx: ids.transactions[1] },
       senderLimitTracking: null,
-      runtimeStateDb: null,
+      stateDb: null,
       recipientUserId: ids.users[1],
     });
 
@@ -298,7 +298,7 @@ test('phase1b p2p concurrent double-spend blocked', async () => {
       userId: ids.users[0],
       responseBody: { tx: txId },
       senderLimitTracking: null,
-      runtimeStateDb: null,
+      stateDb: null,
       recipientUserId,
     });
 
@@ -332,7 +332,7 @@ test('phase1b p2p runtime-state sync upserts missing relational users and wallet
     wallets: [uuidv4(), uuidv4()],
     transactions: [uuidv4()],
   };
-  const runtimeStateDb = {
+  const stateDb = {
     _dbVersion: 0,
     users: [
       { id: ids.users[0], email: `${ids.users[0]}@runtime.test`, passwordHash: 'x', region: 'US', role: 'individual', createdAt: Date.now() },
@@ -376,7 +376,7 @@ test('phase1b p2p runtime-state sync upserts missing relational users and wallet
       userId: ids.users[0],
       responseBody: { ok: true },
       senderLimitTracking: null,
-      runtimeStateDb,
+      stateDb,
       recipientUserId: ids.users[1],
     });
 

@@ -54,7 +54,7 @@ async function commitExchangePostgres({
   userId,
   responseBody,
   senderLimitTracking,
-  runtimeStateDb,
+  stateDb,
 }) {
   const client = await pool.connect();
   try {

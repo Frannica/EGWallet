@@ -97,10 +97,10 @@ async function upsertRuntimeWallet(client, wallet) {
   }
 }
 
-async function syncRuntimeP2PGraph(client, { runtimeStateDb, userId, fromWalletId, toWalletId, recipientUserId }) {
-  if (!runtimeStateDb) return;
-  const users = runtimeStateDb.users || [];
-  const wallets = runtimeStateDb.wallets || [];
+async function syncRuntimeP2PGraph(client, { stateDb, userId, fromWalletId, toWalletId, recipientUserId }) {
+  if (!stateDb) return;
+  const users = stateDb.users || [];
+  const wallets = stateDb.wallets || [];
   const fromWallet = wallets.find((w) => w.id === fromWalletId);
   const toWallet = wallets.find((w) => w.id === toWalletId);
   const senderUser = users.find((u) => u.id === userId) || (fromWallet ? users.find((u) => u.id === fromWallet.userId) : null);
@@ -133,13 +133,13 @@ async function commitP2PSendPostgres({
   userId,
   responseBody,
   senderLimitTracking,
-  runtimeStateDb,
+  stateDb,
   recipientUserId,
 }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await syncRuntimeP2PGraph(client, { runtimeStateDb, userId, fromWalletId, toWalletId, recipientUserId });
+    await syncRuntimeP2PGraph(client, { stateDb, userId, fromWalletId, toWalletId, recipientUserId });
 
     if (clientKey) {
       const replay = await client.query(

@@ -6,8 +6,8 @@ function msToDate(ms) {
   return ms ? new Date(Number(ms)) : null;
 }
 
-function getWalletCurrencyAmounts(runtimeStateDb, walletId, currency) {
-  const wallet = (runtimeStateDb.wallets || []).find((w) => w.id === walletId);
+function getWalletCurrencyAmounts(stateDb, walletId, currency) {
+  const wallet = (stateDb.wallets || []).find((w) => w.id === walletId);
   if (!wallet) return { balance: 0, hold: 0 };
   const balance = (wallet.balances || []).find((b) => b.currency === currency);
   return {
@@ -164,7 +164,7 @@ async function getDurableWithdrawalIdempotency(clientKey, userId) {
 }
 
 async function commitCreateWithdrawalPostgres({
-  runtimeStateDb,
+  stateDb,
   withdrawal,
   userId,
   clientKey,
@@ -196,7 +196,7 @@ async function commitCreateWithdrawalPostgres({
       return { insufficientFunds: true };
     }
 
-    const nextAmounts = getWalletCurrencyAmounts(runtimeStateDb, withdrawal.walletId, withdrawal.currency);
+    const nextAmounts = getWalletCurrencyAmounts(stateDb, withdrawal.walletId, withdrawal.currency);
     await upsertWalletRows(
       client,
       withdrawal.walletId,
@@ -207,7 +207,7 @@ async function commitCreateWithdrawalPostgres({
 
     await upsertWithdrawal(client, withdrawal);
 
-    const holdLedger = (runtimeStateDb.ledger || []).find((l) => l.withdrawalId === withdrawal.id && l.type === 'withdrawal_hold');
+    const holdLedger = (stateDb.ledger || []).find((l) => l.withdrawalId === withdrawal.id && l.type === 'withdrawal_hold');
     if (holdLedger) {
       await client.query(
         `INSERT INTO ledger(
@@ -261,7 +261,7 @@ async function commitCreateWithdrawalPostgres({
 }
 
 async function commitWithdrawalTransitionPostgres({
-  runtimeStateDb,
+  stateDb,
   withdrawal,
   expectedStatus,
   skipRuntimeStateSync = false,
@@ -282,7 +282,7 @@ async function commitWithdrawalTransitionPostgres({
       return { notFound: false, conflict: true };
     }
 
-    const nextAmounts = getWalletCurrencyAmounts(runtimeStateDb, withdrawal.walletId, withdrawal.currency);
+    const nextAmounts = getWalletCurrencyAmounts(stateDb, withdrawal.walletId, withdrawal.currency);
     await upsertWalletRows(
       client,
       withdrawal.walletId,
@@ -293,7 +293,7 @@ async function commitWithdrawalTransitionPostgres({
 
     await upsertWithdrawal(client, withdrawal);
 
-    const ledgers = (runtimeStateDb.ledger || []).filter((l) => l.withdrawalId === withdrawal.id);
+    const ledgers = (stateDb.ledger || []).filter((l) => l.withdrawalId === withdrawal.id);
     const latest = ledgers[ledgers.length - 1];
     if (latest) {
       await client.query(
