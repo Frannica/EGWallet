@@ -52,6 +52,11 @@ const { getDurablePaymentRequestIdempotency, commitPaymentRequestPayPostgres } =
 const { getDurableExchangeIdempotency, commitExchangePostgres } = require('./db/exchangePostgres');
 const { commitDepositConfirmPostgres } = require('./db/depositConfirmPostgres');
 const {
+  getDurableWithdrawalIdempotency,
+  commitCreateWithdrawalPostgres,
+  commitWithdrawalTransitionPostgres,
+} = require('./db/withdrawalsPostgres');
+const {
   isPasswordResetEmailConfigured,
   getPasswordResetEmailMode,
   sendPasswordResetEmail,
@@ -2591,7 +2596,15 @@ app.post('/webhooks/stripe',
             `Stripe webhook: payout ${payout.status} (${payout.id})`);
           logger.info('[webhook/stripe] Marked failed', { withdrawalId, payoutId: payout.id, status: payout.status });
         }
-        saveDB(db);
+        if (USE_POSTGRES_RUNTIME) {
+          await commitWithdrawalTransitionPostgres({
+            runtimeStateDb: db,
+            withdrawal: (db.withdrawals || []).find((x) => x.id === withdrawalId),
+            expectedStatus: 'processing',
+          });
+        } else {
+          saveDB(db);
+        }
       });
       res.json({ received: true });
     } catch (err) {
@@ -2676,7 +2689,15 @@ app.post('/webhooks/kora',
             `Kora webhook: status=${status} ref=${koraRef}`);
           logger.info('[webhook/kora] Marked failed', { withdrawalId, koraRef, status });
         }
-        saveDB(db);
+        if (USE_POSTGRES_RUNTIME) {
+          await commitWithdrawalTransitionPostgres({
+            runtimeStateDb: db,
+            withdrawal: (db.withdrawals || []).find((x) => x.id === withdrawalId),
+            expectedStatus: 'processing',
+          });
+        } else {
+          saveDB(db);
+        }
       });
       res.json({ received: true });
     } catch (err) {
@@ -4048,7 +4069,9 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
 
   // Durable idempotency — survives restart
   if (clientKey) {
-    const durableHit = checkDurableIdempotency(db, clientKey, req.user.userId);
+    const durableHit = USE_POSTGRES_RUNTIME
+      ? await getDurableWithdrawalIdempotency(clientKey, req.user.userId)
+      : checkDurableIdempotency(db, clientKey, req.user.userId);
     if (durableHit) {
       // Sanitize PII from cached response — strips encrypted fields, returns safe masks.
       if (durableHit.withdrawal) {
@@ -4132,9 +4155,44 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
       isInternational: !!isInternational,
     },
   };
-  if (clientKey) saveDurableIdempotency(db, clientKey, responseBody, req.user.userId);
+  if (!USE_POSTGRES_RUNTIME && clientKey) {
+    saveDurableIdempotency(db, clientKey, responseBody, req.user.userId);
+  }
 
-  saveDB(db); // commits hold deduction + KYC limits + idempotency atomically
+  if (USE_POSTGRES_RUNTIME) {
+    try {
+      const pgResult = await commitCreateWithdrawalPostgres({
+        runtimeStateDb: db,
+        withdrawal,
+        userId: req.user.userId,
+        clientKey,
+        responseBody,
+        userLimitTracking: withdrawUser.limitTracking,
+      });
+      if (pgResult.replay && pgResult.response) {
+        const replayResponse = {
+          ...pgResult.response,
+          withdrawal: pgResult.response.withdrawal
+            ? sanitizeWithdrawalForResponse(pgResult.response.withdrawal)
+            : pgResult.response.withdrawal,
+        };
+        idempotencyStore.set(clientKey, { userId: req.user.userId, response: replayResponse, timestamp: Date.now() });
+        _capturedWithdrawalId = replayResponse.withdrawal?.id;
+        return res.status(200).json(replayResponse);
+      }
+      if (pgResult.insufficientFunds) {
+        return res.status(400).json({ error: 'Insufficient funds' });
+      }
+    } catch (pgErr) {
+      logger.error('[/withdrawals] PostgreSQL create commit failed', {
+        error: pgErr.message,
+        userId: req.user.userId,
+      });
+      return res.status(500).json({ error: pgErr.message });
+    }
+  } else {
+    saveDB(db); // commits hold deduction + KYC limits + idempotency atomically
+  }
 
   if (clientKey) idempotencyStore.set(clientKey, { userId: req.user.userId, response: responseBody, timestamp: Date.now() });
 
@@ -4188,7 +4246,17 @@ app.post('/withdrawals/:id/cancel', authMiddleware, async (req, res) => {
 
     try {
       markWithdrawalFailed(db, w.id, 'Cancelled by user');
-      saveDB(db);
+      if (USE_POSTGRES_RUNTIME) {
+        const pgResult = await commitWithdrawalTransitionPostgres({
+          runtimeStateDb: db,
+          withdrawal: w,
+          expectedStatus: 'pending_review',
+        });
+        if (pgResult.notFound) return res.status(404).json({ error: 'Withdrawal not found' });
+        if (pgResult.conflict) return res.status(409).json({ error: 'Withdrawal state changed concurrently' });
+      } else {
+        saveDB(db);
+      }
       logger.info('Withdrawal cancelled by user', {
         userId: req.user.userId,
         withdrawalId: w.id,

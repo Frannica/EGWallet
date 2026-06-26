@@ -28,6 +28,12 @@ const stripeClient      = STRIPE_SECRET_KEY ? require('stripe')(STRIPE_SECRET_KE
 
 // ─── Engine functions (imported to avoid re-importing db helpers) ─────────────
 const { markWithdrawalPaid, markWithdrawalFailed } = require('./withdrawalEngine');
+const {
+  commitWithdrawalTransitionPostgres,
+  upsertPayoutLockPostgres,
+  releasePayoutLockPostgres,
+} = require('./db/withdrawalsPostgres');
+const USE_POSTGRES_RUNTIME = !!process.env.DATABASE_URL;
 
 // ─── Currency helpers ─────────────────────────────────────────────────────────
 // Currencies where the smallest unit IS the major unit (no cents/pence).
@@ -528,7 +534,16 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
       await runCap(async () => {
         const dbCap = loadDB();
         markWithdrawalFailed(dbCap, withdrawalId, 'payout attempt cap reached');
-        saveDB(dbCap);
+        if (USE_POSTGRES_RUNTIME) {
+          const pgResult = await commitWithdrawalTransitionPostgres({
+            runtimeStateDb: dbCap,
+            withdrawal: (dbCap.withdrawals || []).find((x) => x.id === withdrawalId),
+            expectedStatus: 'processing',
+          });
+          if (pgResult.conflict) return;
+        } else {
+          saveDB(dbCap);
+        }
       });
     } catch (capErr) {
       logger.error('[executePayout] Attempt-cap markWithdrawalFailed failed — retrying in 500 ms', {
@@ -540,7 +555,16 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
         await runCap(async () => {
           const dbCapRetry = loadDB();
           markWithdrawalFailed(dbCapRetry, withdrawalId, 'payout attempt cap reached');
-          saveDB(dbCapRetry);
+          if (USE_POSTGRES_RUNTIME) {
+            const pgResult = await commitWithdrawalTransitionPostgres({
+              runtimeStateDb: dbCapRetry,
+              withdrawal: (dbCapRetry.withdrawals || []).find((x) => x.id === withdrawalId),
+              expectedStatus: 'processing',
+            });
+            if (pgResult.conflict) return;
+          } else {
+            saveDB(dbCapRetry);
+          }
         });
         logger.info('[executePayout] Attempt-cap retry succeeded — marked failed', { withdrawalId });
       } catch (capRetryErr) {
@@ -606,7 +630,16 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
     try {
       const dbDemo = loadDB();
       markWithdrawalPaid(dbDemo, withdrawalId, `DEMO-${withdrawalId.slice(0, 8)}`, 'demo');
-      saveDBFast(dbDemo);
+      if (USE_POSTGRES_RUNTIME) {
+        const pgResult = await commitWithdrawalTransitionPostgres({
+          runtimeStateDb: dbDemo,
+          withdrawal: (dbDemo.withdrawals || []).find((x) => x.id === withdrawalId),
+          expectedStatus: 'processing',
+        });
+        if (pgResult.conflict) return;
+      } else {
+        saveDBFast(dbDemo);
+      }
       logger.info('[executePayout] Demo payout marked as paid', { withdrawalId });
     } catch (demoErr) {
       logger.error('[executePayout] Demo mode: could not mark paid', {
@@ -682,6 +715,14 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
       wAttempt.payoutDispatchRef = `egw-${withdrawalId}`; // deterministic — same across retries
       wAttempt.payoutProvider    = provider;              // persist now so reconcile routes correctly after crash
       saveDBFast(dbAttempt);
+      if (USE_POSTGRES_RUNTIME && attemptNumber === 1) {
+        await upsertPayoutLockPostgres({
+          withdrawalId,
+          pid: process.pid,
+          claimedAt: now,
+          expiresAt: now + PAYOUT_LOCK_TTL_MS,
+        });
+      }
       wSnapshot = wAttempt; // capture for provider call below
     });
 
@@ -867,7 +908,16 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
           wForRef.payoutProvider  = result.provider;
         }
         markWithdrawalPaid(dbSuccess, withdrawalId, result.reference, result.provider);
-        saveDB(dbSuccess); // full version-checked save inside mutex
+        if (USE_POSTGRES_RUNTIME) {
+          const pgResult = await commitWithdrawalTransitionPostgres({
+            runtimeStateDb: dbSuccess,
+            withdrawal: (dbSuccess.withdrawals || []).find((x) => x.id === withdrawalId),
+            expectedStatus: 'processing',
+          });
+          if (pgResult.conflict) return;
+        } else {
+          saveDB(dbSuccess); // full version-checked save inside mutex
+        }
         logger.info('[executePayout] Marked paid', {
           withdrawalId,
           provider:  result.provider,
@@ -892,7 +942,16 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
             wRetry.payoutProvider  = result.provider;
           }
           markWithdrawalPaid(dbRetry, withdrawalId, result.reference, result.provider);
-          saveDB(dbRetry);
+          if (USE_POSTGRES_RUNTIME) {
+            const pgResult = await commitWithdrawalTransitionPostgres({
+              runtimeStateDb: dbRetry,
+              withdrawal: (dbRetry.withdrawals || []).find((x) => x.id === withdrawalId),
+              expectedStatus: 'processing',
+            });
+            if (pgResult.conflict) return;
+          } else {
+            saveDB(dbRetry);
+          }
         });
         logger.info('[executePayout] Retry succeeded — marked paid', {
           withdrawalId, provider: result.provider, reference: result.reference });
@@ -1040,7 +1099,19 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
         });
       }
 
-      saveDB(dbFail);
+      if (USE_POSTGRES_RUNTIME) {
+        const pgResult = await commitWithdrawalTransitionPostgres({
+          runtimeStateDb: dbFail,
+          withdrawal: (dbFail.withdrawals || []).find((x) => x.id === withdrawalId),
+          expectedStatus: 'processing',
+        });
+        if (pgResult.conflict) {
+          reconcileRequired = true;
+          return;
+        }
+      } else {
+        saveDB(dbFail);
+      }
     });
 
     if (!reconcileRequired) {
@@ -1084,7 +1155,19 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
           return;
         }
         markWithdrawalFailed(dbRetry, withdrawalId, failReason);
-        saveDB(dbRetry);
+        if (USE_POSTGRES_RUNTIME) {
+          const pgResult = await commitWithdrawalTransitionPostgres({
+            runtimeStateDb: dbRetry,
+            withdrawal: (dbRetry.withdrawals || []).find((x) => x.id === withdrawalId),
+            expectedStatus: 'processing',
+          });
+          if (pgResult.conflict) {
+            reconcileRequired = true;
+            return;
+          }
+        } else {
+          saveDB(dbRetry);
+        }
       });
       if (!reconcileRequired) {
         logger.info('[executePayout] Retry succeeded — marked failed and refund issued', { withdrawalId });
@@ -1145,6 +1228,9 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
             l => !(l.withdrawalId === withdrawalId && l.pid === process.pid)
           );
           if (dbRelease.payoutLocks.length !== before) saveDB(dbRelease);
+        }
+        if (USE_POSTGRES_RUNTIME) {
+          await releasePayoutLockPostgres({ withdrawalId });
         }
       });
     } catch (_) { /* non-fatal — lock expires via PAYOUT_LOCK_TTL_MS */ }

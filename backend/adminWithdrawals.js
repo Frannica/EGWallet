@@ -12,6 +12,8 @@ const axios   = require('axios');
 const router  = express.Router();
 const { adminTransition, markWithdrawalPaid, markWithdrawalFailed } = require('./withdrawalEngine');
 const { payoutRouter } = require('./payoutProviders');
+const { commitWithdrawalTransitionPostgres } = require('./db/withdrawalsPostgres');
+const USE_POSTGRES_RUNTIME = !!process.env.DATABASE_URL;
 
 // ─── PII sanitizer ────────────────────────────────────────────────────────────
 // Strip encrypted ciphertext and regulated PII from withdrawal objects before
@@ -133,7 +135,24 @@ router.post('/:id/transition', adminAuth, async (req, res) => {
       return res.status(err.status || 500).json({ error: err.message });
     }
 
-    req.app.locals.saveDB(db);
+    if (USE_POSTGRES_RUNTIME) {
+      const previousStatus = Array.isArray(updated.statusHistory) && updated.statusHistory.length > 1
+        ? updated.statusHistory[updated.statusHistory.length - 2].status
+        : null;
+      const pgResult = await commitWithdrawalTransitionPostgres({
+        runtimeStateDb: db,
+        withdrawal: updated,
+        expectedStatus: previousStatus || undefined,
+      });
+      if (pgResult.notFound) {
+        return res.status(404).json({ error: 'Withdrawal not found' });
+      }
+      if (pgResult.conflict) {
+        return res.status(409).json({ error: 'Withdrawal state changed concurrently' });
+      }
+    } else {
+      req.app.locals.saveDB(db);
+    }
 
     req.app.locals.logger.info('Admin withdrawal transition', {
       withdrawalId: req.params.id,
@@ -266,7 +285,18 @@ router.post('/:id/reconcile', adminAuth, async (req, res) => {
               if (wSave && !wSave.payoutReference) {
                 wSave.payoutReference = stripePayout.id;
                 wSave.payoutProvider  = 'stripe';
-                req.app.locals.saveDB(dbSave);
+                if (USE_POSTGRES_RUNTIME) {
+          const pgResult = await commitWithdrawalTransitionPostgres({
+                    runtimeStateDb: dbSave,
+                    withdrawal: wSave,
+            expectedStatus: 'processing',
+                  });
+          if (pgResult.conflict) {
+            throw Object.assign(new Error('Concurrent reconcile update conflict'), { statusCode: 409 });
+          }
+                } else {
+                  req.app.locals.saveDB(dbSave);
+                }
               }
             });
           } catch (_) { /* non-fatal — continue with status mapping */ }
@@ -384,7 +414,18 @@ router.post('/:id/reconcile', adminAuth, async (req, res) => {
           wR.payoutProvider  = provider;
         }
         markWithdrawalPaid(dbR, w.id, paidRef, provider);
-        saveDB(dbR);
+        if (USE_POSTGRES_RUNTIME) {
+          const pgResult = await commitWithdrawalTransitionPostgres({
+            runtimeStateDb: dbR,
+            withdrawal: (dbR.withdrawals || []).find((x) => x.id === w.id),
+            expectedStatus: 'processing',
+          });
+          if (pgResult.conflict) {
+            throw Object.assign(new Error('Concurrent state change conflict'), { statusCode: 409 });
+          }
+        } else {
+          saveDB(dbR);
+        }
       });
     } catch (err) {
       const statusCode = err.statusCode || 500;
@@ -442,7 +483,18 @@ router.post('/:id/reconcile', adminAuth, async (req, res) => {
         }
 
         markWithdrawalFailed(dbR, w.id, `Reconciled by admin ${adminId}: provider status = failed`);
-        saveDB(dbR);
+        if (USE_POSTGRES_RUNTIME) {
+          const pgResult = await commitWithdrawalTransitionPostgres({
+            runtimeStateDb: dbR,
+            withdrawal: (dbR.withdrawals || []).find((x) => x.id === w.id),
+            expectedStatus: 'processing',
+          });
+          if (pgResult.conflict) {
+            throw new Error('Concurrent state change conflict');
+          }
+        } else {
+          saveDB(dbR);
+        }
       });
     } catch (err) {
       return res.status(500).json({ error: `Failed to mark failed: ${err.message}` });
