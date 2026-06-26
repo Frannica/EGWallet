@@ -46,6 +46,7 @@ const { parse } = require('csv-parse/sync');
 const { createWithdrawal, advanceToProcessing, markWithdrawalFailed, markWithdrawalPaid } = require('./withdrawalEngine');
 const { router: adminWithdrawalsRouter, adminLoginHandler, adminLogoutHandler } = require('./adminWithdrawals');
 const { executePayout, payoutRouter } = require('./payoutProviders');
+const { getRuntimeStateSync, setRuntimeStateSync, getRuntimeStatusSync } = require('./db/runtimeStateSync');
 const {
   isPasswordResetEmailConfigured,
   getPasswordResetEmailMode,
@@ -95,6 +96,7 @@ let firestore     = null;
 // Environment Configuration
 const DB_FILE = process.env.DB_FILE_PATH || path.join(__dirname, 'db.json');
 const DB_BACKUP = process.env.DB_BACKUP_PATH || path.join(__dirname, 'db.json.bak');
+const USE_POSTGRES_RUNTIME = !!process.env.DATABASE_URL;
 if (!process.env.JWT_SECRET) {
   console.error('❌ FATAL: JWT_SECRET is not set. All tokens would be forgeable. Set JWT_SECRET in your environment.');
   process.exit(1);
@@ -2195,7 +2197,43 @@ function emptyDB() {
   };
 }
 
+function hydrateDbShape(db) {
+  if (!db.paymentRequests) db.paymentRequests = [];
+  if (!db.virtualCards) db.virtualCards = [];
+  if (!db.budgets) db.budgets = [];
+  if (!db.devices) db.devices = [];
+  if (!db.supportTickets) db.supportTickets = [];
+  if (!db.fraudAlerts) db.fraudAlerts = [];
+  if (!db.savedContacts) db.savedContacts = [];
+  if (!db.qrCodes) db.qrCodes = [];
+  if (!db.refreshTokens) db.refreshTokens = [];
+  if (!db.auditLog) db.auditLog = [];
+  if (!db.employers) db.employers = [];
+  if (!db.employerEmployees) db.employerEmployees = [];
+  if (!db.payrollBatches) db.payrollBatches = [];
+  if (!db.demoIntents) db.demoIntents = [];
+  if (!db.notifications) db.notifications = [];
+  if (!db.passwordResetTokens) db.passwordResetTokens = [];
+  if (!db.transactions) db.transactions = [];
+  if (!db.withdrawals) db.withdrawals = [];
+  if (!db.ledger) db.ledger = [];
+  if (!db.idempotencyRecords) db.idempotencyRecords = [];
+  if (!db.kycIdentityClaims) db.kycIdentityClaims = {};
+  if (!db.payoutLocks) db.payoutLocks = [];
+  return db;
+}
+
 function loadDB() {
+  if (USE_POSTGRES_RUNTIME) {
+    const state = getRuntimeStateSync();
+    if (state.missing) {
+      const seeded = emptyDB();
+      const saved = setRuntimeStateSync(seeded, { skipVersionCheck: true });
+      return hydrateDbShape(saved.db);
+    }
+    return hydrateDbShape(state.db || emptyDB());
+  }
+
   // Fresh install or new volume mount — db.json does not exist yet.
   // This is NOT corruption; create the directory and seed an empty database.
   if (!fs.existsSync(DB_FILE)) {
@@ -2215,34 +2253,7 @@ function loadDB() {
   try {
     const raw = fs.readFileSync(DB_FILE, 'utf8');
     const db = JSON.parse(raw);
-    // Migration: ensure all required collections exist (handles older db.json files)
-    if (!db.paymentRequests) db.paymentRequests = [];
-    if (!db.virtualCards) db.virtualCards = [];
-    if (!db.budgets) db.budgets = [];
-    if (!db.devices) db.devices = [];
-    if (!db.supportTickets) db.supportTickets = [];
-    if (!db.fraudAlerts) db.fraudAlerts = [];
-    if (!db.savedContacts) db.savedContacts = [];
-    if (!db.qrCodes) db.qrCodes = [];
-    if (!db.refreshTokens) db.refreshTokens = [];
-    if (!db.auditLog) db.auditLog = [];
-    if (!db.employers) db.employers = [];
-    if (!db.employerEmployees) db.employerEmployees = [];
-    if (!db.payrollBatches) db.payrollBatches = [];
-    if (!db.demoIntents) db.demoIntents = [];
-    if (!db.notifications) db.notifications = [];
-    if (!db.passwordResetTokens) db.passwordResetTokens = [];
-    // Core money-path collections — must exist before any deposit/withdrawal handler runs.
-    if (!db.transactions)       db.transactions       = [];
-    if (!db.withdrawals)        db.withdrawals        = [];
-    if (!db.ledger)             db.ledger             = [];
-    if (!db.idempotencyRecords) db.idempotencyRecords = [];
-    // Persistent KYC identity claims: { [kycIdHash]: { userId, status, claimedAt, updatedAt } }
-    // Authoritative dedup source — survives rejection/error without clearing hash.
-    if (!db.kycIdentityClaims) db.kycIdentityClaims = {};
-    // Advisory payout locks — TTL-keyed, cleaned on load and at startup sweep.
-    if (!db.payoutLocks) db.payoutLocks = [];
-    return db;
+    return hydrateDbShape(db);
   } catch (e) {
     // Never overwrite a potentially-recoverable corrupt file with an empty database.
     // Quarantine it, attempt backup restore, and fail safely.
@@ -2275,13 +2286,7 @@ function loadDB() {
         if (!backupDb.demoIntents)       backupDb.demoIntents       = [];
         if (!backupDb.notifications)     backupDb.notifications     = [];
         if (!backupDb.passwordResetTokens) backupDb.passwordResetTokens = [];
-        if (!backupDb.idempotencyRecords)  backupDb.idempotencyRecords  = [];
-        if (!backupDb.withdrawals)         backupDb.withdrawals         = [];
-        if (!backupDb.transactions)        backupDb.transactions        = [];
-        if (!backupDb.ledger)              backupDb.ledger              = [];
-        if (!backupDb.kycIdentityClaims)   backupDb.kycIdentityClaims   = {};
-        if (!backupDb.payoutLocks)         backupDb.payoutLocks         = [];
-        return backupDb;
+        return hydrateDbShape(backupDb);
       } catch (backupErr) {
         console.error('[loadDB] Backup restore also failed', backupErr.message);
       }
@@ -2301,6 +2306,13 @@ function loadDB() {
 }
 
 function saveDB(db, { skipVersionCheck = false } = {}) {
+  if (USE_POSTGRES_RUNTIME) {
+    const saved = setRuntimeStateSync(db, { skipVersionCheck });
+    db._dbVersion = saved.version;
+    logger.debug('Database saved', { timestamp: Date.now(), version: db._dbVersion });
+    return;
+  }
+
   // Create backup before saving.
   // In production a backup failure is fatal — proceeding without it risks
   // permanent data loss if the subsequent write fails or is interrupted.
@@ -2350,6 +2362,17 @@ function saveDB(db, { skipVersionCheck = false } = {}) {
   fs.writeFileSync(DB_TMP, JSON.stringify(db, null, 2), 'utf8');
   fs.renameSync(DB_TMP, DB_FILE);
   logger.debug('Database saved', { timestamp: Date.now(), version: db._dbVersion });
+}
+
+function isDatabaseConnected() {
+  if (USE_POSTGRES_RUNTIME) {
+    try {
+      return !!getRuntimeStatusSync().connected;
+    } catch (_) {
+      return false;
+    }
+  }
+  return fs.existsSync(DB_FILE);
 }
 
 // ==================== LIVE FX RATE REFRESH ====================
@@ -2786,7 +2809,7 @@ app.get('/health', (req, res) => {
     gitCommit: process.env.GIT_COMMIT || process.env.RAILWAY_GIT_COMMIT_SHA || null,
     allowDemoDeposits: ALLOW_DEMO_DEPOSITS,
     stripeConfigured: !!stripeClient,
-    database: fs.existsSync(DB_FILE) ? 'connected' : 'missing',
+    database: isDatabaseConnected() ? 'connected' : 'missing',
     users: db.users?.length || 0,
     tickets: db.supportTickets?.length || 0,
     freshdeskConfigured: !!(FRESHDESK_DOMAIN && FRESHDESK_API_KEY),
@@ -8256,7 +8279,7 @@ app.get('/admin/health/detailed', authMiddleware, adminMiddleware, (req, res) =>
     environment: NODE_ENV,
     version: '1.0.0',
     database: {
-      connected: fs.existsSync(DB_FILE),
+      connected: isDatabaseConnected(),
       users: db.users?.length || 0,
       wallets: db.wallets?.length || 0,
       transactions: db.transactions?.length || 0,
