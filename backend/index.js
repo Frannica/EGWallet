@@ -50,6 +50,7 @@ const { getRuntimeStateSync, setRuntimeStateSync, getRuntimeStatusSync } = requi
 const { getDurableP2PIdempotency, commitP2PSendPostgres } = require('./db/p2pSendPostgres');
 const { getDurablePaymentRequestIdempotency, commitPaymentRequestPayPostgres } = require('./db/paymentRequestPayPostgres');
 const { getDurableExchangeIdempotency, commitExchangePostgres } = require('./db/exchangePostgres');
+const { commitDepositConfirmPostgres } = require('./db/depositConfirmPostgres');
 const {
   isPasswordResetEmailConfigured,
   getPasswordResetEmailMode,
@@ -4878,7 +4879,41 @@ app.post('/deposits/confirm', authMiddleware,
       stripeIntentId: intentId,
     };
     db.transactions.push(tx);
-    saveDB(db);
+    let responseTransaction = tx;
+    let responseNewBalance = balance.amount;
+
+    if (USE_POSTGRES_RUNTIME) {
+      try {
+        const pgResult = await commitDepositConfirmPostgres({
+          walletId,
+          currency,
+          netCredited,
+          tx,
+          userId: req.user.userId,
+          intentId,
+          runtimeStateDb: db,
+        });
+        if (pgResult.walletNotFound) {
+          return res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
+        }
+        if (pgResult.replay && pgResult.response) {
+          logger.warn('Stripe deposit replay blocked — intent already credited', { intentId, userId: req.user.userId });
+          return res.json(pgResult.response);
+        }
+        if (typeof pgResult.newBalance === 'number') {
+          responseNewBalance = pgResult.newBalance;
+        }
+      } catch (persistErr) {
+        logger.error('[/deposits/confirm] PostgreSQL commit failed', {
+          error: persistErr.message,
+          intentId,
+          userId: req.user.userId,
+        });
+        return res.status(500).json({ error: t('error_internal', req.lang || 'en'), message: persistErr.message });
+      }
+    } else {
+      saveDB(db);
+    }
 
     // Notify user
     createNotification(db, req.user.userId, 'deposit',
@@ -4890,8 +4925,8 @@ app.post('/deposits/confirm', authMiddleware,
     logger.info('Deposit confirmed', { intentId, userId: req.user.userId, walletId, netCredited, feeAmount, currency });
     return res.json({
       success: true,
-      transaction: tx,
-      newBalance: balance.amount,
+      transaction: responseTransaction,
+      newBalance: responseNewBalance,
       currency,
       feeBreakdown: {
         youPaid: netCredited + feeAmount,
