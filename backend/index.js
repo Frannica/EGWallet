@@ -49,6 +49,7 @@ const { executePayout, payoutRouter } = require('./payoutProviders');
 const { getRuntimeStateSync, setRuntimeStateSync, getRuntimeStatusSync } = require('./db/runtimeStateSync');
 const { getDurableP2PIdempotency, commitP2PSendPostgres } = require('./db/p2pSendPostgres');
 const { getDurablePaymentRequestIdempotency, commitPaymentRequestPayPostgres } = require('./db/paymentRequestPayPostgres');
+const { getDurableExchangeIdempotency, commitExchangePostgres } = require('./db/exchangePostgres');
 const {
   isPasswordResetEmailConfigured,
   getPasswordResetEmailMode,
@@ -4416,7 +4417,9 @@ app.post('/exchange', authMiddleware, async (req, res) => {
 
   // Durable idempotency — survives restart
   if (clientKey) {
-    const durableHit = checkDurableIdempotency(db, clientKey, req.user.userId);
+    const durableHit = USE_POSTGRES_RUNTIME
+      ? await getDurableExchangeIdempotency(clientKey, req.user.userId)
+      : checkDurableIdempotency(db, clientKey, req.user.userId);
     if (durableHit) {
       idempotencyStore.set(clientKey, { userId: req.user.userId, response: durableHit, timestamp: Date.now() });
       return res.status(200).json(durableHit);
@@ -4552,21 +4555,56 @@ app.post('/exchange', authMiddleware, async (req, res) => {
     ratesUpdatedAt: db.rates.updatedAt,
     ratesStale,
   };
-  if (clientKey) saveDurableIdempotency(db, clientKey, responseBody, req.user.userId);
+  if (!USE_POSTGRES_RUNTIME && clientKey) {
+    saveDurableIdempotency(db, clientKey, responseBody, req.user.userId);
+  }
 
-  try {
-    saveDB(db); // commits balances + tx + limit tracking + idempotency atomically
-  } catch (saveErr) {
-    fromBalance.amount = originalFromAmount;
-    if (toBalance) {
-      toBalance.amount = originalToAmount;
-    } else {
-      wallet.balances = wallet.balances.filter(b => b.currency !== toCurrency);
+  if (USE_POSTGRES_RUNTIME) {
+    try {
+      const pgResult = await commitExchangePostgres({
+        walletId,
+        fromCurrency,
+        toCurrency,
+        amount,
+        netReceived,
+        tx,
+        clientKey,
+        userId: req.user.userId,
+        responseBody,
+        senderLimitTracking: senderUser.limitTracking,
+        runtimeStateDb: db,
+      });
+      if (pgResult.replay && pgResult.response) {
+        idempotencyStore.set(clientKey, { userId: req.user.userId, response: pgResult.response, timestamp: Date.now() });
+        return res.status(200).json(pgResult.response);
+      }
+      if (pgResult.insufficientFunds) {
+        // Concurrent mutation won lock race after in-memory checks.
+        return res.status(400).json({ error: t('error_insufficient_funds', lang) });
+      }
+    } catch (saveErr) {
+      logger.error('[/exchange] PostgreSQL commit failed', {
+        error: saveErr.message,
+        walletId,
+        userId: req.user.userId,
+      });
+      return res.status(500).json({ error: t('error_transaction_persist', lang) });
     }
-    db.transactions.pop();
-    if (clientKey && db.idempotencyRecords?.length) db.idempotencyRecords.pop();
-    logger.error('[/exchange] saveDB failed — rolled back in-memory state:', saveErr);
-    return res.status(500).json({ error: t('error_transaction_persist', lang) });
+  } else {
+    try {
+      saveDB(db); // commits balances + tx + limit tracking + idempotency atomically
+    } catch (saveErr) {
+      fromBalance.amount = originalFromAmount;
+      if (toBalance) {
+        toBalance.amount = originalToAmount;
+      } else {
+        wallet.balances = wallet.balances.filter(b => b.currency !== toCurrency);
+      }
+      db.transactions.pop();
+      if (clientKey && db.idempotencyRecords?.length) db.idempotencyRecords.pop();
+      logger.error('[/exchange] saveDB failed — rolled back in-memory state:', saveErr);
+      return res.status(500).json({ error: t('error_transaction_persist', lang) });
+    }
   }
 
   if (clientKey) idempotencyStore.set(clientKey, { userId: req.user.userId, response: responseBody, timestamp: Date.now() });
