@@ -154,33 +154,6 @@ async function upsertWalletRows(client, walletId, currency, balanceAmount, holdA
   );
 }
 
-async function upsertRuntimeState(client, runtimeStateDb) {
-  if (!runtimeStateDb) return;
-  const runtimeLock = await client.query(
-    'SELECT version FROM runtime_db_state WHERE id = 1 FOR UPDATE'
-  );
-  if (runtimeLock.rowCount === 0) {
-    const seededVersion = Number(runtimeStateDb._dbVersion || 0) + 1;
-    runtimeStateDb._dbVersion = seededVersion;
-    await client.query(
-      'INSERT INTO runtime_db_state(id, version, data, updated_at) VALUES (1, $1, $2::jsonb, NOW())',
-      [seededVersion, JSON.stringify(runtimeStateDb)]
-    );
-  } else {
-    const currentVersion = Number(runtimeLock.rows[0].version || 0);
-    const expectedVersion = Number(runtimeStateDb._dbVersion || 0);
-    if (currentVersion !== expectedVersion) {
-      throw new Error(`DB_VERSION_CONFLICT:${expectedVersion}:${currentVersion}`);
-    }
-    const nextVersion = expectedVersion + 1;
-    runtimeStateDb._dbVersion = nextVersion;
-    await client.query(
-      'UPDATE runtime_db_state SET version = $1, data = $2::jsonb, updated_at = NOW() WHERE id = 1',
-      [nextVersion, JSON.stringify(runtimeStateDb)]
-    );
-  }
-}
-
 async function getDurableWithdrawalIdempotency(clientKey, userId) {
   if (!clientKey) return null;
   const result = await pool.query(
@@ -273,9 +246,6 @@ async function commitCreateWithdrawalPostgres({
       );
     }
 
-    if (!skipRuntimeStateSync) {
-      await upsertRuntimeState(client, runtimeStateDb);
-    }
     await client.query('COMMIT');
     return { replay: false, insufficientFunds: false };
   } catch (error) {
@@ -349,9 +319,6 @@ async function commitWithdrawalTransitionPostgres({
       );
     }
 
-    if (!skipRuntimeStateSync) {
-      await upsertRuntimeState(client, runtimeStateDb);
-    }
     await client.query('COMMIT');
     return { notFound: false, conflict: false };
   } catch (error) {
