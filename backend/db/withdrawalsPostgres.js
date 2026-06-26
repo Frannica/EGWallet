@@ -1,6 +1,7 @@
 'use strict';
 
 const { pool } = require('./pool');
+const { saveAppState } = require('./appStateStore');
 
 function msToDate(ms) {
   return ms ? new Date(Number(ms)) : null;
@@ -345,10 +346,23 @@ async function releasePayoutLockPostgres({ withdrawalId }) {
   await pool.query('DELETE FROM payout_locks WHERE withdrawal_id = $1', [withdrawalId]);
 }
 
+async function commitWithdrawalStateUpdate(stateDb, withdrawal, expectedStatus) {
+  const pgResult = await commitWithdrawalTransitionPostgres({
+    stateDb,
+    withdrawal,
+    expectedStatus,
+  });
+  if (!pgResult.conflict && !pgResult.notFound) {
+    saveAppState(stateDb);
+  }
+  return pgResult;
+}
+
 module.exports = {
   getDurableWithdrawalIdempotency,
   commitCreateWithdrawalPostgres,
   commitWithdrawalTransitionPostgres,
+  commitWithdrawalStateUpdate,
   upsertPayoutLockPostgres,
   releasePayoutLockPostgres,
 };

@@ -12,8 +12,8 @@ const axios   = require('axios');
 const router  = express.Router();
 const { adminTransition, markWithdrawalPaid, markWithdrawalFailed } = require('./withdrawalEngine');
 const { payoutRouter } = require('./payoutProviders');
-const { commitWithdrawalTransitionPostgres } = require('./db/withdrawalsPostgres');
-const USE_POSTGRES_RUNTIME = !!process.env.DATABASE_URL;
+const { commitWithdrawalStateUpdate } = require('./db/withdrawalsPostgres');
+const { loadAppState, saveAppState } = require('./db/appStateStore');
 
 // ─── PII sanitizer ────────────────────────────────────────────────────────────
 // Strip encrypted ciphertext and regulated PII from withdrawal objects before
@@ -71,7 +71,7 @@ function adminAuth(req, res, next) {
 // ─── GET /admin/withdrawals ───────────────────────────────────────────────────
 // Optional query: ?status=pending_review&currency=XAF&userId=xxx
 router.get('/', adminAuth, (req, res) => {
-  const db = req.app.locals.loadDB();
+  const db = loadAppState();
   let list = db.withdrawals || [];
 
   if (req.query.status)   list = list.filter(w => w.status   === req.query.status);
@@ -96,7 +96,7 @@ router.get('/', adminAuth, (req, res) => {
 // ─── GET /admin/withdrawals/:id ───────────────────────────────────────────────
 // Returns withdrawal + its ledger entries
 router.get('/:id', adminAuth, (req, res) => {
-  const db = req.app.locals.loadDB();
+  const db = loadAppState();
   const w = (db.withdrawals || []).find(x => x.id === req.params.id);
   if (!w) return res.status(404).json({ error: 'Withdrawal not found' });
 
@@ -126,7 +126,7 @@ router.post('/:id/transition', adminAuth, async (req, res) => {
   let transitionSucceeded = false;
 
   await withBalanceMutex(async () => {
-    const db = req.app.locals.loadDB();
+    const db = loadAppState();
 
     let updated;
     try {
@@ -135,23 +135,15 @@ router.post('/:id/transition', adminAuth, async (req, res) => {
       return res.status(err.status || 500).json({ error: err.message });
     }
 
-    if (USE_POSTGRES_RUNTIME) {
-      const previousStatus = Array.isArray(updated.statusHistory) && updated.statusHistory.length > 1
-        ? updated.statusHistory[updated.statusHistory.length - 2].status
-        : null;
-      const pgResult = await commitWithdrawalTransitionPostgres({
-        stateDb: db,
-        withdrawal: updated,
-        expectedStatus: previousStatus || undefined,
-      });
-      if (pgResult.notFound) {
-        return res.status(404).json({ error: 'Withdrawal not found' });
-      }
-      if (pgResult.conflict) {
-        return res.status(409).json({ error: 'Withdrawal state changed concurrently' });
-      }
-    } else {
-      req.app.locals.saveDB(db);
+    const previousStatus = Array.isArray(updated.statusHistory) && updated.statusHistory.length > 1
+      ? updated.statusHistory[updated.statusHistory.length - 2].status
+      : null;
+    const pgResult = await commitWithdrawalStateUpdate(db, updated, previousStatus || undefined);
+    if (pgResult.notFound) {
+      return res.status(404).json({ error: 'Withdrawal not found' });
+    }
+    if (pgResult.conflict) {
+      return res.status(409).json({ error: 'Withdrawal state changed concurrently' });
     }
 
     req.app.locals.logger.info('Admin withdrawal transition', {
@@ -162,15 +154,15 @@ router.post('/:id/transition', adminAuth, async (req, res) => {
     });
 
     res.json({ withdrawal: sanitizeAdmin(updated) });
-    transitionSucceeded = true; // only reached on success — after saveDB and res.json
+    transitionSucceeded = true; // only reached on success — after saveAppState and res.json
   });
 
   // Fire the payout engine only after a successful transition to 'processing'.
   // Guarding on transitionSucceeded prevents a duplicate admin request (or any
   // error path) from scheduling a second provider call for the same withdrawal.
   if (transitionSucceeded && status === 'processing' && req.app.locals.executePayout) {
-    const { executePayout, loadDB, saveDB, logger, withBalanceMutex: wbm } = req.app.locals;
-    setImmediate(() => executePayout(req.params.id, loadDB, saveDB, logger, wbm));
+    const { executePayout, logger, withBalanceMutex: wbm } = req.app.locals;
+    setImmediate(() => executePayout(req.params.id, logger, wbm));
   }
 });
 
@@ -187,9 +179,9 @@ router.post('/:id/transition', adminAuth, async (req, res) => {
 router.post('/:id/reconcile', adminAuth, async (req, res) => {
   const adminId           = req.headers['x-admin-id'] || 'unknown-admin';
   const withBalanceMutex  = req.app.locals.withBalanceMutex || ((fn) => fn());
-  const { loadDB, saveDB, logger } = req.app.locals;
+  const { logger } = req.app.locals;
 
-  const db = loadDB();
+  const db = loadAppState();
   const w  = (db.withdrawals || []).find(x => x.id === req.params.id);
   if (!w) return res.status(404).json({ error: 'Withdrawal not found' });
   if (w.status !== 'processing') {
@@ -280,22 +272,14 @@ router.post('/:id/reconcile', adminAuth, async (req, res) => {
           try {
             const withBalanceMutex = req.app.locals.withBalanceMutex || ((fn) => fn());
             await withBalanceMutex(async () => {
-              const dbSave = req.app.locals.loadDB();
+              const dbSave = loadAppState();
               const wSave  = (dbSave.withdrawals || []).find(x => x.id === w.id);
               if (wSave && !wSave.payoutReference) {
                 wSave.payoutReference = stripePayout.id;
                 wSave.payoutProvider  = 'stripe';
-                if (USE_POSTGRES_RUNTIME) {
-          const pgResult = await commitWithdrawalTransitionPostgres({
-                    stateDb: dbSave,
-                    withdrawal: wSave,
-            expectedStatus: 'processing',
-                  });
-          if (pgResult.conflict) {
-            throw Object.assign(new Error('Concurrent reconcile update conflict'), { statusCode: 409 });
-          }
-                } else {
-                  req.app.locals.saveDB(dbSave);
+                const pgResult = await commitWithdrawalStateUpdate(dbSave, wSave, 'processing');
+                if (pgResult.conflict) {
+                  throw Object.assign(new Error('Concurrent reconcile update conflict'), { statusCode: 409 });
                 }
               }
             });
@@ -380,7 +364,7 @@ router.post('/:id/reconcile', adminAuth, async (req, res) => {
     let alreadyPaid = false;
     try {
       await withBalanceMutex(async () => {
-        const dbR = loadDB();
+        const dbR = loadAppState();
         const wR  = (dbR.withdrawals || []).find(x => x.id === w.id);
 
         // C-1 TOCTOU guard: re-verify status inside the mutex on a fresh DB load.
@@ -414,17 +398,13 @@ router.post('/:id/reconcile', adminAuth, async (req, res) => {
           wR.payoutProvider  = provider;
         }
         markWithdrawalPaid(dbR, w.id, paidRef, provider);
-        if (USE_POSTGRES_RUNTIME) {
-          const pgResult = await commitWithdrawalTransitionPostgres({
-            stateDb: dbR,
-            withdrawal: (dbR.withdrawals || []).find((x) => x.id === w.id),
-            expectedStatus: 'processing',
-          });
-          if (pgResult.conflict) {
-            throw Object.assign(new Error('Concurrent state change conflict'), { statusCode: 409 });
-          }
-        } else {
-          saveDB(dbR);
+        const pgResult = await commitWithdrawalStateUpdate(
+          dbR,
+          (dbR.withdrawals || []).find((x) => x.id === w.id),
+          'processing'
+        );
+        if (pgResult.conflict) {
+          throw Object.assign(new Error('Concurrent state change conflict'), { statusCode: 409 });
         }
       });
     } catch (err) {
@@ -432,7 +412,7 @@ router.post('/:id/reconcile', adminAuth, async (req, res) => {
       return res.status(statusCode).json({ error: `Failed to mark paid: ${err.message}` });
     }
     logger.info('[reconcile] Marked paid', { withdrawalId: w.id, adminId, alreadyPaid });
-    const dbFinal = loadDB();
+    const dbFinal = loadAppState();
     return res.json({ status: 'paid', withdrawal: sanitizeAdmin((dbFinal.withdrawals || []).find(x => x.id === w.id)) });
   }
 
@@ -441,7 +421,7 @@ router.post('/:id/reconcile', adminAuth, async (req, res) => {
     let requiresRequery = false;
     try {
       await withBalanceMutex(async () => {
-        const dbR = loadDB();
+        const dbR = loadAppState();
         const wR  = (dbR.withdrawals || []).find(x => x.id === w.id);
 
         // C-1 TOCTOU guard: re-verify state inside the mutex on a fresh DB load.
@@ -460,7 +440,7 @@ router.post('/:id/reconcile', adminAuth, async (req, res) => {
         //   payoutReference newly set / changed since route entry → a concurrent path
         //     may have received a settled response → status unknown → re-query.
         //
-        // `w` is the snapshot from the initial loadDB() before the provider query.
+        // `w` is the snapshot from the initial loadAppState() before the provider query.
         // `wR` is the fresh reload inside the mutex.
         if (wR.payoutReference && wR.payoutReference !== w.payoutReference) {
           requiresRequery = true;
@@ -483,17 +463,13 @@ router.post('/:id/reconcile', adminAuth, async (req, res) => {
         }
 
         markWithdrawalFailed(dbR, w.id, `Reconciled by admin ${adminId}: provider status = failed`);
-        if (USE_POSTGRES_RUNTIME) {
-          const pgResult = await commitWithdrawalTransitionPostgres({
-            stateDb: dbR,
-            withdrawal: (dbR.withdrawals || []).find((x) => x.id === w.id),
-            expectedStatus: 'processing',
-          });
-          if (pgResult.conflict) {
-            throw new Error('Concurrent state change conflict');
-          }
-        } else {
-          saveDB(dbR);
+        const pgResult = await commitWithdrawalStateUpdate(
+          dbR,
+          (dbR.withdrawals || []).find((x) => x.id === w.id),
+          'processing'
+        );
+        if (pgResult.conflict) {
+          throw new Error('Concurrent state change conflict');
         }
       });
     } catch (err) {
@@ -501,7 +477,7 @@ router.post('/:id/reconcile', adminAuth, async (req, res) => {
     }
 
     if (alreadyResolved) {
-      const dbFinal = loadDB();
+      const dbFinal = loadAppState();
       const wFinal  = (dbFinal.withdrawals || []).find(x => x.id === w.id);
       logger.info('[reconcile] Withdrawal already resolved — no-op', { withdrawalId: w.id, status: wFinal?.status, adminId });
       return res.json({ status: wFinal?.status || 'resolved', withdrawal: sanitizeAdmin(wFinal) });
@@ -515,7 +491,7 @@ router.post('/:id/reconcile', adminAuth, async (req, res) => {
     }
 
     logger.info('[reconcile] Marked failed and refund issued', { withdrawalId: w.id, adminId });
-    const dbFinal = loadDB();
+    const dbFinal = loadAppState();
     return res.json({ status: 'failed', withdrawal: sanitizeAdmin((dbFinal.withdrawals || []).find(x => x.id === w.id)) });
   }
 

@@ -3,7 +3,7 @@
  * payoutProviders.js
  * Handles real money movement via Stripe (international) and Kora (African).
  *
- * Entry point: executePayout(withdrawalId, loadDB, saveDB, logger)
+ * Entry point: executePayout(withdrawalId, logger, withBalanceMutex)
  *   — called asynchronously from index.js AFTER the HTTP response is sent.
  *   — loads a fresh DB, calls the right provider, marks paid or failed.
  *
@@ -30,10 +30,19 @@ const stripeClient      = STRIPE_SECRET_KEY ? require('stripe')(STRIPE_SECRET_KE
 const { markWithdrawalPaid, markWithdrawalFailed } = require('./withdrawalEngine');
 const {
   commitWithdrawalTransitionPostgres,
+  commitWithdrawalStateUpdate,
   upsertPayoutLockPostgres,
   releasePayoutLockPostgres,
 } = require('./db/withdrawalsPostgres');
-const USE_POSTGRES_RUNTIME = !!process.env.DATABASE_URL;
+const { loadAppState, saveAppState } = require('./db/appStateStore');
+
+async function persistWithdrawalById(state, withdrawalId, expectedStatus) {
+  return commitWithdrawalStateUpdate(
+    state,
+    (state.withdrawals || []).find((x) => x.id === withdrawalId),
+    expectedStatus
+  );
+}
 
 // ─── Currency helpers ─────────────────────────────────────────────────────────
 // Currencies where the smallest unit IS the major unit (no cents/pence).
@@ -429,7 +438,7 @@ const _payoutInFlight = new Set();
 // TTL-keyed record written to db.payoutLocks atomically with payoutDispatchRef
 // inside withBalanceMutex.  Provides a second defence layer for shared-filesystem
 // multi-process scenarios where _payoutInFlight is per-process.
-// The _dbVersion check in saveDB provides the CAS guarantee for concurrent writes.
+// The _dbVersion check in saveAppState provides the CAS guarantee for concurrent writes.
 const PAYOUT_LOCK_TTL_MS = 10 * 60 * 1000; // 10 min > 2 × 30 s timeout + retry
 
 // ─── executePayout ────────────────────────────────────────────────────────────
@@ -453,11 +462,10 @@ const PAYOUT_LOCK_TTL_MS = 10 * 60 * 1000; // 10 min > 2 × 30 s timeout + retry
  *   • All provider responses and retry decisions are logged.
  *
  * @param {string}   withdrawalId
- * @param {function} loadDB
- * @param {function} saveDB
  * @param {object}   logger
+ * @param {function} withBalanceMutex
  */
-async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMutex) {
+async function executePayout(withdrawalId, logger, withBalanceMutex) {
   // H-3: Single-process duplicate guard — second call for the same withdrawal exits immediately.
   if (_payoutInFlight.has(withdrawalId)) {
     logger.warn('[executePayout] Already in-flight for this withdrawal — skipping duplicate invocation', { withdrawalId });
@@ -469,7 +477,7 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
   logger.info('[executePayout] Starting', { withdrawalId });
 
   // ── Load fresh DB ─────────────────────────────────────────────────────────
-  const db = loadDB();
+  const db = loadAppState();
   const w  = (db.withdrawals || []).find(x => x.id === withdrawalId);
 
   if (!w) {
@@ -532,18 +540,10 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
     const runCap = withBalanceMutex ? withBalanceMutex : (fn) => fn();
     try {
       await runCap(async () => {
-        const dbCap = loadDB();
+        const dbCap = loadAppState();
         markWithdrawalFailed(dbCap, withdrawalId, 'payout attempt cap reached');
-        if (USE_POSTGRES_RUNTIME) {
-          const pgResult = await commitWithdrawalTransitionPostgres({
-              stateDb: dbCap,
-            withdrawal: (dbCap.withdrawals || []).find((x) => x.id === withdrawalId),
-            expectedStatus: 'processing',
-          });
-          if (pgResult.conflict) return;
-        } else {
-          saveDB(dbCap);
-        }
+        const pgResult = await persistWithdrawalById(dbCap, withdrawalId, 'processing');
+        if (pgResult.conflict) return;
       });
     } catch (capErr) {
       logger.error('[executePayout] Attempt-cap markWithdrawalFailed failed — retrying in 500 ms', {
@@ -553,18 +553,10 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
       try {
         await new Promise(r => setTimeout(r, 500));
         await runCap(async () => {
-          const dbCapRetry = loadDB();
+          const dbCapRetry = loadAppState();
           markWithdrawalFailed(dbCapRetry, withdrawalId, 'payout attempt cap reached');
-          if (USE_POSTGRES_RUNTIME) {
-            const pgResult = await commitWithdrawalTransitionPostgres({
-                stateDb: dbCapRetry,
-              withdrawal: (dbCapRetry.withdrawals || []).find((x) => x.id === withdrawalId),
-              expectedStatus: 'processing',
-            });
-            if (pgResult.conflict) return;
-          } else {
-            saveDB(dbCapRetry);
-          }
+          const pgResult = await persistWithdrawalById(dbCapRetry, withdrawalId, 'processing');
+          if (pgResult.conflict) return;
         });
         logger.info('[executePayout] Attempt-cap retry succeeded — marked failed', { withdrawalId });
       } catch (capRetryErr) {
@@ -575,14 +567,14 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
         });
         try {
           await new Promise(r => setTimeout(r, 500));
-          const dbMarker = loadDB();
+          const dbMarker = loadAppState();
           const wMarker  = (dbMarker.withdrawals || []).find(x => x.id === withdrawalId);
           if (wMarker && wMarker.status === 'processing' && !wMarker.holdReleased) {
             wMarker.reconcileRequired = true;
             wMarker.reconcileNote     =
               `Attempt cap reached but markWithdrawalFailed could not be persisted at ${Date.now()}. ` +
               `Refund required: POST /admin/withdrawals/${withdrawalId}/transition { "status": "failed" }`;
-            saveDB(dbMarker);
+            saveAppState(dbMarker);
             logger.warn('[executePayout] Attempt-cap reconcile marker persisted', {
               withdrawalId,
               hint: `POST /admin/withdrawals/${withdrawalId}/transition { "status": "failed" }`,
@@ -607,11 +599,7 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
   const provider = payoutRouter(w.country);
   logger.info('[executePayout] Routing to provider', { withdrawalId, provider, country: w.country });
 
-  // C5: All saves now use the full version check so that multi-instance conflicts
-  // fail noisily (DB_VERSION_CONFLICT error logged) instead of silently overwriting
-  // concurrent balance mutations from another pod. On single-instance deployments
-  // (the current setup) the mutex ensures the version always matches.
-  const saveDBFast = saveDB;
+  // C5: All saves use version-checked PostgreSQL app state persistence.
 
   // ── Demo mode: no provider configured → simulate a successful payout ─────
   // Consistent with the deposit system which also uses demo mode when Stripe
@@ -628,18 +616,10 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
     }
     // Dev / staging only: simulate a successful payout
     try {
-      const dbDemo = loadDB();
+      const dbDemo = loadAppState();
       markWithdrawalPaid(dbDemo, withdrawalId, `DEMO-${withdrawalId.slice(0, 8)}`, 'demo');
-      if (USE_POSTGRES_RUNTIME) {
-        const pgResult = await commitWithdrawalTransitionPostgres({
-            stateDb: dbDemo,
-          withdrawal: (dbDemo.withdrawals || []).find((x) => x.id === withdrawalId),
-          expectedStatus: 'processing',
-        });
-        if (pgResult.conflict) return;
-      } else {
-        saveDBFast(dbDemo);
-      }
+      const pgResult = await persistWithdrawalById(dbDemo, withdrawalId, 'processing');
+      if (pgResult.conflict) return;
       logger.info('[executePayout] Demo payout marked as paid', { withdrawalId });
     } catch (demoErr) {
       logger.error('[executePayout] Demo mode: could not mark paid', {
@@ -653,9 +633,9 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
   // ── attemptPayout — inner function, may run up to twice ──────────────────
   async function attemptPayout(attemptNumber) {
     // Atomically claim the dispatch slot under withBalanceMutex:
-    //   1. Fresh loadDB to see the latest state.
+    //   1. Fresh loadAppState to see the latest state.
     //   2. Duplicate guards (holdReleased, and on attempt 1 only: payoutDispatchRef).
-    //   3. Write payoutAttempts + payoutDispatchRef + payoutProvider → saveDB.
+    //   3. Write payoutAttempts + payoutDispatchRef + payoutProvider → saveAppState.
     //
     // Wrapping in withBalanceMutex ensures that even on multi-pod deployments, only
     // one executor can write payoutDispatchRef.  The second pod's claim will find
@@ -668,7 +648,7 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
     const runClaim = withBalanceMutex ? withBalanceMutex : (fn) => fn();
 
     await runClaim(async () => {
-      const dbAttempt = loadDB();
+      const dbAttempt = loadAppState();
       const wAttempt  = (dbAttempt.withdrawals || []).find(x => x.id === withdrawalId);
       if (!wAttempt) throw new Error('Withdrawal disappeared before attempt');
       if (wAttempt.holdReleased) throw Object.assign(
@@ -676,9 +656,9 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
         { _permanent: true }
       );
       // On the first attempt only: atomically acquire the DB-level advisory lock and
-      // set payoutDispatchRef.  Both changes are persisted in the same saveDB call so
+      // set payoutDispatchRef.  Both changes are persisted in the same saveAppState call so
       // the _dbVersion check acts as a compare-and-swap — a concurrent process that
-      // read the same version will get a DB_VERSION_CONFLICT on its own saveDB and
+      // read the same version will get a DB_VERSION_CONFLICT on its own saveAppState and
       // abort safely.
       if (attemptNumber === 1) {
         // Initialise and clean expired locks.
@@ -714,8 +694,8 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
       wAttempt.payoutAttempts    = attemptNumber;
       wAttempt.payoutDispatchRef = `egw-${withdrawalId}`; // deterministic — same across retries
       wAttempt.payoutProvider    = provider;              // persist now so reconcile routes correctly after crash
-      saveDBFast(dbAttempt);
-      if (USE_POSTGRES_RUNTIME && attemptNumber === 1) {
+      saveAppState(dbAttempt);
+      if (attemptNumber === 1) {
         await upsertPayoutLockPostgres({
           withdrawalId,
           pid: process.pid,
@@ -818,9 +798,9 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
             withdrawalId, koraQueryStatus,
           });
           try {
-            const dbClear = loadDB();
+            const dbClear = loadAppState();
             const wClear  = (dbClear.withdrawals || []).find(x => x.id === withdrawalId);
-            if (wClear) { wClear.payoutDispatchRef = null; saveDB(dbClear); }
+            if (wClear) { wClear.payoutDispatchRef = null; saveAppState(dbClear); }
           } catch (clearErr) {
             // If the clear fails, payoutDispatchRef stays set → failure path will leave
             // processing for manual reconcile rather than auto-refunding.  Safe.
@@ -870,12 +850,12 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
       // premature admin refund while the payout is in-flight.
       if (result.reference) {
         try {
-          const dbRef = loadDB();
+          const dbRef = loadAppState();
           const wRef  = (dbRef.withdrawals || []).find(x => x.id === withdrawalId);
           if (wRef) {
             wRef.payoutReference = result.reference;
             wRef.payoutProvider  = result.provider;
-            saveDB(dbRef);
+            saveAppState(dbRef);
           }
         } catch (refErr) {
           logger.error('[executePayout] Could not persist provider reference', {
@@ -898,9 +878,9 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
     const runSuccess = withBalanceMutex ? withBalanceMutex : (fn) => fn();
     try {
       await runSuccess(async () => {
-        const dbSuccess = loadDB();
+        const dbSuccess = loadAppState();
         // Pre-set reference before markWithdrawalPaid so it is captured in the
-        // same saveDB write. If markWithdrawalPaid throws (e.g. duplicate-guard),
+        // same saveAppState write. If markWithdrawalPaid throws (e.g. duplicate-guard),
         // the reference is already present thanks to the payoutAttempts > 0 backstop.
         const wForRef = (dbSuccess.withdrawals || []).find(x => x.id === withdrawalId);
         if (wForRef && !wForRef.payoutReference) {
@@ -908,16 +888,8 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
           wForRef.payoutProvider  = result.provider;
         }
         markWithdrawalPaid(dbSuccess, withdrawalId, result.reference, result.provider);
-        if (USE_POSTGRES_RUNTIME) {
-          const pgResult = await commitWithdrawalTransitionPostgres({
-              stateDb: dbSuccess,
-            withdrawal: (dbSuccess.withdrawals || []).find((x) => x.id === withdrawalId),
-            expectedStatus: 'processing',
-          });
-          if (pgResult.conflict) return;
-        } else {
-          saveDB(dbSuccess); // full version-checked save inside mutex
-        }
+        const pgResult = await persistWithdrawalById(dbSuccess, withdrawalId, 'processing');
+        if (pgResult.conflict) return;
         logger.info('[executePayout] Marked paid', {
           withdrawalId,
           provider:  result.provider,
@@ -935,23 +907,15 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
       try {
         await new Promise(r => setTimeout(r, 500));
         await runSuccess(async () => {
-          const dbRetry = loadDB();
+          const dbRetry = loadAppState();
           const wRetry  = (dbRetry.withdrawals || []).find(x => x.id === withdrawalId);
           if (wRetry && !wRetry.payoutReference) {
             wRetry.payoutReference = result.reference;
             wRetry.payoutProvider  = result.provider;
           }
           markWithdrawalPaid(dbRetry, withdrawalId, result.reference, result.provider);
-          if (USE_POSTGRES_RUNTIME) {
-              const pgResult = await commitWithdrawalTransitionPostgres({
-                stateDb: dbRetry,
-              withdrawal: (dbRetry.withdrawals || []).find((x) => x.id === withdrawalId),
-              expectedStatus: 'processing',
-            });
-            if (pgResult.conflict) return;
-          } else {
-            saveDB(dbRetry);
-          }
+          const pgResult = await persistWithdrawalById(dbRetry, withdrawalId, 'processing');
+          if (pgResult.conflict) return;
         });
         logger.info('[executePayout] Retry succeeded — marked paid', {
           withdrawalId, provider: result.provider, reference: result.reference });
@@ -960,14 +924,14 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
           withdrawalId, error: retryErr.message, payoutReference: result.reference,
         });
 
-        // C-2: Both full markWithdrawalPaid+saveDB attempts failed.
+        // C-2: Both full markWithdrawalPaid+saveAppState attempts failed.
         // Provider confirmed settlement — funds already disbursed.
         // Do NOT call provider again. Do NOT refund. Do NOT call markWithdrawalPaid again.
         // Stamp a minimal marker so the admin /reconcile endpoint can complete the
         // transition once DB I/O recovers, without any risk of double-payment.
         try {
           await new Promise(r => setTimeout(r, 500));
-          const dbEmergency = loadDB();
+          const dbEmergency = loadAppState();
           const wEmergency  = (dbEmergency.withdrawals || []).find(x => x.id === withdrawalId);
           // Only stamp if the withdrawal is still in processing and hold not yet released.
           // If holdReleased is already true a previous partial write succeeded — skip.
@@ -978,7 +942,7 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
             wEmergency.reconcileNote     =
               `Provider settled at ${Date.now()} but markWithdrawalPaid could not be persisted. ` +
               `Manual reconcile required: POST /admin/withdrawals/${withdrawalId}/reconcile`;
-            saveDB(dbEmergency); // minimal stamp — no hold mutation, no ledger write, no status change
+            saveAppState(dbEmergency); // minimal stamp — no hold mutation, no ledger write, no status change
             logger.warn('[executePayout] Emergency audit marker persisted — /reconcile will complete the transition', {
               withdrawalId,
               payoutReference: result.reference,
@@ -1021,7 +985,7 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
 
   try {
     await runFail(async () => {
-      const dbFail = loadDB();
+      const dbFail = loadAppState();
       const wFail  = (dbFail.withdrawals || []).find(x => x.id === withdrawalId);
 
       // Guard: provider was contacted (payoutDispatchRef is set) — three cases:
@@ -1099,18 +1063,10 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
         });
       }
 
-      if (USE_POSTGRES_RUNTIME) {
-        const pgResult = await commitWithdrawalTransitionPostgres({
-            stateDb: dbFail,
-          withdrawal: (dbFail.withdrawals || []).find((x) => x.id === withdrawalId),
-          expectedStatus: 'processing',
-        });
-        if (pgResult.conflict) {
-          reconcileRequired = true;
-          return;
-        }
-      } else {
-        saveDB(dbFail);
+      const pgResult = await persistWithdrawalById(dbFail, withdrawalId, 'processing');
+      if (pgResult.conflict) {
+        reconcileRequired = true;
+        return;
       }
     });
 
@@ -1124,13 +1080,13 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
       withdrawalId,
       error: innerErr.message,
     });
-    // Retry with a fresh DB load. refundIssued was never persisted (saveDB threw), so the
+    // Retry with a fresh DB load. refundIssued was never persisted (saveAppState threw), so the
     // fresh load sees refundIssued:false and markWithdrawalFailed is safe to run again.
     // runFail has released the mutex (its promise rejected), so re-entering is safe.
     try {
       await new Promise(r => setTimeout(r, 500));
       await runFail(async () => {
-        const dbRetry = loadDB();
+        const dbRetry = loadAppState();
         const wRetry  = (dbRetry.withdrawals || []).find(x => x.id === withdrawalId);
         if (wRetry?.payoutDispatchRef) {
           // Mirror the primary failure-path guard: clear payoutDispatchRef only for
@@ -1155,18 +1111,10 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
           return;
         }
         markWithdrawalFailed(dbRetry, withdrawalId, failReason);
-        if (USE_POSTGRES_RUNTIME) {
-            const pgResult = await commitWithdrawalTransitionPostgres({
-              stateDb: dbRetry,
-            withdrawal: (dbRetry.withdrawals || []).find((x) => x.id === withdrawalId),
-            expectedStatus: 'processing',
-          });
-          if (pgResult.conflict) {
-            reconcileRequired = true;
-            return;
-          }
-        } else {
-          saveDB(dbRetry);
+        const pgResult = await persistWithdrawalById(dbRetry, withdrawalId, 'processing');
+        if (pgResult.conflict) {
+          reconcileRequired = true;
+          return;
         }
       });
       if (!reconcileRequired) {
@@ -1182,19 +1130,19 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
         withdrawalId, error: retryErr.message,
       });
       // Provider was never contacted (payoutDispatchRef absent) but both
-      // markWithdrawalFailed + saveDB attempts failed.  Stamp a minimal marker
+      // markWithdrawalFailed + saveAppState attempts failed.  Stamp a minimal marker
       // (no balance mutation) so admin tooling can issue the refund via /transition.
       // Mirrors the settled-success emergency audit marker path.
       try {
         await new Promise(r => setTimeout(r, 500));
-        const dbFailEmergency = loadDB();
+        const dbFailEmergency = loadAppState();
         const wFailEmergency  = (dbFailEmergency.withdrawals || []).find(x => x.id === withdrawalId);
         if (wFailEmergency && wFailEmergency.status === 'processing' && !wFailEmergency.holdReleased) {
           wFailEmergency.reconcileRequired = true;
           wFailEmergency.reconcileNote     =
             `Provider not contacted but markWithdrawalFailed could not be persisted at ${Date.now()}. ` +
             `Refund required: POST /admin/withdrawals/${withdrawalId}/transition { "status": "failed" }`;
-          saveDB(dbFailEmergency);
+          saveAppState(dbFailEmergency);
           logger.warn('[executePayout] Emergency failure marker persisted — admin must refund via /transition', {
             withdrawalId,
             hint: `POST /admin/withdrawals/${withdrawalId}/transition { "status": "failed" }`,
@@ -1221,17 +1169,15 @@ async function executePayout(withdrawalId, loadDB, saveDB, logger, withBalanceMu
     try {
       const runRelease = withBalanceMutex ? withBalanceMutex : (fn) => fn();
       await runRelease(async () => {
-        const dbRelease = loadDB();
+        const dbRelease = loadAppState();
         if (dbRelease.payoutLocks) {
           const before = dbRelease.payoutLocks.length;
           dbRelease.payoutLocks = dbRelease.payoutLocks.filter(
             l => !(l.withdrawalId === withdrawalId && l.pid === process.pid)
           );
-          if (dbRelease.payoutLocks.length !== before) saveDB(dbRelease);
+          if (dbRelease.payoutLocks.length !== before) saveAppState(dbRelease);
         }
-        if (USE_POSTGRES_RUNTIME) {
-          await releasePayoutLockPostgres({ withdrawalId });
-        }
+        await releasePayoutLockPostgres({ withdrawalId });
       });
     } catch (_) { /* non-fatal — lock expires via PAYOUT_LOCK_TTL_MS */ }
   }

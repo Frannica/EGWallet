@@ -52,7 +52,7 @@ function recordStatusChange(withdrawal, status, by) {
  * Validates balance, locks funds into holdBalance, creates withdrawal record,
  * writes a withdrawal_hold ledger entry.
  *
- * @param {object} db            - live db object (caller must saveDB after)
+ * @param {object} state         - live app state object (caller must saveAppState after)
  * @param {string} userId
  * @param {object} fields
  * @returns {object}             - the new withdrawal record
@@ -105,7 +105,7 @@ function createWithdrawal(db, userId, fields) {
 
     // Routing details — defense-in-depth PAN enforcement.
     // Even if a caller bypasses the route-level sanitization, this layer ensures
-    // a full card PAN is never written to db.json.
+    // a full card PAN is never written to persistent storage.
     // PII fields (accountNumber, iban, swiftBic, accountHolderName, bankName) are
     // AES-256-GCM encrypted at rest via piiCipher.js.  Safe display copies are kept
     // in accountMask and bankNameDisplay so API responses never expose ciphertext.
@@ -188,7 +188,7 @@ function createWithdrawal(db, userId, fields) {
 // ─── adminTransition ─────────────────────────────────────────────────────────
 /**
  * Moves a withdrawal through the state machine.
- * Called from admin routes.  Caller must saveDB after.
+ * Called from admin routes.  Caller must saveAppState after.
  *
  * @param {object} db
  * @param {string} withdrawalId
@@ -401,7 +401,7 @@ module.exports = {
  * through approved → processing.  Does NOT mark paid — that is done
  * by payoutProviders.js after the real API call succeeds.
  *
- * Called in the HTTP handler before saveDB() and res.json().
+ * Called in the HTTP handler before saveAppState() and res.json().
  * If the state machine cannot advance (logic error), marks failed + refunds.
  *
  * @param {object} db
@@ -454,7 +454,7 @@ function advanceToProcessing(db, withdrawalId) {
 /**
  * Marks a processing withdrawal as paid after the provider API confirms success.
  * Called by payoutProviders.js executePayout on success path.
- * Caller must saveDB after.
+ * Caller must saveAppState after.
  *
  * @param {object} db
  * @param {string} withdrawalId
@@ -520,7 +520,7 @@ function markWithdrawalPaid(db, withdrawalId, providerRef, provider) {
 /**
  * Marks a withdrawal as failed and issues a full refund of the held funds.
  * Called by payoutProviders.js executePayout on error path.
- * Caller must saveDB after.
+ * Caller must saveAppState after.
  *
  * @param {object} db
  * @param {string} withdrawalId
