@@ -323,3 +323,76 @@ test('phase1b p2p concurrent double-spend blocked', async () => {
     client.release();
   }
 });
+
+test('phase1b p2p runtime-state sync upserts missing relational users and wallets', async () => {
+  requireDb();
+  const client = await pool.connect();
+  const ids = {
+    users: [uuidv4(), uuidv4()],
+    wallets: [uuidv4(), uuidv4()],
+    transactions: [uuidv4()],
+  };
+  const runtimeStateDb = {
+    _dbVersion: 0,
+    users: [
+      { id: ids.users[0], email: `${ids.users[0]}@runtime.test`, passwordHash: 'x', region: 'US', role: 'individual', createdAt: Date.now() },
+      { id: ids.users[1], email: `${ids.users[1]}@runtime.test`, passwordHash: 'x', region: 'US', role: 'individual', createdAt: Date.now() },
+    ],
+    wallets: [
+      { id: ids.wallets[0], userId: ids.users[0], balances: [{ currency: 'USD', amount: 9000 }], createdAt: Date.now(), maxLimitUSD: 250000 },
+      { id: ids.wallets[1], userId: ids.users[1], balances: [{ currency: 'USD', amount: 0 }], createdAt: Date.now(), maxLimitUSD: 250000 },
+    ],
+    transactions: [],
+    paymentRequests: [],
+    ledger: [],
+  };
+  try {
+    const result = await commitP2PSendPostgres({
+      fromWalletId: ids.wallets[0],
+      toWalletId: ids.wallets[1],
+      debitCurrency: 'USD',
+      debitAmount: 1500,
+      receivedCurrency: 'USD',
+      receivedAmount: 1500,
+      tx: {
+        id: ids.transactions[0],
+        fromWalletId: ids.wallets[0],
+        toWalletId: ids.wallets[1],
+        amount: 1500,
+        currency: 'USD',
+        debitAmount: 1500,
+        debitCurrency: 'USD',
+        senderCrossCurrency: false,
+        receivedAmount: 1500,
+        receivedCurrency: 'USD',
+        wasConverted: false,
+        fxFeeAmount: 0,
+        sendFeeAmount: 0,
+        memo: 'runtime-sync',
+        status: 'completed',
+        timestamp: Date.now(),
+      },
+      clientKey: `phase1b-${uuidv4()}`,
+      userId: ids.users[0],
+      responseBody: { ok: true },
+      senderLimitTracking: null,
+      runtimeStateDb,
+      recipientUserId: ids.users[1],
+    });
+
+    assert.equal(result.replay, false);
+    assert.equal(result.insufficientFunds, false);
+    const userRows = await client.query('SELECT COUNT(*)::int AS c FROM users WHERE id = ANY($1::uuid[])', [ids.users]);
+    const walletRows = await client.query('SELECT COUNT(*)::int AS c FROM wallets WHERE id = ANY($1::uuid[])', [ids.wallets]);
+    const senderBal = await client.query('SELECT amount FROM wallet_balances WHERE wallet_id = $1 AND currency = $2', [ids.wallets[0], 'USD']);
+    const receiverBal = await client.query('SELECT amount FROM wallet_balances WHERE wallet_id = $1 AND currency = $2', [ids.wallets[1], 'USD']);
+    assert.equal(userRows.rows[0].c, 2);
+    assert.equal(walletRows.rows[0].c, 2);
+    assert.equal(Number(senderBal.rows[0].amount), 7500);
+    assert.equal(Number(receiverBal.rows[0].amount), 1500);
+  } finally {
+    try { await client.query('DELETE FROM runtime_db_state WHERE id = 1'); } catch (_) {}
+    await cleanup(client, ids);
+    client.release();
+  }
+});

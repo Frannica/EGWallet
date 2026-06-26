@@ -335,3 +335,75 @@ test('phase1b-b payment request concurrent double-pay prevention', async () => {
     client.release();
   }
 });
+
+test('phase1b-b payment request runtime-state sync upserts missing relational graph', async () => {
+  requireDb();
+  const client = await pool.connect();
+  const ids = {
+    users: [uuidv4(), uuidv4()],
+    wallets: [uuidv4(), uuidv4()],
+    requests: [uuidv4()],
+    transactions: [uuidv4()],
+  };
+  const runtimeStateDb = {
+    _dbVersion: 0,
+    users: [
+      { id: ids.users[0], email: `${ids.users[0]}@runtime.test`, passwordHash: 'x', region: 'US', role: 'individual', createdAt: Date.now() },
+      { id: ids.users[1], email: `${ids.users[1]}@runtime.test`, passwordHash: 'x', region: 'US', role: 'individual', createdAt: Date.now() },
+    ],
+    wallets: [
+      { id: ids.wallets[0], userId: ids.users[0], balances: [{ currency: 'USD', amount: 8000 }], createdAt: Date.now(), maxLimitUSD: 250000 },
+      { id: ids.wallets[1], userId: ids.users[1], balances: [{ currency: 'USD', amount: 0 }], createdAt: Date.now(), maxLimitUSD: 250000 },
+    ],
+    paymentRequests: [
+      {
+        id: ids.requests[0],
+        requesterId: ids.users[1],
+        walletId: ids.wallets[1],
+        amount: 2200,
+        currency: 'USD',
+        memo: 'runtime request',
+        status: 'pending',
+        type: 'personal_request',
+        createdAt: Date.now(),
+      },
+    ],
+    transactions: [],
+    ledger: [],
+  };
+  try {
+    const result = await commitPaymentRequestPayPostgres({
+      requestId: ids.requests[0],
+      fromWalletId: ids.wallets[0],
+      toWalletId: ids.wallets[1],
+      debitCurrency: 'USD',
+      debitAmount: 2200,
+      requestCurrency: 'USD',
+      requestAmount: 2200,
+      tx: buildTx({ id: ids.transactions[0], fromWalletId: ids.wallets[0], toWalletId: ids.wallets[1], amount: 2200, currency: 'USD', memo: 'runtime pay' }),
+      clientKey: `phase1b-pr-${uuidv4()}`,
+      userId: ids.users[0],
+      responseBody: { ok: true },
+      payerLimitTracking: null,
+      employerPayrollLimitTracking: null,
+      employerId: null,
+      runtimeStateDb,
+      skipRuntimeStateSync: true,
+    });
+
+    assert.equal(result.replay, false);
+    const reqRow = await client.query('SELECT status, paid_by, transaction_id FROM payment_requests WHERE id = $1', [ids.requests[0]]);
+    const payer = await client.query('SELECT amount FROM wallet_balances WHERE wallet_id = $1 AND currency = $2', [ids.wallets[0], 'USD']);
+    const payee = await client.query('SELECT amount FROM wallet_balances WHERE wallet_id = $1 AND currency = $2', [ids.wallets[1], 'USD']);
+    assert.equal(reqRow.rowCount, 1);
+    assert.equal(reqRow.rows[0].status, 'paid');
+    assert.equal(reqRow.rows[0].paid_by, ids.users[0]);
+    assert.equal(reqRow.rows[0].transaction_id, ids.transactions[0]);
+    assert.equal(Number(payer.rows[0].amount), 5800);
+    assert.equal(Number(payee.rows[0].amount), 2200);
+  } finally {
+    try { await client.query('DELETE FROM runtime_db_state WHERE id = 1'); } catch (_) {}
+    await cleanup(client, ids);
+    client.release();
+  }
+});

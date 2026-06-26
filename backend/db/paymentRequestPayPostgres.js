@@ -80,6 +80,139 @@ function mapTransactionRow(row) {
   };
 }
 
+async function upsertRuntimeUser(client, user) {
+  if (!user || !user.id) return;
+  await client.query(
+    `INSERT INTO users (
+      id, email, username, password_hash, region, role, preferred_currency, auto_convert_incoming,
+      kyc_tier, kyc_status, kyc_documents, device_id, risk_flags, kyc_device_blocked,
+      daily_spent, last_reset_date, limit_tracking, linked_employers, token_version, status, created_at
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13::jsonb,$14,$15,$16,$17::jsonb,$18::jsonb,$19,$20,$21
+    )
+    ON CONFLICT (id) DO NOTHING`,
+    [
+      user.id,
+      user.email || `${user.id}@runtime.local`,
+      user.username || null,
+      user.passwordHash || user.password_hash || 'x',
+      user.region || 'US',
+      user.role || 'individual',
+      user.preferredCurrency || user.preferred_currency || null,
+      user.autoConvertIncoming === undefined ? true : !!user.autoConvertIncoming,
+      Number(user.kycTier || 0),
+      user.kycStatus || 'pending',
+      JSON.stringify(user.kycDocuments || {}),
+      user.deviceId || null,
+      user.riskFlags ? JSON.stringify(user.riskFlags) : null,
+      user.kycDeviceBlocked === undefined ? null : !!user.kycDeviceBlocked,
+      Number(user.dailySpent || 0),
+      user.lastResetDate || null,
+      JSON.stringify(user.limitTracking || {}),
+      JSON.stringify(user.linkedEmployers || []),
+      Number(user.tokenVersion || 0),
+      user.status || null,
+      msToDate(user.createdAt),
+    ]
+  );
+}
+
+async function upsertRuntimeWallet(client, wallet) {
+  if (!wallet || !wallet.id || !wallet.userId) return;
+  await client.query(
+    `INSERT INTO wallets (id, user_id, type, employer_id, max_limit_usd, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      wallet.id,
+      wallet.userId,
+      wallet.type || null,
+      wallet.employerId || null,
+      wallet.maxLimitUSD === undefined ? null : Number(wallet.maxLimitUSD),
+      msToDate(wallet.createdAt),
+    ]
+  );
+  for (const bal of wallet.balances || []) {
+    await client.query(
+      `INSERT INTO wallet_balances(wallet_id, currency, amount)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (wallet_id, currency) DO UPDATE SET amount = EXCLUDED.amount`,
+      [wallet.id, bal.currency, Number(bal.amount || 0)]
+    );
+  }
+}
+
+async function upsertRuntimePaymentRequest(client, request) {
+  if (!request || !request.id) return;
+  const requesterId = request.requesterId || request.userId || null;
+  if (!requesterId) return;
+  const safeStatus = request.status === 'cancelled' ? 'cancelled' : 'pending';
+  const safeTransactionId = null;
+  const safePaidBy = null;
+  const safeSettledByTransactionId = null;
+  await client.query(
+    `INSERT INTO payment_requests (
+      id, requester_id, wallet_id, target_wallet_id, target_employer_id,
+      amount, currency, memo, status, type, payroll_metadata, compliance_flags,
+      paid_at, paid_by, transaction_id, cancelled_at, cancel_reason, settled_by_transaction_id, created_at
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13,$14,$15,$16,$17,$18,$19
+    )
+    ON CONFLICT (id) DO UPDATE SET
+      requester_id = EXCLUDED.requester_id,
+      wallet_id = EXCLUDED.wallet_id,
+      target_wallet_id = EXCLUDED.target_wallet_id,
+      target_employer_id = EXCLUDED.target_employer_id,
+      amount = EXCLUDED.amount,
+      currency = EXCLUDED.currency,
+      memo = EXCLUDED.memo,
+      status = EXCLUDED.status,
+      type = EXCLUDED.type,
+      payroll_metadata = EXCLUDED.payroll_metadata,
+      compliance_flags = EXCLUDED.compliance_flags`,
+    [
+      request.id,
+      requesterId,
+      request.walletId || null,
+      request.targetWalletId || null,
+      request.targetEmployerId || null,
+      Number(request.amount || 0),
+      request.currency || 'USD',
+      request.memo || '',
+      safeStatus,
+      request.type || null,
+      JSON.stringify(request.payrollMetadata || null),
+      JSON.stringify(request.complianceFlags || null),
+      null,
+      safePaidBy,
+      safeTransactionId,
+      request.cancelledAt ? msToDate(request.cancelledAt) : null,
+      request.cancelReason || null,
+      safeSettledByTransactionId,
+      msToDate(request.createdAt),
+    ]
+  );
+}
+
+async function syncRuntimePaymentRequestGraph(client, { runtimeStateDb, requestId, payerUserId, fromWalletId, toWalletId }) {
+  if (!runtimeStateDb) return;
+  const users = runtimeStateDb.users || [];
+  const wallets = runtimeStateDb.wallets || [];
+  const requests = runtimeStateDb.paymentRequests || [];
+  const request = requests.find((r) => r.id === requestId);
+  const fromWallet = wallets.find((w) => w.id === fromWalletId);
+  const payeeWallet = wallets.find((w) => w.id === toWalletId) || (request ? wallets.find((w) => w.id === request.walletId) : null);
+  const payerUser = users.find((u) => u.id === payerUserId) || (fromWallet ? users.find((u) => u.id === fromWallet.userId) : null);
+  const requesterId = request ? (request.requesterId || request.userId) : null;
+  const requesterUser = requesterId ? users.find((u) => u.id === requesterId) : null;
+
+  await upsertRuntimeUser(client, payerUser);
+  await upsertRuntimeUser(client, requesterUser);
+  await upsertRuntimeWallet(client, fromWallet);
+  await upsertRuntimeWallet(client, payeeWallet);
+  await upsertRuntimePaymentRequest(client, request);
+}
+
 async function getDurablePaymentRequestIdempotency(clientKey, userId) {
   if (!clientKey) return null;
   const result = await pool.query(
@@ -105,10 +238,18 @@ async function commitPaymentRequestPayPostgres({
   employerPayrollLimitTracking,
   employerId,
   runtimeStateDb,
+  skipRuntimeStateSync = false,
 }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    await syncRuntimePaymentRequestGraph(client, {
+      runtimeStateDb,
+      requestId,
+      payerUserId: userId,
+      fromWalletId,
+      toWalletId,
+    });
 
     if (clientKey) {
       const replay = await client.query(
@@ -259,7 +400,7 @@ async function commitPaymentRequestPayPostgres({
       );
     }
 
-    if (runtimeStateDb) {
+    if (runtimeStateDb && !skipRuntimeStateSync) {
       const runtimeLock = await client.query(
         'SELECT version FROM runtime_db_state WHERE id = 1 FOR UPDATE'
       );

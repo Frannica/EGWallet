@@ -143,6 +143,7 @@ async function commitDepositConfirmPostgres({
   runtimeStateDb,
   clientKey,
   idempotencyResponse,
+  skipRuntimeStateSync = false,
 }) {
   const client = await pool.connect();
   try {
@@ -258,7 +259,7 @@ async function commitDepositConfirmPostgres({
       );
     }
 
-    if (runtimeStateDb) {
+    if (runtimeStateDb && !skipRuntimeStateSync) {
       const runtimeLock = await client.query(
         'SELECT version FROM runtime_db_state WHERE id = 1 FOR UPDATE'
       );

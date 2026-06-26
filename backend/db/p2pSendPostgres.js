@@ -34,6 +34,83 @@ function mapTxRow(tx) {
   };
 }
 
+async function upsertRuntimeUser(client, user) {
+  if (!user || !user.id) return;
+  await client.query(
+    `INSERT INTO users (
+      id, email, username, password_hash, region, role, preferred_currency, auto_convert_incoming,
+      kyc_tier, kyc_status, kyc_documents, device_id, risk_flags, kyc_device_blocked,
+      daily_spent, last_reset_date, limit_tracking, linked_employers, token_version, status, created_at
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13::jsonb,$14,$15,$16,$17::jsonb,$18::jsonb,$19,$20,$21
+    )
+    ON CONFLICT (id) DO NOTHING`,
+    [
+      user.id,
+      user.email || `${user.id}@runtime.local`,
+      user.username || null,
+      user.passwordHash || user.password_hash || 'x',
+      user.region || 'US',
+      user.role || 'individual',
+      user.preferredCurrency || user.preferred_currency || null,
+      user.autoConvertIncoming === undefined ? true : !!user.autoConvertIncoming,
+      Number(user.kycTier || 0),
+      user.kycStatus || 'pending',
+      JSON.stringify(user.kycDocuments || {}),
+      user.deviceId || null,
+      user.riskFlags ? JSON.stringify(user.riskFlags) : null,
+      user.kycDeviceBlocked === undefined ? null : !!user.kycDeviceBlocked,
+      Number(user.dailySpent || 0),
+      user.lastResetDate || null,
+      JSON.stringify(user.limitTracking || {}),
+      JSON.stringify(user.linkedEmployers || []),
+      Number(user.tokenVersion || 0),
+      user.status || null,
+      msToDate(user.createdAt),
+    ]
+  );
+}
+
+async function upsertRuntimeWallet(client, wallet) {
+  if (!wallet || !wallet.id || !wallet.userId) return;
+  await client.query(
+    `INSERT INTO wallets (id, user_id, type, employer_id, max_limit_usd, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      wallet.id,
+      wallet.userId,
+      wallet.type || null,
+      wallet.employerId || null,
+      wallet.maxLimitUSD === undefined ? null : Number(wallet.maxLimitUSD),
+      msToDate(wallet.createdAt),
+    ]
+  );
+
+  for (const bal of wallet.balances || []) {
+    await client.query(
+      `INSERT INTO wallet_balances(wallet_id, currency, amount)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (wallet_id, currency) DO UPDATE SET amount = EXCLUDED.amount`,
+      [wallet.id, bal.currency, Number(bal.amount || 0)]
+    );
+  }
+}
+
+async function syncRuntimeP2PGraph(client, { runtimeStateDb, userId, fromWalletId, toWalletId, recipientUserId }) {
+  if (!runtimeStateDb) return;
+  const users = runtimeStateDb.users || [];
+  const wallets = runtimeStateDb.wallets || [];
+  const fromWallet = wallets.find((w) => w.id === fromWalletId);
+  const toWallet = wallets.find((w) => w.id === toWalletId);
+  const senderUser = users.find((u) => u.id === userId) || (fromWallet ? users.find((u) => u.id === fromWallet.userId) : null);
+  const receiverUser = users.find((u) => u.id === recipientUserId) || (toWallet ? users.find((u) => u.id === toWallet.userId) : null);
+  await upsertRuntimeUser(client, senderUser);
+  await upsertRuntimeUser(client, receiverUser);
+  await upsertRuntimeWallet(client, fromWallet);
+  await upsertRuntimeWallet(client, toWallet);
+}
+
 async function getDurableP2PIdempotency(clientKey, userId) {
   if (!clientKey) return null;
   const result = await pool.query(
@@ -62,6 +139,7 @@ async function commitP2PSendPostgres({
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    await syncRuntimeP2PGraph(client, { runtimeStateDb, userId, fromWalletId, toWalletId, recipientUserId });
 
     if (clientKey) {
       const replay = await client.query(

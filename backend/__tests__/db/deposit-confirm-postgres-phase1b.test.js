@@ -265,6 +265,7 @@ test('phase1b-d deposit confirm upserts missing relational user wallet rows from
       userId: ids.users[0],
       intentId,
       runtimeStateDb,
+      skipRuntimeStateSync: true,
     });
 
     assert.equal(result.replay, false);
