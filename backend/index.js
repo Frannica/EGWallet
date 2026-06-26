@@ -47,6 +47,7 @@ const { createWithdrawal, advanceToProcessing, markWithdrawalFailed, markWithdra
 const { router: adminWithdrawalsRouter, adminLoginHandler, adminLogoutHandler } = require('./adminWithdrawals');
 const { executePayout, payoutRouter } = require('./payoutProviders');
 const { getRuntimeStateSync, setRuntimeStateSync, getRuntimeStatusSync } = require('./db/runtimeStateSync');
+const { getDurableP2PIdempotency, commitP2PSendPostgres } = require('./db/p2pSendPostgres');
 const {
   isPasswordResetEmailConfigured,
   getPasswordResetEmailMode,
@@ -3656,7 +3657,9 @@ app.post('/transactions', authMiddleware, async (req, res) => {
 
   // Durable idempotency — survives restart (check DB after acquiring mutex)
   if (clientKey) {
-    const durableHit = checkDurableIdempotency(db, clientKey, req.user.userId);
+    const durableHit = USE_POSTGRES_RUNTIME
+      ? await getDurableP2PIdempotency(clientKey, req.user.userId)
+      : checkDurableIdempotency(db, clientKey, req.user.userId);
     if (durableHit) {
       idempotencyStore.set(clientKey, { userId: req.user.userId, response: durableHit, timestamp: Date.now() });
       return res.status(200).json(durableHit);
@@ -3887,19 +3890,60 @@ app.post('/transactions', authMiddleware, async (req, res) => {
       tierLevel:           limitCheck.tierLevel,
     },
   };
-  if (clientKey) saveDurableIdempotency(db, clientKey, responseBody, req.user.userId);
+  if (!USE_POSTGRES_RUNTIME && clientKey) {
+    saveDurableIdempotency(db, clientKey, responseBody, req.user.userId);
+  }
 
-  try {
-    saveDB(db); // commits balances + tx + limit tracking + idempotency atomically
-  } catch (saveErr) {
-    // Rollback in-memory changes so state stays consistent before rethrowing
-    debitEntry.amount = originalFromAmount;
-    if (destBalance && originalDestAmount !== null) destBalance.amount = originalDestAmount;
-    else if (destBalance) toWallet.balances = toWallet.balances.filter(b => b.currency !== receivedCurrency);
-    db.transactions.pop();
-    if (clientKey && db.idempotencyRecords?.length) db.idempotencyRecords.pop();
-    console.error('[/transactions] saveDB failed — rolled back in-memory state:', saveErr);
-    return res.status(500).json({ error: t('error_transaction_persist', lang) });
+  if (USE_POSTGRES_RUNTIME) {
+    try {
+      const pgResult = await commitP2PSendPostgres({
+        fromWalletId,
+        toWalletId,
+        debitCurrency,
+        debitAmount,
+        receivedCurrency,
+        receivedAmount,
+        tx,
+        clientKey,
+        userId: req.user.userId,
+        responseBody,
+        senderLimitTracking: senderUser.limitTracking,
+        runtimeStateDb: db,
+        recipientUserId: toWallet.userId,
+      });
+      if (pgResult.replay && pgResult.response) {
+        idempotencyStore.set(clientKey, { userId: req.user.userId, response: pgResult.response, timestamp: Date.now() });
+        return res.status(200).json(pgResult.response);
+      }
+      if (pgResult.insufficientFunds) {
+        // Concurrent debit won the race after optimistic in-memory checks.
+        debitEntry.amount = originalFromAmount;
+        if (destBalance && originalDestAmount !== null) destBalance.amount = originalDestAmount;
+        else if (destBalance) toWallet.balances = toWallet.balances.filter(b => b.currency !== receivedCurrency);
+        db.transactions.pop();
+        return res.status(400).json({ error: t('error_insufficient_funds', lang) });
+      }
+    } catch (saveErr) {
+      debitEntry.amount = originalFromAmount;
+      if (destBalance && originalDestAmount !== null) destBalance.amount = originalDestAmount;
+      else if (destBalance) toWallet.balances = toWallet.balances.filter(b => b.currency !== receivedCurrency);
+      db.transactions.pop();
+      console.error('[/transactions] PostgreSQL commit failed — rolled back in-memory state:', saveErr);
+      return res.status(500).json({ error: t('error_transaction_persist', lang) });
+    }
+  } else {
+    try {
+      saveDB(db); // commits balances + tx + limit tracking + idempotency atomically
+    } catch (saveErr) {
+      // Rollback in-memory changes so state stays consistent before rethrowing
+      debitEntry.amount = originalFromAmount;
+      if (destBalance && originalDestAmount !== null) destBalance.amount = originalDestAmount;
+      else if (destBalance) toWallet.balances = toWallet.balances.filter(b => b.currency !== receivedCurrency);
+      db.transactions.pop();
+      if (clientKey && db.idempotencyRecords?.length) db.idempotencyRecords.pop();
+      console.error('[/transactions] saveDB failed — rolled back in-memory state:', saveErr);
+      return res.status(500).json({ error: t('error_transaction_persist', lang) });
+    }
   }
 
   if (clientKey) idempotencyStore.set(clientKey, { userId: req.user.userId, response: responseBody, timestamp: Date.now() });
