@@ -10,6 +10,7 @@ import { minorToMajor, formatMajorAmount } from '../utils/currency';
 import { payPaymentRequest, generateId } from '../api/transactions';
 import { refreshWalletFromBackend } from '../utils/walletSync';
 import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
+import { getApiErrorMessage } from '../utils/apiErrorMessage';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -172,7 +173,14 @@ export default function PayRequestScreen({ route, navigation }: any) {
 
       showPaymentSuccessAlert(t, navigation, { ...request, status: 'paid' }, payData.transaction);
     } catch (e: any) {
-      Alert.alert(t('payRequest.paymentFailed'), e.message || t('payRequest.couldNotProcess'));
+      const friendly = getApiErrorMessage({
+        message: e?.message,
+        status: typeof e?.status === 'number' ? e.status : undefined,
+        errorCode: e?.errorCode,
+        code: e?.code,
+        limitType: e?.limitType,
+      }, t);
+      Alert.alert(t('payRequest.paymentFailed'), friendly || t('payRequest.couldNotProcess'));
     } finally {
       if (auth.token) {
         try { await refreshWalletFromBackend(auth.token); } catch { /* best-effort */ }

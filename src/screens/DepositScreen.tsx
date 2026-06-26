@@ -339,7 +339,12 @@ export default function DepositScreen() {
         body: JSON.stringify({ amount: amountMinor, currency, walletId }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.message || 'Create intent failed');
+      if (!res.ok) {
+        const err: any = new Error(data.error || data.message || 'Create intent failed');
+        err.status = res.status;
+        err.errorCode = data.errorCode;
+        throw err;
+      }
 
       setMode(data.mode);
 
@@ -357,20 +362,23 @@ export default function DepositScreen() {
       }
     } catch (e: any) {
       if (__DEV__) console.log('[Deposit] error:', e?.message);
-
-      const isAuthError =
-        e?.message?.toLowerCase().includes('invalid token') ||
-        e?.message?.toLowerCase().includes('missing token');
+      const status = typeof e?.status === 'number' ? e.status : undefined;
+      const isAuthError = status === 401 || status === 403;
 
       if (isAuthError) {
-        await auth.handleTokenExpired();
-        Alert.alert(t('common.sessionExpired'), t('deposit.sessionExpired'));
+        const refreshed = await auth.handleTokenExpired();
+        if (!refreshed) {
+          Alert.alert(t('common.sessionExpired'), t('deposit.sessionExpired'));
+        } else {
+          Alert.alert(t('common.error'), t('apiError.requestFailed'));
+        }
       } else {
-        // Backend unavailable — show a clear error instead of silently crediting funds
-        Alert.alert(
-          t('common.error'),
-          t('deposit.serviceUnavailable'),
-        );
+        const friendly = getApiErrorMessage({
+          message: e?.message,
+          status,
+          errorCode: e?.errorCode,
+        }, t);
+        Alert.alert(t('common.error'), friendly);
       }
     } finally {
       setLoading(false);

@@ -33,14 +33,26 @@ async function _executeRefresh(): Promise<string | null> {
     });
 
     if (!response.ok) {
-      // Re-read SecureStore before clearing.  A concurrent refresh may have already
-      // succeeded and stored a new token.  Only wipe if the stored token still matches
-      // the one that just failed — prevents a losing race from evicting the winner's
-      // rotated tokens and triggering a spurious sign-out.
-      const storedNow = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
-      if (storedNow === refreshToken) {
-        await SecureStore.deleteItemAsync(TOKEN_KEY);
-        await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+      let shouldClearTokens = response.status === 401 || response.status === 403;
+
+      // Some backends return 400 for invalid/expired refresh tokens.
+      if (!shouldClearTokens && response.status === 400) {
+        const body = await response.json().catch(() => ({}));
+        const msg = String(body?.error || body?.message || '').toLowerCase();
+        if (msg.includes('refresh token') || msg.includes('invalid') || msg.includes('expired')) {
+          shouldClearTokens = true;
+        }
+      }
+
+      // Re-read SecureStore before clearing. A concurrent refresh may have already
+      // succeeded and stored a new token. Only wipe if the stored token still matches
+      // the one that just failed.
+      if (shouldClearTokens) {
+        const storedNow = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+        if (storedNow === refreshToken) {
+          await SecureStore.deleteItemAsync(TOKEN_KEY);
+          await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+        }
       }
       return null;
     }

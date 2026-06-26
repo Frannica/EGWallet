@@ -34,7 +34,7 @@ type AuthState = {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, region?: string) => Promise<void>;
   signOut: () => Promise<void>;
-  handleTokenExpired: () => Promise<void>;
+  handleTokenExpired: () => Promise<boolean>;
   updatePreferredCurrency: (currency: string) => Promise<void>;
   updateAutoConvert: (enabled: boolean) => Promise<void>;
   updateUsername: (username: string) => void;
@@ -113,11 +113,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Called by screens when a 401 "Invalid token" is received.
   // Tries to silently refresh; if that fails, signs the user out so the
   // login screen is shown automatically by AppNavigator.
-  async function handleTokenExpired() {
+  async function handleTokenExpired(): Promise<boolean> {
     const refreshed = await tryRefreshToken();
-    if (!refreshed) {
-      await signOut();
+    if (refreshed) {
+      return true;
     }
+    // Keep the user signed in on transient network failures. If refresh token
+    // still exists locally, the token is not conclusively invalid yet.
+    const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY).catch(() => null);
+    if (refreshToken) return false;
+    await signOut();
+    return false;
   }
 
   async function signIn(email: string, password: string) {
