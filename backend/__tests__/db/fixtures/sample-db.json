@@ -1,0 +1,127 @@
+{
+  "_dbVersion": 7,
+  "users": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "email": "phase0@example.com",
+      "username": "@phase0",
+      "passwordHash": "$2a$12$phase0hash",
+      "region": "US",
+      "role": "individual",
+      "preferredCurrency": "USD",
+      "autoConvertIncoming": true,
+      "kycTier": 1,
+      "kycStatus": "verified",
+      "kycDocuments": {},
+      "createdAt": 1719310000000,
+      "tokenVersion": 0
+    }
+  ],
+  "wallets": [
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "userId": "11111111-1111-4111-8111-111111111111",
+      "balances": [
+        { "currency": "USD", "amount": 12500 },
+        { "currency": "EUR", "amount": 5000 }
+      ],
+      "holdBalance": {
+        "USD": 1000
+      },
+      "maxLimitUSD": 250000,
+      "createdAt": 1719310000000
+    }
+  ],
+  "transactions": [
+    {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "fromWalletId": "22222222-2222-4222-8222-222222222222",
+      "toWalletId": "22222222-2222-4222-8222-222222222222",
+      "amount": 1000,
+      "currency": "USD",
+      "status": "completed",
+      "timestamp": 1719310005000
+    }
+  ],
+  "paymentRequests": [],
+  "virtualCards": [],
+  "budgets": [],
+  "devices": [],
+  "supportTickets": [],
+  "fraudAlerts": [],
+  "savedContacts": [],
+  "qrCodes": [],
+  "refreshTokens": [
+    {
+      "tokenHash": "tokenhash1",
+      "userId": "11111111-1111-4111-8111-111111111111",
+      "createdAt": 1719310006000
+    }
+  ],
+  "auditLog": [],
+  "employers": [],
+  "employerEmployees": [],
+  "payrollBatches": [],
+  "demoIntents": [],
+  "notifications": [],
+  "passwordResetTokens": [
+    {
+      "tokenHash": "resethash1",
+      "userId": "11111111-1111-4111-8111-111111111111",
+      "expiresAt": 1719313600000,
+      "createdAt": 1719310007000
+    }
+  ],
+  "idempotencyRecords": [
+    {
+      "key": "idem-key-1",
+      "userId": "11111111-1111-4111-8111-111111111111",
+      "response": { "ok": true },
+      "timestamp": 1719310008000
+    }
+  ],
+  "withdrawals": [
+    {
+      "id": "44444444-4444-4444-8444-444444444444",
+      "idempotencyKey": "withdraw-1",
+      "userId": "11111111-1111-4111-8111-111111111111",
+      "walletId": "22222222-2222-4222-8222-222222222222",
+      "amount": 1000,
+      "currency": "USD",
+      "status": "pending_review",
+      "statusHistory": [],
+      "createdAt": 1719310010000
+    }
+  ],
+  "ledger": [
+    {
+      "id": "55555555-5555-4555-8555-555555555555",
+      "withdrawalId": "44444444-4444-4444-8444-444444444444",
+      "userId": "11111111-1111-4111-8111-111111111111",
+      "walletId": "22222222-2222-4222-8222-222222222222",
+      "currency": "USD",
+      "type": "withdrawal_hold",
+      "amount": 1000,
+      "balanceBefore": 12500,
+      "balanceAfter": 11500,
+      "at": 1719310011000
+    }
+  ],
+  "kycIdentityClaims": {},
+  "payoutLocks": [],
+  "rates": {
+    "base": "USD",
+    "values": {
+      "USD": 1,
+      "EUR": 0.9,
+      "GBP": 0.8,
+      "XAF": 590,
+      "XOF": 590
+    },
+    "updatedAt": 1719310012000
+  },
+  "kyc": [],
+  "fraudReports": [],
+  "device_signup_tracker": [],
+  "paymentRequestsRateLimit": {}
+}

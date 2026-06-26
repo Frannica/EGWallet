@@ -24,3 +24,18 @@ Note: `amount` is expressed in minor units (integer). For example, USD $1.23 sho
 Notes:
 - Data is persisted to `db.json` in this folder. This is intentionally simple for local testing.
 - JWT secret is `dev_secret_change_me` by default. Set `JWT_SECRET` env var to override.
+
+## PostgreSQL Phase 0 Tooling
+
+Phase 0 adds schema + import/parity tooling only. Runtime still uses `db.json`.
+
+Runbook: `docs/postgres-phase0-runbook.md`
+
+Quick commands:
+
+```powershell
+npm run db:migrate
+npm run db:import -- --file .\db.proof-test.json
+npm run db:parity -- --file .\db.proof-test.json --strict
+npm run test:db:phase0
+```
