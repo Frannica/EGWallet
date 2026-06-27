@@ -23,6 +23,7 @@ const SUITES = [
   ['Phase 18 — Money sync + idempotent pay fixes',      require('./regression/phase18.test')],
   ['Phase 19 — Username creation + localized API errors', require('./regression/phase19.test')],
   ['Withdrawal stale FX — SendScreen guard scope', require('./send-withdrawal-stale-rates.node.test.js')],
+  ['KYC upload flow — crop recovery + preview', require('./kyc-upload-flow.node.test.js')],
   ['Money flow — $300 split + idempotent pay',            require('../backend/__tests__/money-flow.test.js')],
 ];
 

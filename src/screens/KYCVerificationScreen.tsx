@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Image } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Image, Modal, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../auth/AuthContext';
@@ -7,6 +7,7 @@ import { API_BASE } from '../api/client';
 import { useLanguage } from '../i18n/LanguageContext';
 import { getApiErrorMessage } from '../utils/apiErrorMessage';
 import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
+import { useFocusEffect } from '@react-navigation/native';
 
 type KYCStatus = 'not_started' | 'pending' | 'under_review' | 'approved' | 'rejected';
 
@@ -19,6 +20,80 @@ type KYCDocument = {
   rejectionReason?: string;
 };
 
+type KYCDocumentType = KYCDocument['type'];
+
+type PendingCapture = {
+  uri: string;
+  mimeType: string;
+  fileSize?: number;
+};
+
+const ALLOWED_DOC_TYPES: KYCDocumentType[] = ['id_card', 'passport', 'drivers_license', 'proof_of_address'];
+const ALLOWED_MIME = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
+
+const IMAGE_PICKER_OPTIONS: ImagePicker.ImagePickerOptions = {
+  mediaTypes: ImagePicker.MediaTypeOptions.Images,
+  allowsEditing: true,
+  aspect: [4, 3],
+  quality: 0.85,
+};
+
+/** Normalize expo-image-picker result to a single asset (or null if canceled). */
+export function normalizePickerAsset(
+  result: ImagePicker.ImagePickerResult | ImagePicker.ImagePickerErrorResult | null | undefined,
+): ImagePicker.ImagePickerAsset | null {
+  if (!result || !('canceled' in result) || result.canceled || !result.assets?.[0]) return null;
+  return result.assets[0];
+}
+
+/** Recover camera/gallery result after Android MainActivity was destroyed mid-picker. */
+export async function recoverAndroidPickerResult(): Promise<ImagePicker.ImagePickerResult | null> {
+  if (Platform.OS !== 'android') return null;
+  try {
+    const pending = await ImagePicker.getPendingResultAsync();
+    if (pending && 'canceled' in pending && !pending.canceled && pending.assets?.[0]) {
+      return pending;
+    }
+  } catch {
+    // Non-fatal — fall through to a fresh picker launch.
+  }
+  return null;
+}
+
+export function validateKycAsset(
+  asset: Pick<ImagePicker.ImagePickerAsset, 'uri' | 'mimeType' | 'fileSize'>,
+  docType: KYCDocumentType,
+): { ok: true; mimeType: string } | { ok: false; reason: 'invalid_doc_type' | 'invalid_mime' | 'invalid_uri' | 'file_too_large' } {
+  if (!ALLOWED_DOC_TYPES.includes(docType)) return { ok: false, reason: 'invalid_doc_type' };
+
+  const mimeType = asset.mimeType?.toLowerCase() ?? 'image/jpeg';
+  if (!ALLOWED_MIME.includes(mimeType)) return { ok: false, reason: 'invalid_mime' };
+
+  if (!asset.uri || (!asset.uri.startsWith('file://') && !asset.uri.startsWith('content://'))) {
+    return { ok: false, reason: 'invalid_uri' };
+  }
+
+  if (asset.fileSize && asset.fileSize > 10 * 1024 * 1024) {
+    return { ok: false, reason: 'file_too_large' };
+  }
+
+  return { ok: true, mimeType };
+}
+
+export function mergeCapturedDocument(
+  documents: KYCDocument[],
+  type: KYCDocumentType,
+  uploadedAt = Date.now(),
+): KYCDocument[] {
+  const newDoc: KYCDocument = {
+    id: Math.random().toString(36).substring(7),
+    type,
+    status: 'under_review',
+    uploadedAt,
+  };
+  return [...documents.filter(d => d.type !== type), newDoc];
+}
+
 export default function KYCVerificationScreen() {
   const auth = useAuth();
   const { t } = useLanguage();
@@ -26,10 +101,29 @@ export default function KYCVerificationScreen() {
   const [documents, setDocuments] = useState<KYCDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [pendingCaptures, setPendingCaptures] = useState<Partial<Record<KYCDocumentType, PendingCapture>>>({});
+  const [sourceModalType, setSourceModalType] = useState<KYCDocumentType | null>(null);
+  const pendingDocTypeRef = useRef<KYCDocumentType | null>(null);
 
   useEffect(() => {
     loadKYCStatus();
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      (async () => {
+        const docType = pendingDocTypeRef.current;
+        if (!docType) return;
+        const pending = await recoverAndroidPickerResult();
+        const asset = normalizePickerAsset(pending);
+        if (cancelled || !asset) return;
+        pendingDocTypeRef.current = null;
+        await onImageSelected(docType, asset);
+      })();
+      return () => { cancelled = true; };
+    }, [auth.token]),
+  );
 
   async function loadKYCStatus() {
     if (!auth.token) { setLoading(false); return; }
@@ -61,8 +155,85 @@ export default function KYCVerificationScreen() {
     }
   }
 
-  async function pickAndUpload(type: KYCDocument['type'], source: 'camera' | 'gallery') {
-    // Request permission
+  async function launchPicker(source: 'camera' | 'gallery'): Promise<ImagePicker.ImagePickerResult | null> {
+    const pending = await recoverAndroidPickerResult();
+    if (pending) return pending;
+
+    return source === 'camera'
+      ? await ImagePicker.launchCameraAsync(IMAGE_PICKER_OPTIONS)
+      : await ImagePicker.launchImageLibraryAsync(IMAGE_PICKER_OPTIONS);
+  }
+
+  async function uploadDocument(type: KYCDocumentType, asset: ImagePicker.ImagePickerAsset, mimeType: string) {
+    if (!auth.token) return;
+
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('document', {
+        uri: asset.uri,
+        type: mimeType,
+        name: `kyc_${type}_${Date.now()}.jpg`,
+      } as any);
+      formData.append('documentType', type);
+
+      const res = await fetchWithTokenRefresh(`${API_BASE}/kyc/upload`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${auth.token}` },
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const apiErr: any = new Error((err as any).error || (err as any).message || 'Upload failed');
+        apiErr.status = res.status;
+        apiErr.errorCode = (err as any).errorCode;
+        throw apiErr;
+      }
+
+      setDocuments(prev => mergeCapturedDocument(prev, type));
+      setPendingCaptures(prev => {
+        const next = { ...prev };
+        delete next[type];
+        return next;
+      });
+      setKycStatus('under_review');
+      Alert.alert(t('kyc.documentSubmittedTitle'), t('kyc.documentSubmittedMsg'));
+    } catch (error: any) {
+      Alert.alert(t('kyc.uploadFailed'), getApiErrorMessage(error, t));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function onImageSelected(type: KYCDocumentType, asset: ImagePicker.ImagePickerAsset) {
+    const validation = validateKycAsset(asset, type);
+    if (!validation.ok) {
+      switch (validation.reason) {
+        case 'invalid_doc_type':
+          Alert.alert(t('kyc.invalidDocType'), t('kyc.invalidDocTypeMsg'));
+          break;
+        case 'invalid_mime':
+          Alert.alert(t('kyc.invalidFileType'), t('kyc.invalidFileTypeMsg'));
+          break;
+        case 'invalid_uri':
+          Alert.alert(t('kyc.invalidImage'), t('kyc.invalidImageMsg'));
+          break;
+        case 'file_too_large':
+          Alert.alert(t('kyc.fileTooLarge'), t('kyc.fileTooLargeMsg'));
+          break;
+      }
+      return;
+    }
+
+    setPendingCaptures(prev => ({
+      ...prev,
+      [type]: { uri: asset.uri, mimeType: validation.mimeType, fileSize: asset.fileSize },
+    }));
+    await uploadDocument(type, asset, validation.mimeType);
+  }
+
+  async function pickDocument(type: KYCDocumentType, source: 'camera' | 'gallery') {
     if (source === 'camera') {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
@@ -77,103 +248,38 @@ export default function KYCVerificationScreen() {
       }
     }
 
-    // Launch picker
-    const result = source === 'camera'
-      ? await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          aspect: [4, 3],
-          quality: 0.85,
-        })
-      : await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          aspect: [4, 3],
-          quality: 0.85,
-        });
-
-    if (result.canceled || !result.assets?.[0]) return;
-
-    const asset = result.assets[0];
-
-    // ── Security: allowlist document types ───────────────────────────────────
-    const ALLOWED_DOC_TYPES: KYCDocument['type'][] = ['id_card', 'passport', 'drivers_license', 'proof_of_address'];
-    if (!ALLOWED_DOC_TYPES.includes(type)) {
-      Alert.alert(t('kyc.invalidDocType'), t('kyc.invalidDocTypeMsg'));
-      return;
-    }
-
-    // ── Security: allowlist MIME types (images only) ──────────────────────────
-    const ALLOWED_MIME = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
-    const mimeType = asset.mimeType?.toLowerCase() ?? 'image/jpeg';
-    if (!ALLOWED_MIME.includes(mimeType)) {
-      Alert.alert(t('kyc.invalidFileType'), t('kyc.invalidFileTypeMsg'));
-      return;
-    }
-
-    // ── Security: validate URI is a local file (not a remote URL) ────────────
-    if (!asset.uri || (!asset.uri.startsWith('file://') && !asset.uri.startsWith('content://'))) {
-      Alert.alert(t('kyc.invalidImage'), t('kyc.invalidImageMsg'));
-      return;
-    }
-
-    // ── Security: file size (max 10 MB) ──────────────────────────────────────
-    if (asset.fileSize && asset.fileSize > 10 * 1024 * 1024) {
-      Alert.alert(t('kyc.fileTooLarge'), t('kyc.fileTooLargeMsg'));
-      return;
-    }
-
-    setUploading(true);
+    pendingDocTypeRef.current = type;
     try {
-      const formData = new FormData();
-      formData.append('document', {
-        uri: asset.uri,
-        type: mimeType,
-        name: `kyc_${type}_${Date.now()}.jpg`,
-      } as any);
-      // Use validated type from allowlist — never trust raw user input
-      formData.append('documentType', type);
-
-      const res = await fetchWithTokenRefresh(`${API_BASE}/kyc/upload`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${auth.token}` },
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error((err as any).error || 'Upload failed');
-      }
-
-      const newDoc: KYCDocument = {
-        id: Math.random().toString(36).substring(7),
-        type,
-        status: 'under_review',
-        uploadedAt: Date.now(),
-      };
-      setDocuments(prev => {
-        const filtered = prev.filter(d => d.type !== type);
-        return [...filtered, newDoc];
-      });
-      setKycStatus('under_review');
-      Alert.alert(t('kyc.documentSubmittedTitle'), t('kyc.documentSubmittedMsg'));
-    } catch (error: any) {
-      Alert.alert(t('kyc.uploadFailed'), getApiErrorMessage(error, t));
+      const result = await launchPicker(source);
+      const asset = normalizePickerAsset(result);
+      if (!asset) return;
+      pendingDocTypeRef.current = null;
+      await onImageSelected(type, asset);
     } finally {
-      setUploading(false);
+      if (pendingDocTypeRef.current === type) {
+        pendingDocTypeRef.current = null;
+      }
     }
   }
 
+  async function pickAndUpload(type: KYCDocumentType, source: 'camera' | 'gallery') {
+    await pickDocument(type, source);
+  }
+
   async function handleUploadDocument(type: KYCDocument['type']) {
-    Alert.alert(
-      getDocumentTypeLabel(type),
-      getDocumentInstructions(type, t),
-      [
-        { text: t('common.cancel'), style: 'cancel' },
-        { text: t('kyc.takePhoto'), onPress: () => pickAndUpload(type, 'camera') },
-        { text: t('kyc.chooseFromGallery'), onPress: () => pickAndUpload(type, 'gallery') },
-      ]
-    );
+    setSourceModalType(type);
+  }
+
+  function closeSourceModal() {
+    setSourceModalType(null);
+  }
+
+  function startPick(source: 'camera' | 'gallery') {
+    const type = sourceModalType;
+    closeSourceModal();
+    if (!type) return;
+    // Defer picker launch until the modal closes — avoids Android losing the crop result.
+    setTimeout(() => { pickDocument(type, source); }, 0);
   }
 
   function getStatusColor(status: KYCStatus): string {
@@ -319,6 +425,11 @@ export default function KYCVerificationScreen() {
                       {getStatusText(doc.status)}
                     </Text>
                   </View>
+                ) : pendingCaptures[type] ? (
+                  <View style={styles.previewRow}>
+                    <Image source={{ uri: pendingCaptures[type]!.uri }} style={styles.previewThumb} />
+                    <Text style={styles.previewText}>{t('kyc.documentCaptured')}</Text>
+                  </View>
                 ) : (
                   <Text style={styles.notUploadedText}>{t('kyc.notUploaded')}</Text>
                 )}
@@ -375,6 +486,35 @@ export default function KYCVerificationScreen() {
           {t('kyc.privacyNote')}
         </Text>
       </View>
+
+      <Modal
+        visible={sourceModalType !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={closeSourceModal}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>
+              {sourceModalType ? getDocumentTypeLabel(sourceModalType) : ''}
+            </Text>
+            {sourceModalType && (
+              <Text style={styles.modalSubtitle}>
+                {getDocumentInstructions(sourceModalType, t)}
+              </Text>
+            )}
+            <TouchableOpacity style={styles.modalAction} onPress={() => startPick('camera')}>
+              <Text style={styles.modalActionText}>{t('kyc.takePhoto')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.modalAction} onPress={() => startPick('gallery')}>
+              <Text style={styles.modalActionText}>{t('kyc.chooseFromGallery')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.modalCancel} onPress={closeSourceModal}>
+              <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -558,6 +698,66 @@ const styles = StyleSheet.create({
   notUploadedText: {
     fontSize: 14,
     color: '#AAB8C2',
+  },
+  previewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  previewThumb: {
+    width: 48,
+    height: 36,
+    borderRadius: 4,
+    backgroundColor: '#E1E8ED',
+  },
+  previewText: {
+    fontSize: 13,
+    color: '#007AFF',
+    flexShrink: 1,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 20,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1C1E21',
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#657786',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  modalAction: {
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  modalActionText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 15,
+  },
+  modalCancel: {
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  modalCancelText: {
+    color: '#657786',
+    fontSize: 15,
+    fontWeight: '600',
   },
   rejectionNote: {
     flex: 1,
