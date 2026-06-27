@@ -95,11 +95,12 @@ export default function SendScreen() {
     }, [auth.token])
   );
 
-  // Debounced FX lookup: when wallet ID or amount/currency changes, fetch quote
+  // Debounced FX lookup: transfer tab only — withdrawals never need FX quotes.
   useEffect(() => {
     if (fxDebounceRef.current) clearTimeout(fxDebounceRef.current);
     setFxQuote(null);
     setReceiverCurrency(null);
+    if (activeTab !== 'transfer') return;
     const isAtUsername = toWalletId.trim().startsWith('@');
     if (!toWalletId.trim() || (!isAtUsername && toWalletId.length < 8) || !auth.token) return;
     let cancelled = false;
@@ -120,7 +121,7 @@ export default function SendScreen() {
       }
     }, 500);
     return () => { cancelled = true; };
-  }, [toWalletId, currency, amount, auth.token]);
+  }, [toWalletId, currency, amount, auth.token, activeTab]);
 
   async function refreshAndSetWallets(): Promise<Array<any>> {
     if (!auth.token) return wallets;
@@ -166,6 +167,15 @@ export default function SendScreen() {
     if (!fromWalletId) return Alert.alert(t('common.error'), t('send.selectSourceWallet'));
     const amt = parseFloat(amount.replace(/,/g, ''));
     if (!amt || amt <= 0) return Alert.alert(t('common.error'), t('send.enterValidAmount'));
+
+    // Prevent stale-rate cross-currency transfers before users reach confirmation.
+    if (
+      activeTab === 'transfer' &&
+      preview?.isCrossCurrency &&
+      fxQuote?.ratesStale
+    ) {
+      return Alert.alert(t('send.transactionFailed'), t('exchange.ratesUnavailable'));
+    }
     
     if (activeTab === 'transfer') {
       if (!toWalletId.trim()) return Alert.alert(t('common.error'), t('send.enterDestWalletId'));
@@ -402,7 +412,11 @@ export default function SendScreen() {
       
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || 'Withdrawal failed');
+        const err: any = new Error(error.error || error.message || 'Withdrawal failed');
+        err.status = response.status;
+        err.errorCode = error.errorCode;
+        err.code = error.code;
+        throw err;
       }
       
       // Debit local balance and log locally (backend stores withdrawals
@@ -468,7 +482,7 @@ export default function SendScreen() {
 
     // FX-aware receiver amount
     const effectiveToCurrency = receiverCurrency || currency;
-    const isCrossCurrency = effectiveToCurrency !== currency;
+    const isCrossCurrency = activeTab === 'transfer' && effectiveToCurrency !== currency;
 
     // For transfers: FX fee (1.15%) is taken from the converted amount on receiver's side
     const fxFeeRate = isCrossCurrency && activeTab === 'transfer' ? FX_CONVERSION_RATE : 0;
@@ -528,6 +542,15 @@ export default function SendScreen() {
     if (!amt || amt <= 0) return Alert.alert(t('common.error'), t('send.enterValidAmount'));
     const amountMinor = majorToMinor(amt, currency);
     if (!toWalletId) return Alert.alert(t('common.error'), t('send.enterDestWalletId'));
+
+    // Safety guard: block cross-currency transfer confirmation if the quote is stale.
+    if (
+      activeTab === 'transfer' &&
+      preview?.isCrossCurrency &&
+      fxQuote?.ratesStale
+    ) {
+      return Alert.alert(t('send.transactionFailed'), t('exchange.ratesUnavailable'));
+    }
     
     // Check scam acknowledgement for high amounts
     if (isHighAmount() && !scamAcknowledged) {
@@ -1072,7 +1095,12 @@ export default function SendScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.tab, activeTab === 'withdraw' && styles.tabActive]}
-            onPress={() => setActiveTab('withdraw')}
+            onPress={() => {
+              setActiveTab('withdraw');
+              setToWalletId('');
+              setReceiverCurrency(null);
+              setFxQuote(null);
+            }}
           >
             <Ionicons name="cash-outline" size={18} color={activeTab === 'withdraw' ? '#1565C0' : '#657786'} />
             <Text style={[styles.tabText, activeTab === 'withdraw' && styles.tabTextActive]}>{t('wallet.withdraw')}</Text>
