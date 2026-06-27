@@ -44,7 +44,9 @@ const { normalizeEmail } = require('validator');
 const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const { createWithdrawal, advanceToProcessing, markWithdrawalFailed, markWithdrawalPaid } = require('./withdrawalEngine');
-const { router: adminWithdrawalsRouter, adminLoginHandler, adminLogoutHandler } = require('./adminWithdrawals');
+const { router: adminWithdrawalsRouter, adminAuth, adminLoginHandler, adminLogoutHandler } = require('./adminWithdrawals');
+const adminKycRouter = require('./adminKyc');
+const { kycUploadMiddleware, handleKycUpload } = require('./kycUpload');
 const { executePayout, payoutRouter } = require('./payoutProviders');
 const {
   loadAppState,
@@ -3783,6 +3785,7 @@ app.post('/transactions', authMiddleware, async (req, res) => {
 app.post('/admin/login',  adminLoginLimiter, adminLoginHandler);
 app.post('/admin/logout', adminLoginLimiter, adminLogoutHandler);
 app.use('/admin/withdrawals', adminWithdrawalsRouter);
+app.use('/admin/kyc', adminKycRouter);
 
 // Withdrawals to bank/mobile money
 app.post('/withdrawals', authMiddleware, async (req, res) => {
@@ -6514,37 +6517,8 @@ app.get('/kyc/status', authMiddleware, (req, res) => {
   });
 });
 
-// Upload KYC document (simplified for demo)
-app.post('/kyc/upload', authMiddleware, (req, res) => {
-  const db = loadAppState();
-  if (!db.kyc) db.kyc = [];
-  
-  const { documentType } = req.body;
-  if (!documentType) return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
-  
-  let userKyc = db.kyc.find(k => k.userId === req.user.userId);
-  if (!userKyc) {
-    userKyc = {
-      userId: req.user.userId,
-      status: 'under_review',
-      documents: []
-    };
-    db.kyc.push(userKyc);
-  }
-  
-  const newDoc = {
-    id: uuidv4(),
-    type: documentType,
-    status: 'under_review',
-    uploadedAt: Date.now()
-  };
-  
-  userKyc.documents.push(newDoc);
-  userKyc.status = 'under_review';
-  
-  saveAppState(db);
-  res.json({ success: true, document: newDoc });
-});
+// Upload KYC document — multipart image stored privately; metadata in PostgreSQL.
+app.post('/kyc/upload', authMiddleware, kycUploadMiddleware, handleKycUpload);
 
 // ==================== SMILE IDENTITY KYC VERIFICATION ====================
 // POST /kyc/verify

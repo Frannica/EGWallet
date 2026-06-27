@@ -533,4 +533,4 @@ function adminLoginHandler(req, res) {
   res.json({ token, expiresAt });
 }
 
-module.exports = { router, adminLoginHandler, adminLogoutHandler };
+module.exports = { router, adminAuth, adminLoginHandler, adminLogoutHandler };
