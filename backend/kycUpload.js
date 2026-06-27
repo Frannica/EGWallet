@@ -125,6 +125,8 @@ async function handleKycUpload(req, res) {
   const documentId = uuidv4();
   const storageKey = uuidv4();
   const sizeBytes = req.file.buffer.length;
+  const db = loadAppState();
+  const authedUser = db.users.find((user) => user.id === req.user.userId);
 
   try {
     const saved = await insertKycDocument({
@@ -136,6 +138,9 @@ async function handleKycUpload(req, res) {
       sizeBytes,
       fileBuffer: req.file.buffer,
       status: 'under_review',
+      userEmail: authedUser?.email,
+      userRegion: authedUser?.region,
+      userRole: authedUser?.role,
     });
 
     const responseDoc = {

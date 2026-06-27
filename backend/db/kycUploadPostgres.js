@@ -54,6 +54,15 @@ function toPublicDocument(doc) {
   };
 }
 
+async function ensureRelationalUser(client, { userId, email, region, role }) {
+  await client.query(
+    `INSERT INTO users (id, email, password_hash, region, role, created_at)
+     VALUES ($1, $2, 'kyc-upload', $3, $4, NOW())
+     ON CONFLICT (id) DO NOTHING`,
+    [userId, email || `${userId}@users.local`, region || 'US', role || 'individual'],
+  );
+}
+
 async function insertKycDocument({
   id,
   userId,
@@ -63,12 +72,21 @@ async function insertKycDocument({
   sizeBytes,
   fileBuffer,
   status = 'under_review',
+  userEmail,
+  userRegion,
+  userRole,
 }) {
   await ensureKycDocumentsTable();
   writeEncryptedDocument(storageKey, fileBuffer);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    await ensureRelationalUser(client, {
+      userId,
+      email: userEmail,
+      region: userRegion,
+      role: userRole,
+    });
     const result = await client.query(
       `INSERT INTO kyc_documents (
         id, user_id, document_type, storage_key, mime_type, size_bytes, status, uploaded_at
