@@ -25,6 +25,43 @@ interface PaymentMethod {
 // Sends are FREE; FX fee is applied on cross-currency conversion (backend)
 const FEE_PERCENTAGE = 0;
 
+/** Withdrawals debit the selected wallet currency only — no FX conversion path exists. */
+export function withdrawalRequiresFxConversion(_tab: 'transfer' | 'withdraw'): boolean {
+  return false;
+}
+
+/** HARD RULE: /fx-quote is transfer-only; the Withdraw tab must never fetch quotes. */
+export function shouldFetchTransferFxQuote(tab: 'transfer' | 'withdraw'): boolean {
+  return tab === 'transfer';
+}
+
+/** HARD RULE: stale FX blocks transfer confirm only when conversion is actually required. */
+export function shouldBlockForStaleFxQuote(
+  tab: 'transfer' | 'withdraw',
+  isCrossCurrency: boolean,
+  ratesStale: boolean | undefined,
+): boolean {
+  if (tab !== 'transfer' || !isCrossCurrency) return false;
+  return !!ratesStale;
+}
+
+export function computePreviewCrossCurrency(
+  tab: 'transfer' | 'withdraw',
+  senderCurrency: string,
+  receiverCurrency: string | null,
+): boolean {
+  if (tab !== 'transfer') return false;
+  return (receiverCurrency || senderCurrency) !== senderCurrency;
+}
+
+export function effectivePreviewReceiverCurrency(
+  tab: 'transfer' | 'withdraw',
+  senderCurrency: string,
+  receiverCurrency: string | null,
+): string {
+  return tab === 'transfer' ? (receiverCurrency || senderCurrency) : senderCurrency;
+}
+
 export default function SendScreen() {
   const auth = useAuth();
   const { t } = useLanguage();
@@ -80,6 +117,22 @@ export default function SendScreen() {
   const [fxQuote, setFxQuote] = useState<FxQuote | null>(null);
   const [showAllCurrencies, setShowAllCurrencies] = useState(false);
   const fxDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** HARD RULE: switching to Withdraw clears transfer-only FX state. */
+  function clearTransferFxState() {
+    setToWalletId('');
+    setReceiverCurrency(null);
+    setFxQuote(null);
+  }
+
+  function getWithdrawalConfirmErrorMessage(e: any): string {
+    const msg = getApiErrorMessage(e, t);
+    if (withdrawalRequiresFxConversion(activeTab)) return msg;
+    if (msg === t('exchange.ratesUnavailable')) {
+      return e?.message || t('send.backendUnavailable');
+    }
+    return msg;
+  }
   
   const navigation = useNavigation();
 
@@ -100,7 +153,7 @@ export default function SendScreen() {
     if (fxDebounceRef.current) clearTimeout(fxDebounceRef.current);
     setFxQuote(null);
     setReceiverCurrency(null);
-    if (activeTab !== 'transfer') return;
+    if (!shouldFetchTransferFxQuote(activeTab)) return;
     const isAtUsername = toWalletId.trim().startsWith('@');
     if (!toWalletId.trim() || (!isAtUsername && toWalletId.length < 8) || !auth.token) return;
     let cancelled = false;
@@ -112,6 +165,8 @@ export default function SendScreen() {
         const amt = parseFloat(amount.replace(/,/g, ''));
         if (amt > 0 && toCurrency !== currency) {
           const amtMinor = majorToMinor(amt, currency);
+          // HARD RULE: never call /fx-quote unless still on the transfer tab.
+          if (cancelled || !shouldFetchTransferFxQuote(activeTab)) return;
           const quote = await fetchFxQuote(auth.token!, currency, toCurrency, amtMinor);
           if (cancelled) return;
           setFxQuote(quote);
@@ -168,12 +223,7 @@ export default function SendScreen() {
     const amt = parseFloat(amount.replace(/,/g, ''));
     if (!amt || amt <= 0) return Alert.alert(t('common.error'), t('send.enterValidAmount'));
 
-    // Prevent stale-rate cross-currency transfers before users reach confirmation.
-    if (
-      activeTab === 'transfer' &&
-      preview?.isCrossCurrency &&
-      fxQuote?.ratesStale
-    ) {
+    if (shouldBlockForStaleFxQuote(activeTab, !!preview?.isCrossCurrency, fxQuote?.ratesStale)) {
       return Alert.alert(t('send.transactionFailed'), t('exchange.ratesUnavailable'));
     }
     
@@ -460,7 +510,7 @@ export default function SendScreen() {
     } catch (e: any) {
       // Release the pending lock on failure so user can retry
       await clearPendingWithdrawal(currency, amountMinor);
-      Alert.alert(t('send.transactionFailed'), getApiErrorMessage(e, t));
+      Alert.alert(t('send.transactionFailed'), getWithdrawalConfirmErrorMessage(e));
       return;
     } finally {
       setLoading(false);
@@ -480,9 +530,9 @@ export default function SendScreen() {
     const total = amt + (activeTab === 'withdraw' ? 0 : 0); // total deducted from wallet = amount
     const netSent = amt - fee; // amount after withdrawal fee (or same as amt for transfers)
 
-    // FX-aware receiver amount
-    const effectiveToCurrency = receiverCurrency || currency;
-    const isCrossCurrency = activeTab === 'transfer' && effectiveToCurrency !== currency;
+    // FX-aware receiver amount — withdraw tab ignores leftover transfer FX state.
+    const effectiveToCurrency = effectivePreviewReceiverCurrency(activeTab, currency, receiverCurrency);
+    const isCrossCurrency = computePreviewCrossCurrency(activeTab, currency, receiverCurrency);
 
     // For transfers: FX fee (1.15%) is taken from the converted amount on receiver's side
     const fxFeeRate = isCrossCurrency && activeTab === 'transfer' ? FX_CONVERSION_RATE : 0;
@@ -543,12 +593,7 @@ export default function SendScreen() {
     const amountMinor = majorToMinor(amt, currency);
     if (!toWalletId) return Alert.alert(t('common.error'), t('send.enterDestWalletId'));
 
-    // Safety guard: block cross-currency transfer confirmation if the quote is stale.
-    if (
-      activeTab === 'transfer' &&
-      preview?.isCrossCurrency &&
-      fxQuote?.ratesStale
-    ) {
+    if (shouldBlockForStaleFxQuote(activeTab, !!preview?.isCrossCurrency, fxQuote?.ratesStale)) {
       return Alert.alert(t('send.transactionFailed'), t('exchange.ratesUnavailable'));
     }
     
@@ -970,14 +1015,14 @@ export default function SendScreen() {
               </View>
             )}
             {/* FX rate */}
-            {preview.isCrossCurrency && preview.rateDisplay && (
+            {activeTab === 'transfer' && preview.isCrossCurrency && preview.rateDisplay && (
               <View style={styles.amountRow}>
                 <Text style={[styles.amountLabel, { color: '#7C3AED', fontSize: 12 }]}>{t('send.fxRate')}</Text>
                 <Text style={[styles.amountLabel, { color: '#7C3AED', fontSize: 12 }]}>{preview.rateDisplay}</Text>
               </View>
             )}
             {/* Recipient currency */}
-            {preview.isCrossCurrency && (
+            {activeTab === 'transfer' && preview.isCrossCurrency && (
               <View style={styles.amountRow}>
                 <Text style={[styles.amountLabel, { color: '#7C3AED' }]}>{t('send.recipientCurrency')}</Text>
                 <Text style={[styles.amountLabel, { color: '#7C3AED' }]}>{preview.receiverCurrency}</Text>
@@ -1097,9 +1142,7 @@ export default function SendScreen() {
             style={[styles.tab, activeTab === 'withdraw' && styles.tabActive]}
             onPress={() => {
               setActiveTab('withdraw');
-              setToWalletId('');
-              setReceiverCurrency(null);
-              setFxQuote(null);
+              clearTransferFxState();
             }}
           >
             <Ionicons name="cash-outline" size={18} color={activeTab === 'withdraw' ? '#1565C0' : '#657786'} />
