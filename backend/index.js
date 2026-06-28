@@ -3982,7 +3982,7 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
         error: pgErr.message,
         userId: req.user.userId,
       });
-      return res.status(500).json({ error: pgErr.message });
+      return res.status(500).json({ error: t('error_transaction_persist', req.lang || 'en') });
     }
   }
 
@@ -4761,7 +4761,7 @@ app.post('/deposits/confirm', authMiddleware,
           intentId,
           userId: req.user.userId,
         });
-        return res.status(500).json({ error: t('error_internal', req.lang || 'en'), message: persistErr.message });
+        return res.status(500).json({ error: t('error_transaction_persist', req.lang || 'en') });
       }
     } else {
       saveAppState(db);
@@ -5162,7 +5162,34 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
     return; // employer path handled fully inside mutex; prevent fall-through
   }
 
-  // Non-employer (personal) request path — unchanged.
+  // Non-employer (personal) request path — block duplicate pending requests within 24h.
+  const PERSONAL_DUPLICATE_WINDOW_MS = 24 * 60 * 60 * 1000;
+  const normalizedPersonalCur = (currency || '').toUpperCase();
+  const duplicatePersonal = (db.paymentRequests || []).find(r =>
+    r.requesterId === req.user.userId &&
+    r.type !== 'payroll_request' &&
+    !r.targetEmployerId &&
+    !r.employerId &&
+    r.status === 'pending' &&
+    r.amount === amount &&
+    (r.currency || '').toUpperCase() === normalizedPersonalCur &&
+    (r.recipientUserId || null) === (recipientUserId || null) &&
+    (Date.now() - (r.createdAt || 0)) < PERSONAL_DUPLICATE_WINDOW_MS
+  );
+  if (duplicatePersonal) {
+    logger.warn('Duplicate personal payment request detected', {
+      requesterId: req.user.userId,
+      amount,
+      currency,
+      recipientUserId: recipientUserId || null,
+      existingRequestId: duplicatePersonal.id,
+    });
+    return res.status(400).json({
+      error: t('error_duplicate_request', req.lang || 'en'),
+      existingRequestId: duplicatePersonal.id,
+    });
+  }
+
   db.paymentRequests.push(request);
   saveAppState(db);
 
