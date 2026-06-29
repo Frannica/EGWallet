@@ -1,6 +1,6 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "npm install"
+buildCommand = "npm install && npm install --prefix ../admin-dashboard && npm run build --prefix ../admin-dashboard"
 
 [deploy]
 startCommand = "npm start"
