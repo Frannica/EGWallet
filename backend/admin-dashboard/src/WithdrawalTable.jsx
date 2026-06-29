@@ -41,6 +41,7 @@ export default function WithdrawalTable({ onSelect }) {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
+  const [error, setError] = useState('');
 
   const load = useCallback(async (pageNum = page) => {
     setLoading(true);

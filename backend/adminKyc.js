@@ -16,25 +16,39 @@ const { logAdminAction } = require('./adminAudit');
 const router = express.Router();
 
 function syncUserKycInAppState(userId, { kycStatus, kycTier }) {
-  const db = loadAppState();
-  const user = (db.users || []).find((u) => u.id === userId);
-  if (!user) return null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const db = loadAppState();
+    const user = (db.users || []).find((u) => u.id === userId);
+    if (!user) return null;
 
-  user.kycStatus = kycStatus;
-  user.kycTier = kycTier;
-  user.kycUpdatedAt = Date.now();
+    user.kycStatus = kycStatus;
+    user.kycTier = kycTier;
+    user.kycUpdatedAt = Date.now();
 
-  if (!db.kyc) db.kyc = [];
-  let kycEntry = db.kyc.find((k) => k.userId === userId);
-  if (!kycEntry) {
-    kycEntry = { userId, status: kycStatus, documents: [] };
-    db.kyc.push(kycEntry);
-  } else {
-    kycEntry.status = kycStatus;
+    if (!db.kyc) db.kyc = [];
+    let kycEntry = db.kyc.find((k) => k.userId === userId);
+    if (!kycEntry) {
+      kycEntry = { userId, status: kycStatus, documents: [] };
+      db.kyc.push(kycEntry);
+    } else {
+      kycEntry.status = kycStatus;
+      if (Array.isArray(kycEntry.documents)) {
+        kycEntry.documents = kycEntry.documents.map((doc) => ({
+          ...doc,
+          status: kycStatus,
+          reviewedAt: Date.now(),
+        }));
+      }
+    }
+
+    try {
+      saveAppState(db);
+      return user;
+    } catch (error) {
+      if (!String(error.message).includes('DB_VERSION_CONFLICT') || attempt === 2) throw error;
+    }
   }
-
-  saveAppState(db);
-  return user;
+  return null;
 }
 
 router.get('/pending', adminAuth, requirePermission('kyc:read'), async (req, res) => {

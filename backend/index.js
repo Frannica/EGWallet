@@ -6612,19 +6612,41 @@ app.post('/devices/:id/trust', authMiddleware, (req, res) => {
   res.json({ success: true });
 });
 
-// Get KYC status
-app.get('/kyc/status', authMiddleware, (req, res) => {
+// Get KYC status — user.kycStatus is authoritative after admin approval; PG docs supplement list
+app.get('/kyc/status', authMiddleware, async (req, res) => {
   const db = loadAppState();
-  if (!db.kyc) db.kyc = [];
-  
-  const userKyc = db.kyc.find(k => k.userId === req.user.userId);
-  if (!userKyc) {
-    return res.json({ status: 'not_started', documents: [] });
+  const user = db.users.find((u) => u.id === req.user.userId);
+  if (!user) {
+    return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
   }
-  
+
+  const userKyc = (db.kyc || []).find((k) => k.userId === req.user.userId);
+  let documents = userKyc?.documents || [];
+
+  try {
+    const { listKycDocuments } = require('./db/kycUploadPostgres');
+    const pgDocs = await listKycDocuments({ userId: req.user.userId });
+    if (pgDocs.length > 0) {
+      documents = pgDocs.map((doc) => ({
+        id: doc.id,
+        type: doc.documentType,
+        status: doc.status,
+        uploadedAt: doc.uploadedAt,
+        reviewedAt: doc.reviewedAt || undefined,
+        rejectionReason: doc.rejectionReason || undefined,
+      }));
+    }
+  } catch (_pgErr) {
+    // Fall back to app-state document list.
+  }
+
+  let status = user.kycStatus || userKyc?.status || 'not_started';
+  if (status === 'pending_verification') status = 'pending';
+
   res.json({
-    status: userKyc.status,
-    documents: userKyc.documents || []
+    status,
+    documents,
+    kycTier: user.kycTier ?? 0,
   });
 });
 
