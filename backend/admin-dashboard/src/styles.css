@@ -483,6 +483,26 @@ body {
   margin-bottom: 8px;
 }
 
+.wallet-id-label {
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.wallet-balance-grid {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid #e4e7ec;
+  border-radius: 6px;
+}
+
+.wallet-balance-grid .balance-zero td {
+  color: #8a8f98;
+}
+
+.filter-group .form-select option {
+  font-size: 13px;
+}
+
 .flag-list { list-style: none; }
 .flag-item {
   padding: 8px 10px;

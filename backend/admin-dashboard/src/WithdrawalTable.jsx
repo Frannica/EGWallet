@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { fetchWithdrawals } from './api';
+import { currencyFilterOptions } from './currencies';
 
 const STATUS_OPTIONS = ['', 'pending_review', 'pending', 'submitted', 'approved', 'processing', 'paid', 'completed', 'failed', 'reversed', 'rejected'];
-const CURRENCY_OPTIONS = ['', 'XAF', 'XOF', 'EUR', 'USD', 'GBP'];
+const CURRENCY_OPTIONS = currencyFilterOptions('All (queue tab filter)');
 
 const STATUS_BADGE = {
   pending_review: 'badge-pending',
@@ -138,7 +139,7 @@ export default function WithdrawalTable({ onSelect }) {
           <label className="form-label">Currency</label>
           <select className="form-select" value={filterCurrency} onChange={(e) => { setFilterCurrency(e.target.value); setPage(1); }}>
             {CURRENCY_OPTIONS.map((c) => (
-              <option key={c || 'all'} value={c}>{c || 'All'}</option>
+              <option key={c.value || 'all'} value={c.value}>{c.label}</option>
             ))}
           </select>
         </div>

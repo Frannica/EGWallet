@@ -13,6 +13,7 @@ import {
   hasPermission,
 } from './api';
 import { confirmAction, copyText, showToast } from './utils/ui';
+import { normalizeWalletBalances } from './currencies';
 import KycDocumentViewer from './components/KycDocumentViewer';
 
 function formatDate(ts) {
@@ -197,10 +198,27 @@ export default function UserDetail({ userId, onBack, onReviewKyc, onViewTimeline
         <h3>Wallet Balances <span className="read-only-tag">Read-only</span></h3>
         {wallets.map((wallet) => (
           <div key={wallet.id} className="wallet-card">
-            <div className="mono">{wallet.id}</div>
-            {(wallet.balances || []).map((b) => (
-              <div key={b.currency}>{formatAmount(b.amount, b.currency)}</div>
-            ))}
+            <div className="mono wallet-id-label">{wallet.id}</div>
+            <div className="wallet-balance-grid">
+              <table className="data-table compact">
+                <thead>
+                  <tr>
+                    <th>Currency</th>
+                    <th>Name</th>
+                    <th>Balance (minor units)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {normalizeWalletBalances(wallet.balances).map((b) => (
+                    <tr key={b.currency} className={b.amount === 0 ? 'balance-zero' : ''}>
+                      <td className="mono">{b.currency}</td>
+                      <td>{b.name}</td>
+                      <td>{formatAmount(b.amount, b.currency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         ))}
         {wallets.length === 0 && <p className="muted">No wallets.</p>}
