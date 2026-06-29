@@ -16,6 +16,28 @@ function formatDate(iso) {
   return new Date(iso).toLocaleString();
 }
 
+function formatAmount(amount, currency) {
+  if (amount == null || Number.isNaN(Number(amount))) return '—';
+  return `${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency || ''}`.trim();
+}
+
+function normalizeStatusHistory(history) {
+  if (!Array.isArray(history)) return [];
+  return history.map((entry, index) => {
+    if (entry.to || entry.from) return entry;
+    const previous = index > 0 ? (history[index - 1].to || history[index - 1].status) : null;
+    return {
+      from: previous,
+      to: entry.status,
+      at: entry.at,
+      by: entry.by,
+      note: entry.note,
+    };
+  });
+}
+
+const TERMINAL_STATUSES = new Set(['failed', 'reversed', 'paid', 'completed']);
+
 function Row({ label, value }) {
   return (
     <tr>
@@ -87,7 +109,9 @@ export default function WithdrawalDetails({ id, onBack }) {
   if (!data) return null;
 
   const w = data.withdrawal || data;
-  const ledger = data.ledgerEntries || [];
+  const ledger = data.ledgerEntries || data.ledger || [];
+  const statusHistory = normalizeStatusHistory(w.statusHistory);
+  const isTerminal = TERMINAL_STATUSES.has(w.status);
 
   return (
     <div>
@@ -117,6 +141,9 @@ export default function WithdrawalDetails({ id, onBack }) {
             {(w.status === 'failed' || w.status === 'reversed') && (
               <span className="muted small">Terminal state — no further transitions</span>
             )}
+            {isTerminal && w.status !== 'failed' && w.status !== 'reversed' && (
+              <span className="muted small">Completed — read only</span>
+            )}
           </div>
         )}
       </div>
@@ -129,7 +156,7 @@ export default function WithdrawalDetails({ id, onBack }) {
             <tbody>
               <Row label="Withdrawal ID" value={<span className="mono">{w.id}</span>} />
               <Row label="User ID" value={<span className="mono">{w.userId}</span>} />
-              <Row label="Amount" value={`${Number(w.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })} ${w.currency}`} />
+              <Row label="Amount" value={formatAmount(w.amount, w.currency)} />
               <Row label="Method" value={w.method} />
               <Row label="Country" value={w.country} />
               <Row label="Created" value={formatDate(w.createdAt)} />
@@ -163,7 +190,7 @@ export default function WithdrawalDetails({ id, onBack }) {
         </section>
 
         {/* Status history */}
-        {w.statusHistory && w.statusHistory.length > 0 && (
+        {statusHistory.length > 0 && (
           <section className="detail-section">
             <h3 className="section-title">Status History</h3>
             <table className="detail-table">
@@ -177,10 +204,10 @@ export default function WithdrawalDetails({ id, onBack }) {
                 </tr>
               </thead>
               <tbody>
-                {w.statusHistory.map((h, i) => (
+                {statusHistory.map((h, i) => (
                   <tr key={i}>
                     <td><span className={`badge ${STATUS_BADGE[h.from] || ''}`}>{h.from || '—'}</span></td>
-                    <td><span className={`badge ${STATUS_BADGE[h.to] || ''}`}>{h.to}</span></td>
+                    <td><span className={`badge ${STATUS_BADGE[h.to] || ''}`}>{h.to || '—'}</span></td>
                     <td className="mono small">{h.by || '—'}</td>
                     <td>{h.note || '—'}</td>
                     <td>{formatDate(h.at)}</td>

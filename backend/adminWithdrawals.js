@@ -15,6 +15,20 @@ const { adminTransition, markWithdrawalPaid, markWithdrawalFailed } = require('.
 const { payoutRouter } = require('./payoutProviders');
 const { commitWithdrawalStateUpdate } = require('./db/withdrawalsPostgres');
 const { loadAppState, saveAppState } = require('./db/appStateStore');
+const { logAdminAction } = require('./adminAudit');
+
+const QUEUE_STATUS_MAP = {
+  pending: ['pending_review', 'pending', 'submitted'],
+  processing: ['processing', 'approved'],
+  failed: ['failed', 'reversed', 'rejected'],
+  completed: ['paid', 'completed'],
+};
+
+function filterByQueue(list, queue) {
+  const statuses = QUEUE_STATUS_MAP[queue];
+  if (!statuses) return list;
+  return list.filter((w) => statuses.includes(w.status));
+}
 
 // ─── PII sanitizer ────────────────────────────────────────────────────────────
 // Strip encrypted ciphertext and regulated PII from withdrawal objects before
@@ -33,26 +47,33 @@ function sanitizeAdmin(w) {
 }
 
 // ─── GET /admin/withdrawals ───────────────────────────────────────────────────
-// Optional query: ?status=pending_review&currency=XAF&userId=xxx
+// Query: ?queue=pending|processing|failed|completed OR ?status=pending_review
+//        &currency=XAF&userId=xxx&page=1&limit=20
 router.get('/', adminAuth, requirePermission('withdrawals:read'), (req, res) => {
   const db = loadAppState();
   let list = db.withdrawals || [];
 
-  if (req.query.status)   list = list.filter(w => w.status   === req.query.status);
-  if (req.query.currency) list = list.filter(w => w.currency === req.query.currency);
-  if (req.query.userId)   list = list.filter(w => w.userId   === req.query.userId);
+  if (req.query.queue) list = filterByQueue(list, req.query.queue);
+  else if (req.query.status) list = list.filter((w) => w.status === req.query.status);
+  if (req.query.currency) list = list.filter((w) => w.currency === req.query.currency);
+  if (req.query.userId) list = list.filter((w) => w.userId === req.query.userId);
 
-  // Newest first
-  list = list.slice().sort((a, b) => b.createdAt - a.createdAt);
+  list = list.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
-  // Pagination
   const totalItems = list.length;
-  const limit      = Math.max(1, parseInt(req.query.limit, 10)  || 20);
-  const page       = Math.max(1, parseInt(req.query.page,  10)  || 1);
+  const limit = Math.max(1, parseInt(req.query.limit, 10) || 20);
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
   const totalPages = Math.max(1, Math.ceil(totalItems / limit));
-  const safePage   = Math.min(page, totalPages);
-  const start      = (safePage - 1) * limit;
-  const data       = list.slice(start, start + limit).map(sanitizeAdmin);
+  const safePage = Math.min(page, totalPages);
+  const start = (safePage - 1) * limit;
+  const data = list.slice(start, start + limit).map(sanitizeAdmin);
+
+  logAdminAction(req, 'WITHDRAWALS_LIST', {
+    queue: req.query.queue || null,
+    status: req.query.status || null,
+    count: data.length,
+    totalItems,
+  });
 
   res.json({ data, page: safePage, totalPages, totalItems, count: data.length, withdrawals: data });
 });
@@ -65,7 +86,8 @@ router.get('/:id', adminAuth, requirePermission('withdrawals:read'), (req, res) 
   if (!w) return res.status(404).json({ error: 'Withdrawal not found' });
 
   const ledger = (db.ledger || []).filter(l => l.withdrawalId === w.id);
-  res.json({ withdrawal: sanitizeAdmin(w), ledger });
+  logAdminAction(req, 'WITHDRAWAL_VIEW', { withdrawalId: w.id, userId: w.userId, status: w.status });
+  res.json({ withdrawal: sanitizeAdmin(w), ledger, ledgerEntries: ledger });
 });
 
 // ─── POST /admin/withdrawals/:id/transition ───────────────────────────────────
@@ -115,6 +137,14 @@ router.post('/:id/transition', adminAuth, adminCsrf, requirePermission('withdraw
       newStatus:    status,
       adminId,
       note:         note || null,
+    });
+
+    logAdminAction(req, 'WITHDRAWAL_TRANSITION', {
+      withdrawalId: req.params.id,
+      fromStatus: previousStatus,
+      toStatus: status,
+      userId: updated.userId,
+      note: note || null,
     });
 
     res.json({ withdrawal: sanitizeAdmin(updated) });

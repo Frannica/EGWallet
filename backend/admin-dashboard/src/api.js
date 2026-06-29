@@ -147,6 +147,7 @@ export async function searchUsers(query) {
 
 export async function fetchWithdrawals(filters = {}) {
   const params = new URLSearchParams();
+  if (filters.queue) params.set('queue', filters.queue);
   if (filters.status) params.set('status', filters.status);
   if (filters.currency) params.set('currency', filters.currency);
   if (filters.userId) params.set('userId', filters.userId);
@@ -154,7 +155,10 @@ export async function fetchWithdrawals(filters = {}) {
   if (filters.limit) params.set('limit', String(filters.limit));
   const qs = params.toString();
   const res = await adminFetch(`/admin/withdrawals${qs ? '?' + qs : ''}`);
-  if (!res.ok) throw new Error(`Server error: ${res.status}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Server error: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -170,7 +174,10 @@ export async function transitionWithdrawal(id, status, note) {
     method: 'POST',
     body: JSON.stringify({ status, note }),
   });
-  if (!res.ok) throw new Error(await res.text() || `Server error: ${res.status}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Server error: ${res.status}`);
+  }
   return res.json();
 }
 
