@@ -306,6 +306,20 @@ export async function fetchUserById(id) {
   return res.json();
 }
 
+export async function fetchUserActivity(userId, category, page = 1, limit = 25) {
+  const params = new URLSearchParams({
+    category,
+    page: String(page),
+    limit: String(limit),
+  });
+  const res = await adminFetch(`/admin/users/${userId}/activity?${params}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Server error: ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function fetchUserTimeline(id) {
   const res = await adminFetch(`/admin/users/${id}/timeline`);
   if (!res.ok) throw new Error(`Server error: ${res.status}`);

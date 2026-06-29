@@ -15,6 +15,8 @@ import {
 import { confirmAction, copyText, showToast } from './utils/ui';
 import { normalizeWalletBalances } from './currencies';
 import KycDocumentViewer from './components/KycDocumentViewer';
+import UserLimitsPanel from './components/UserLimitsPanel';
+import UserActivityPanel from './components/UserActivityPanel';
 
 function formatDate(ts) {
   if (!ts) return '—';
@@ -35,6 +37,7 @@ export default function UserDetail({ userId, onBack, onReviewKyc, onViewTimeline
   const [selectedDocId, setSelectedDocId] = useState(null);
   const [noteText, setNoteText] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const canWrite = hasPermission('users:write');
   const canNote = hasPermission('notes:write');
 
@@ -97,6 +100,18 @@ export default function UserDetail({ userId, onBack, onReviewKyc, onViewTimeline
     });
   }
 
+  async function handleRefresh() {
+    setRefreshing(true);
+    setError('');
+    try {
+      await reload();
+      showToast('User data refreshed', 'success');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setRefreshing(false);
+    }
+  }
   async function handlePreviewDocument(docId) {
     try {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -112,7 +127,7 @@ export default function UserDetail({ userId, onBack, onReviewKyc, onViewTimeline
   if (error && !data) return <p className="error-text">{error}</p>;
   if (!data) return null;
 
-  const { profile, wallets, transactions, paymentRequests, withdrawals, kycDocuments, riskFlags } = data;
+  const { profile, wallets, kycDocuments, riskFlags, limits, activityCounts, syncHint } = data;
   const status = profile.accountStatus || 'active';
 
   return (
@@ -128,10 +143,14 @@ export default function UserDetail({ userId, onBack, onReviewKyc, onViewTimeline
           {hasPermission('users:export') && (
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => exportUserCsv(userId).then(() => showToast('CSV exported', 'success'))}>Export CSV</button>
           )}
+          <button type="button" className="btn btn-secondary btn-sm" onClick={handleRefresh} disabled={refreshing}>
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => onViewTimeline?.(userId)}>Timeline</button>
         </div>
       </div>
       {error && <p className="error-text">{error}</p>}
+      {syncHint && <p className="sync-hint">{syncHint}</p>}
 
       {canWrite && (
         <section className="detail-section support-tools">
@@ -224,62 +243,9 @@ export default function UserDetail({ userId, onBack, onReviewKyc, onViewTimeline
         {wallets.length === 0 && <p className="muted">No wallets.</p>}
       </section>
 
-      <section className="detail-section">
-        <h3>Recent Transactions <span className="read-only-tag">Read-only</span></h3>
-        <div className="table-wrap">
-          <table className="data-table compact">
-            <thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Status</th></tr></thead>
-            <tbody>
-              {(transactions || []).map((tx) => (
-                <tr key={tx.id}>
-                  <td>{formatDate(tx.createdAt)}</td>
-                  <td>{tx.type}</td>
-                  <td>{formatAmount(tx.amount, tx.currency)}</td>
-                  <td>{tx.status || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <UserLimitsPanel limits={limits} />
 
-      <section className="detail-section">
-        <h3>Payment Requests <span className="read-only-tag">Read-only</span></h3>
-        <div className="table-wrap">
-          <table className="data-table compact">
-            <thead><tr><th>Date</th><th>Amount</th><th>Status</th><th>Memo</th></tr></thead>
-            <tbody>
-              {(paymentRequests || []).map((pr) => (
-                <tr key={pr.id}>
-                  <td>{formatDate(pr.createdAt)}</td>
-                  <td>{formatAmount(pr.amount, pr.currency)}</td>
-                  <td>{pr.status}</td>
-                  <td>{pr.memo || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="detail-section">
-        <h3>Withdrawals <span className="read-only-tag">Read-only</span></h3>
-        <div className="table-wrap">
-          <table className="data-table compact">
-            <thead><tr><th>Date</th><th>Amount</th><th>Status</th><th>Method</th></tr></thead>
-            <tbody>
-              {(withdrawals || []).map((w) => (
-                <tr key={w.id}>
-                  <td>{formatDate(w.createdAt)}</td>
-                  <td>{formatAmount(w.amount, w.currency)}</td>
-                  <td>{w.status}</td>
-                  <td>{w.method || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <UserActivityPanel userId={userId} activityCounts={activityCounts} />
 
       <section className="detail-section">
         <h3>KYC Documents</h3>

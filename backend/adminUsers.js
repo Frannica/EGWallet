@@ -6,6 +6,22 @@ const { loadAppState, saveAppState } = require('./db/appStateStore');
 const { listKycDocuments, toPublicDocument } = require('./db/kycUploadPostgres');
 const { listAdminUserNotes, insertAdminUserNote } = require('./db/adminPlatformPostgres');
 const { logAdminAction, auditChange, getAdminAuditLogs } = require('./adminAudit');
+const {
+  ACTIVITY_CATEGORIES,
+  buildLimitSummary,
+  buildActivityCounts,
+  getUserActivity,
+  getUserWalletIds,
+  userTransactions,
+  userPaymentRequests,
+  userWithdrawals,
+  userVirtualCards,
+  userQrCodes,
+  mapTransaction,
+  sanitizeVirtualCard,
+  sanitizeQrCode,
+  paginate,
+} = require('./adminUserHelpers');
 
 const router = express.Router();
 
@@ -326,6 +342,29 @@ router.post('/:id/reset-failed-logins', adminAuth, adminCsrf, requirePermission(
   res.json({ success: true, userId: user.id, failedLoginAttempts: 0 });
 });
 
+router.get('/:id/activity', adminAuth, requirePermission('users:read'), (req, res) => {
+  try {
+    const found = findUserOr404(req, res);
+    if (!found) return;
+    const { db, user } = found;
+    const category = (req.query.category || '').trim();
+    if (!ACTIVITY_CATEGORIES.includes(category)) {
+      return res.status(400).json({
+        error: 'Invalid category',
+        validCategories: ACTIVITY_CATEGORIES,
+      });
+    }
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+    const result = getUserActivity(db, user, category, page, limit);
+    if (!result) return res.status(400).json({ error: 'Unknown category' });
+    logAdminAction(req, 'USER_ACTIVITY_VIEW', { userId: user.id, category, page, totalItems: result.totalItems });
+    res.json({ userId: user.id, ...result });
+  } catch (_error) {
+    res.status(500).json({ error: 'Failed to load activity' });
+  }
+});
+
 router.get('/:id', adminAuth, requirePermission('users:read'), async (req, res) => {
   try {
     const found = findUserOr404(req, res);
@@ -341,29 +380,13 @@ router.get('/:id', adminAuth, requirePermission('users:read'), async (req, res) 
         holdBalance: w.holdBalance || {},
       }));
 
-    const walletIds = new Set(wallets.map((w) => w.id));
-    const transactions = (db.transactions || [])
-      .filter((tx) => walletIds.has(tx.fromWalletId) || walletIds.has(tx.toWalletId))
-      .slice()
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-      .slice(0, 100)
-      .map((tx) => ({
-        id: tx.id,
-        type: tx.type,
-        amount: tx.amount,
-        currency: tx.currency,
-        status: tx.status,
-        fromWalletId: tx.fromWalletId,
-        toWalletId: tx.toWalletId,
-        memo: tx.memo || null,
-        createdAt: tx.createdAt,
-      }));
+    const walletIds = getUserWalletIds(db, user.id);
+    const transactions = userTransactions(db, walletIds)
+      .slice(0, 20)
+      .map(mapTransaction);
 
-    const paymentRequests = (db.paymentRequests || [])
-      .filter((pr) => pr.requesterId === user.id || pr.userId === user.id || walletIds.has(pr.walletId))
-      .slice()
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-      .slice(0, 50)
+    const paymentRequests = userPaymentRequests(db, user.id, walletIds)
+      .slice(0, 20)
       .map((pr) => ({
         id: pr.id,
         walletId: pr.walletId,
@@ -374,12 +397,14 @@ router.get('/:id', adminAuth, requirePermission('users:read'), async (req, res) 
         createdAt: pr.createdAt,
       }));
 
-    const withdrawals = (db.withdrawals || [])
-      .filter((w) => w.userId === user.id)
-      .slice()
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-      .slice(0, 50)
+    const withdrawals = userWithdrawals(db, user.id)
+      .slice(0, 20)
       .map(sanitizeWithdrawal);
+
+    const virtualCards = userVirtualCards(db, user.id).slice(0, 10).map(sanitizeVirtualCard);
+    const qrCodes = userQrCodes(db, user.id).slice(0, 10).map(sanitizeQrCode);
+    const limits = buildLimitSummary(user);
+    const activityCounts = buildActivityCounts(db, user.id, walletIds);
 
     let kycDocuments = [];
     try {
@@ -420,10 +445,15 @@ router.get('/:id', adminAuth, requirePermission('users:read'), async (req, res) 
       transactions,
       paymentRequests,
       withdrawals,
+      virtualCards,
+      qrCodes,
+      limits,
+      activityCounts,
       kycDocuments,
       notes,
       riskFlags: buildRiskFlags(user, db),
       readOnly: true,
+      syncHint: 'Admin and mobile share the same database. Refresh this page after Admin actions; the Android app updates on its next API refresh (no push sync).',
     });
   } catch (_error) {
     res.status(500).json({ error: 'Failed to load user detail' });

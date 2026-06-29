@@ -503,6 +503,50 @@ body {
   font-size: 13px;
 }
 
+.sync-hint {
+  background: #eef4ff;
+  border: 1px solid #c8dafc;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  color: #1a3a6b;
+  font-size: 13px;
+}
+
+.activity-tabs {
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.tab-count {
+  opacity: 0.75;
+  font-size: 12px;
+}
+
+.limit-row {
+  margin-bottom: 14px;
+}
+
+.limit-row-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.limit-bar-track {
+  height: 8px;
+  background: #e8ebf0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.limit-bar-fill {
+  height: 100%;
+  background: #3b6cff;
+  border-radius: 999px;
+}
+
 .flag-list { list-style: none; }
 .flag-item {
   padding: 8px 10px;
