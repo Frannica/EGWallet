@@ -20,6 +20,7 @@ const TABS = [
   { id: 'withdrawals', label: 'Withdrawals' },
   { id: 'virtual_cards', label: 'Virtual Cards' },
   { id: 'virtual_card_charges', label: 'Card Charges' },
+  { id: 'virtual_card_freeze_history', label: 'Freeze History' },
   { id: 'transactions', label: 'All Transactions' },
 ];
 
@@ -30,9 +31,22 @@ function renderRow(category, item) {
         <td className="mono">{item.maskedNumber || item.last4}</td>
         <td>{item.label || '—'}</td>
         <td>{item.status}</td>
-        <td>{formatAmount(item.spentToday, item.currency)} spent today</td>
-        <td>{formatAmount(item.dailyLimit, item.currency)} daily cap</td>
+        <td>{formatAmount(item.spentToday, item.currency)} today</td>
+        <td>{formatAmount(item.spentMonth, item.currency)} month</td>
+        <td>{formatAmount(item.dailyLimit, item.currency)} / {formatAmount(item.monthlyLimit, item.currency)}</td>
         <td>{formatDate(item.createdAt)}</td>
+      </tr>
+    );
+  }
+  if (category === 'virtual_card_freeze_history') {
+    return (
+      <tr key={item.id}>
+        <td>{formatDate(item.at)}</td>
+        <td className="mono">{item.maskedCard || item.cardLast4 || '—'}</td>
+        <td>{item.from} → {item.to}</td>
+        <td>{item.actor || '—'}</td>
+        <td>{item.adminId || '—'}</td>
+        <td>{item.reason || '—'}</td>
       </tr>
     );
   }
@@ -94,7 +108,10 @@ function renderRow(category, item) {
 
 function tableHeaders(category) {
   if (category === 'virtual_cards') {
-    return ['Card', 'Label', 'Status', 'Spent Today', 'Daily Limit', 'Created'];
+    return ['Card', 'Label', 'Status', 'Spent Today', 'Spent Month', 'Daily / Monthly Limit', 'Created'];
+  }
+  if (category === 'virtual_card_freeze_history') {
+    return ['Date', 'Card', 'Transition', 'Actor', 'Admin', 'Reason'];
   }
   if (category === 'virtual_card_charges') {
     return ['Date', 'Card', 'Type', 'Amount', 'Merchant', 'Status', 'Provider Ref'];

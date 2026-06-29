@@ -401,7 +401,7 @@ router.get('/:id', adminAuth, requirePermission('users:read'), async (req, res) 
       .slice(0, 20)
       .map(sanitizeWithdrawal);
 
-    const virtualCards = userVirtualCards(db, user.id).slice(0, 10).map(sanitizeVirtualCard);
+    const virtualCards = userVirtualCards(db, user.id).slice(0, 10).map((c) => sanitizeVirtualCard(c, user.id));
     const qrCodes = userQrCodes(db, user.id).slice(0, 10).map(sanitizeQrCode);
     const limits = buildLimitSummary(user);
     const activityCounts = buildActivityCounts(db, user.id, walletIds);

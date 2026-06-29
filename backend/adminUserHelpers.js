@@ -8,6 +8,11 @@ const KYC_TIERS = {
 };
 
 const { userVirtualCardCharges, mapVirtualCardCharge } = require('./virtualCardCharges');
+const {
+  getUserVirtualCards,
+  enrichCardForAdmin,
+  userVirtualCardFreezeHistory,
+} = require('./virtualCards');
 
 const ACTIVITY_CATEGORIES = [
   'deposits',
@@ -18,6 +23,7 @@ const ACTIVITY_CATEGORIES = [
   'withdrawals',
   'virtual_cards',
   'virtual_card_charges',
+  'virtual_card_freeze_history',
   'transactions',
 ];
 
@@ -138,22 +144,8 @@ function paginate(items, page, limit) {
   };
 }
 
-function sanitizeVirtualCard(card) {
-  if (!card) return card;
-  const { cvv, cardNumber, ...rest } = card;
-  const last4 = rest.last4 || (cardNumber ? cardNumber.slice(-4) : '****');
-  return {
-    id: rest.id,
-    walletId: rest.walletId,
-    last4,
-    maskedNumber: `****${last4}`,
-    currency: rest.currency,
-    label: rest.label || null,
-    status: rest.status,
-    spentToday: rest.spentToday ?? 0,
-    dailyLimit: rest.dailyLimit ?? null,
-    createdAt: rest.createdAt || null,
-  };
+function sanitizeVirtualCard(card, userId = null) {
+  return enrichCardForAdmin(card, userId || card.userId);
 }
 
 function sanitizeQrCode(qr) {
@@ -207,10 +199,7 @@ function userWithdrawals(db, userId) {
 }
 
 function userVirtualCards(db, userId) {
-  return (db.virtualCards || [])
-    .filter((c) => c.userId === userId && c.status !== 'deleted')
-    .slice()
-    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  return getUserVirtualCards(db, userId, { includeTerminal: true });
 }
 
 function userQrCodes(db, userId) {
@@ -231,6 +220,7 @@ function buildActivityCounts(db, userId, walletIds) {
     withdrawals: userWithdrawals(db, userId).length,
     virtual_cards: userVirtualCards(db, userId).length,
     virtual_card_charges: userVirtualCardCharges(db, userId).length,
+    virtual_card_freeze_history: userVirtualCardFreezeHistory(db, userId).length,
     qr_codes: userQrCodes(db, userId).length,
   };
 }
@@ -255,12 +245,17 @@ function getUserActivity(db, user, category, page, limit) {
   }
 
   if (category === 'virtual_cards') {
-    const list = userVirtualCards(db, user.id).map(sanitizeVirtualCard);
+    const list = userVirtualCards(db, user.id).map((card) => sanitizeVirtualCard(card, user.id));
     return { category, ...paginate(list, page, limit) };
   }
 
   if (category === 'virtual_card_charges') {
     const list = userVirtualCardCharges(db, user.id).map((c) => mapVirtualCardCharge(c, db));
+    return { category, ...paginate(list, page, limit) };
+  }
+
+  if (category === 'virtual_card_freeze_history') {
+    const list = userVirtualCardFreezeHistory(db, user.id);
     return { category, ...paginate(list, page, limit) };
   }
 

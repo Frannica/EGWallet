@@ -6,6 +6,7 @@ const REQUIRED_TOP_LEVEL_KEYS = [
   'transactions',
   'paymentRequests',
   'virtualCards',
+  'virtualCardCharges',
   'budgets',
   'devices',
   'supportTickets',
@@ -47,6 +48,7 @@ function validateRootShape(db) {
   ensureArray(db.transactions, 'transactions');
   ensureArray(db.paymentRequests, 'paymentRequests');
   ensureArray(db.virtualCards, 'virtualCards');
+  ensureArray(db.virtualCardCharges, 'virtualCardCharges');
   ensureArray(db.budgets, 'budgets');
   ensureArray(db.devices, 'devices');
   ensureArray(db.supportTickets, 'supportTickets');

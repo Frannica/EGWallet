@@ -127,7 +127,7 @@ export default function UserDetail({ userId, onBack, onReviewKyc, onViewTimeline
   if (error && !data) return <p className="error-text">{error}</p>;
   if (!data) return null;
 
-  const { profile, wallets, kycDocuments, riskFlags, limits, activityCounts, syncHint } = data;
+  const { profile, wallets, virtualCards, kycDocuments, riskFlags, limits, activityCounts, syncHint } = data;
   const status = profile.accountStatus || 'active';
 
   return (
@@ -244,6 +244,22 @@ export default function UserDetail({ userId, onBack, onReviewKyc, onViewTimeline
       </section>
 
       <UserLimitsPanel limits={limits} />
+
+      {virtualCards?.length > 0 && (
+        <section className="detail-section">
+          <h3>Virtual Card <span className="read-only-tag">Read-only</span></h3>
+          {virtualCards.map((card) => (
+            <div key={card.id} className="wallet-card">
+              <div><strong>Owner</strong> {profile.email}</div>
+              <div><strong>Card</strong> {card.maskedNumber || `****${card.last4}`}</div>
+              <div><strong>Status</strong> {card.status}</div>
+              <div><strong>Daily spend</strong> {formatAmount(card.spentToday, card.currency)} / {formatAmount(card.dailyLimit, card.currency)}</div>
+              <div><strong>Monthly spend</strong> {formatAmount(card.spentMonth, card.currency)} / {formatAmount(card.monthlyLimit, card.currency)}</div>
+              <div className="mono">{card.id}</div>
+            </div>
+          ))}
+        </section>
+      )}
 
       <UserActivityPanel userId={userId} activityCounts={activityCounts} />
 

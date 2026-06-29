@@ -24,13 +24,8 @@ function findExistingCharge(db, { idempotencyKey, providerReference }) {
 }
 
 function applySpentTodayDelta(card, type, amount, status) {
-  if (!card) return;
-  const current = card.spentToday || 0;
-  if (type === 'purchase' && status !== 'declined') {
-    card.spentToday = current + amount;
-  } else if (type === 'refund' || type === 'reversal') {
-    card.spentToday = Math.max(0, current - amount);
-  }
+  const { applySpendDelta } = require('./virtualCards');
+  applySpendDelta(card, type, amount, status);
 }
 
 /**

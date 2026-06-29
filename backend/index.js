@@ -70,6 +70,13 @@ const { router: adminSettingsRouter, isMaintenanceModeEnabled } = require('./adm
 const { getAdminAuditLogs } = require('./adminAudit');
 const { appendLoginHistory } = require('./adminUsers');
 const { kycUploadMiddleware, handleKycUpload } = require('./kycUpload');
+const {
+  provisionVirtualCardForUser,
+  getPrimaryVirtualCard,
+  toggleVirtualCardFreeze,
+  setVirtualCardStatus,
+  normalizeCard,
+} = require('./virtualCards');
 const { executePayout, payoutRouter } = require('./payoutProviders');
 const {
   loadAppState,
@@ -2940,6 +2947,13 @@ app.post('/auth/register',
   const wallet = { id: uuidv4(), userId: id, balances: [{ currency: preferredCurrency, amount: 0 }], createdAt: Date.now(), maxLimitUSD: 250000 };
   db.wallets.push(wallet);
 
+  provisionVirtualCardForUser(db, {
+    userId: id,
+    walletId: wallet.id,
+    currency: preferredCurrency,
+    label: 'Virtual Card',
+  });
+
   // Register first device (no alert needed on registration)
   if (!db.devices) db.devices = [];
   if (deviceInfo && deviceInfo.fingerprint) {
@@ -3021,6 +3035,16 @@ app.post('/auth/login',
   u.failedLoginAttempts = 0;
   u.lockedUntil = null;
   appendLoginHistory(u, { ...loginEntry, success: true });
+
+  const primaryWallet = (db.wallets || []).find((w) => w.userId === u.id);
+  if (primaryWallet) {
+    provisionVirtualCardForUser(db, {
+      userId: u.id,
+      walletId: primaryWallet.id,
+      currency: u.preferredCurrency || primaryWallet.balances?.[0]?.currency || 'USD',
+      label: 'Virtual Card',
+    });
+  }
 
   // Check if this is a new device
   let isNewDevice = false;
@@ -5886,55 +5910,39 @@ app.post('/virtual-cards', authMiddleware, (req, res) => {
   const db = loadAppState();
   const { walletId, currency, label, idempotencyKey } = req.body;
   if (!walletId || !currency) return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
-  
-  // Check idempotency
+
   if (idempotencyKey) {
     const cached = idempotencyStore.get(idempotencyKey);
     if (cached && cached.userId === req.user.userId) {
-      console.log(`Returning cached response for idempotency key: ${idempotencyKey}`);
       return res.json(cached.response);
     }
   }
-  
-  const wallet = db.wallets.find(w => w.id === walletId && w.userId === req.user.userId);
+
+  const wallet = db.wallets.find((w) => w.id === walletId && w.userId === req.user.userId);
   if (!wallet) return res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
-  
-  // Check card limit (max 5 cards per user)
-  const userCards = (db.virtualCards || []).filter(c => c.userId === req.user.userId && c.status !== 'deleted');
-  if (userCards.length >= 5) return res.status(400).json({ error: t('error_max_cards', req.lang || 'en') });
-  
-  // Generate card details — full PAN/CVV are NEVER written to persistent storage
-  const cardNumber = '4' + Math.floor(Math.random() * 1e15).toString().padStart(15, '0');
-  const cvv = Math.floor(Math.random() * 900 + 100).toString();
-  const last4 = cardNumber.slice(-4);
-  const now = new Date();
-  const expiryMonth = (now.getMonth() + 1).toString().padStart(2, '0');
-  const expiryYear = (now.getFullYear() + 3).toString().slice(-2);
-  
-  // Persist only non-sensitive fields — last4 is sufficient for display
-  const card = {
-    id: uuidv4(),
+
+  const existing = getPrimaryVirtualCard(db, req.user.userId);
+  if (existing) {
+    const response = { card: sanitizeCard(existing), existing: true };
+    if (idempotencyKey) {
+      idempotencyStore.set(idempotencyKey, { userId: req.user.userId, response, timestamp: Date.now() });
+    }
+    return res.json(response);
+  }
+
+  const { card, created, secrets } = provisionVirtualCardForUser(db, {
     userId: req.user.userId,
     walletId,
-    last4,
-    expiryMonth,
-    expiryYear,
     currency,
     label: label || 'Virtual Card',
-    status: 'active', // active, frozen, deleted
-    createdAt: Date.now(),
-    spentToday: 0,
-    dailyLimit: majorToMinor(1000, currency) // $1000 daily limit
-  };
-  
-  if (!db.virtualCards) db.virtualCards = [];
-  db.virtualCards.push(card);
-  saveAppState(db);
-  
-  // Return full PAN/CVV exactly once in the creation response — they cannot be retrieved later
-  const response = { card: { ...card, cardNumber, cvv } };
+  });
 
-  // Store idempotency key
+  saveAppState(db);
+
+  const response = created && secrets
+    ? { card: { ...sanitizeCard(card), cardNumber: secrets.cardNumber, cvv: secrets.cvv }, created: true }
+    : { card: sanitizeCard(card), existing: true };
+
   if (idempotencyKey) {
     idempotencyStore.set(idempotencyKey, { userId: req.user.userId, response, timestamp: Date.now() });
   }
@@ -5946,17 +5954,18 @@ app.post('/virtual-cards', authMiddleware, (req, res) => {
 app.get('/virtual-cards', authMiddleware, (req, res) => {
   const db = loadAppState();
   const cards = (db.virtualCards || [])
-    .filter(c => c.userId === req.user.userId && c.status !== 'deleted')
-    .sort((a, b) => b.createdAt - a.createdAt);
-  res.json({ cards: cards.map(sanitizeCard) });
+    .filter((c) => c.userId === req.user.userId && c.status !== 'deleted' && c.status !== 'closed')
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map((c) => sanitizeCard(normalizeCard(c)));
+  res.json({ cards });
 });
 
 // Get single card
 app.get('/virtual-cards/:id', authMiddleware, (req, res) => {
   const db = loadAppState();
-  const card = (db.virtualCards || []).find(c => c.id === req.params.id && c.userId === req.user.userId);
+  const card = (db.virtualCards || []).find((c) => c.id === req.params.id && c.userId === req.user.userId);
   if (!card) return res.status(404).json({ error: t('error_card_not_found', req.lang || 'en') });
-  res.json({ card: sanitizeCard(card) });
+  res.json({ card: sanitizeCard(normalizeCard(card)) });
 });
 
 // Freeze/unfreeze card
@@ -5973,14 +5982,23 @@ app.post('/virtual-cards/:id/toggle-freeze', authMiddleware, (req, res) => {
     }
   }
   
-  const card = (db.virtualCards || []).find(c => c.id === req.params.id && c.userId === req.user.userId);
+  const card = (db.virtualCards || []).find((c) => c.id === req.params.id && c.userId === req.user.userId);
   if (!card) return res.status(404).json({ error: t('error_card_not_found', req.lang || 'en') });
-  if (card.status === 'deleted') return res.status(400).json({ error: t('error_card_deleted', req.lang || 'en') });
-  
-  card.status = card.status === 'active' ? 'frozen' : 'active';
+  if (card.status === 'deleted' || card.status === 'closed') {
+    return res.status(400).json({ error: t('error_card_deleted', req.lang || 'en') });
+  }
+  if (card.status === 'blocked') {
+    return res.status(400).json({ error: 'Card is blocked' });
+  }
+
+  try {
+    toggleVirtualCardFreeze(db, card, { actor: 'user' });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
   saveAppState(db);
 
-  const response = { card: sanitizeCard(card) };
+  const response = { card: sanitizeCard(normalizeCard(card)) };
 
   // Store idempotency key
   if (idempotencyKey) {
@@ -5993,10 +6011,10 @@ app.post('/virtual-cards/:id/toggle-freeze', authMiddleware, (req, res) => {
 // Delete card
 app.delete('/virtual-cards/:id', authMiddleware, (req, res) => {
   const db = loadAppState();
-  const card = (db.virtualCards || []).find(c => c.id === req.params.id && c.userId === req.user.userId);
+  const card = (db.virtualCards || []).find((c) => c.id === req.params.id && c.userId === req.user.userId);
   if (!card) return res.status(404).json({ error: t('error_card_not_found', req.lang || 'en') });
-  
-  card.status = 'deleted';
+
+  setVirtualCardStatus(card, 'closed', { actor: 'user', reason: 'user_deleted' });
   saveAppState(db);
   res.json({ success: true });
 });
