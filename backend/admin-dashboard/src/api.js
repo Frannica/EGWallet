@@ -174,6 +174,115 @@ export async function transitionWithdrawal(id, status, note) {
   return res.json();
 }
 
+export async function reconcileWithdrawal(id) {
+  const res = await adminFetch(`/admin/withdrawals/${id}/reconcile`, { method: 'POST', body: '{}' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Server error: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchSupportTickets(filters = {}) {
+  const params = new URLSearchParams();
+  if (filters.status) params.set('status', filters.status);
+  const qs = params.toString();
+  const res = await adminFetch(`/admin/support/tickets${qs ? '?' + qs : ''}`);
+  if (!res.ok) throw new Error(`Server error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchSupportTicket(id) {
+  const res = await adminFetch(`/admin/support/tickets/${id}`);
+  if (!res.ok) throw new Error(`Server error: ${res.status}`);
+  return res.json();
+}
+
+export async function replySupportTicket(id, message) {
+  const res = await adminFetch(`/admin/support/tickets/${id}/reply`, {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Server error: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function closeSupportTicket(id, resolution) {
+  const res = await adminFetch(`/admin/support/tickets/${id}/close`, {
+    method: 'POST',
+    body: JSON.stringify({ resolution }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Server error: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchDisputes(filters = {}) {
+  const params = new URLSearchParams();
+  if (filters.status) params.set('status', filters.status);
+  const qs = params.toString();
+  const res = await adminFetch(`/admin/disputes${qs ? '?' + qs : ''}`);
+  if (!res.ok) throw new Error(`Server error: ${res.status}`);
+  return res.json();
+}
+
+export async function updateDispute(id, payload) {
+  const res = await adminFetch(`/admin/disputes/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Server error: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function sendNotification(payload) {
+  const res = await adminFetch('/admin/notifications/send', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Server error: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function broadcastAnnouncement(payload) {
+  const res = await adminFetch('/admin/notifications/announcements', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Server error: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchAnnouncements() {
+  const res = await adminFetch('/admin/notifications/announcements');
+  if (!res.ok) throw new Error(`Server error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchFraudSignals(filters = {}) {
+  const params = new URLSearchParams();
+  if (filters.type) params.set('type', filters.type);
+  if (filters.userId) params.set('userId', filters.userId);
+  const qs = params.toString();
+  const res = await adminFetch(`/admin/fraud${qs ? '?' + qs : ''}`);
+  if (!res.ok) throw new Error(`Server error: ${res.status}`);
+  return res.json();
+}
+
 export async function fetchUsers(query = '') {
   const params = new URLSearchParams();
   if (query.trim()) params.set('q', query.trim());

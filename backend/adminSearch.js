@@ -55,6 +55,8 @@ function searchUsers(db, query) {
 
   for (const tx of db.transactions || []) {
     if (tx.id === query || tx.id?.toLowerCase() === q) {
+      const walletId = tx.fromWalletId || tx.toWalletId;
+      const wallet = (db.wallets || []).find((w) => w.id === walletId);
       results.push({
         type: 'transaction',
         matchType: 'transaction_id',
@@ -62,7 +64,8 @@ function searchUsers(db, query) {
         amount: tx.amount,
         currency: tx.currency,
         status: tx.status,
-        userHint: tx.fromWalletId || tx.toWalletId,
+        userId: wallet?.userId || tx.userId || null,
+        userHint: walletId,
       });
     }
   }

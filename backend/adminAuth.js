@@ -42,14 +42,18 @@ const ROLE_PERMISSIONS = {
   support: [
     'stats:read', 'health:read', 'audit:read', 'users:read', 'users:write', 'users:export',
     'notes:read', 'notes:write', 'timeline:read', 'kyc:read', 'withdrawals:read', 'logs:read', 'search:read',
+    'tickets:read', 'tickets:write', 'disputes:read', 'disputes:write', 'notifications:read', 'notifications:write',
+    'fraud:read',
   ],
   compliance: [
     'stats:read', 'health:read', 'audit:read', 'users:read', 'timeline:read', 'kyc:read', 'kyc:approve',
     'withdrawals:read', 'withdrawals:write', 'notes:read', 'search:read',
+    'disputes:read', 'disputes:write', 'fraud:read',
   ],
   read_only: [
     'stats:read', 'health:read', 'audit:read', 'users:read', 'timeline:read', 'kyc:read',
     'withdrawals:read', 'notes:read', 'logs:read', 'search:read',
+    'tickets:read', 'disputes:read', 'notifications:read', 'fraud:read',
   ],
 };
 
@@ -74,7 +78,11 @@ function hasPermission(role, permission) {
 function getPermissionsForRole(role) {
   const perms = ROLE_PERMISSIONS[role] || [];
   return perms.includes('*')
-    ? Object.values(ROLE_PERMISSIONS).flat().filter((p) => p !== '*').concat(['*', 'kyc:download', 'settings:read', 'settings:write'])
+    ? Object.values(ROLE_PERMISSIONS).flat().filter((p) => p !== '*').concat([
+      '*', 'kyc:download', 'settings:read', 'settings:write',
+      'tickets:read', 'tickets:write', 'disputes:read', 'disputes:write',
+      'notifications:read', 'notifications:write', 'fraud:read',
+    ])
     : perms;
 }
 

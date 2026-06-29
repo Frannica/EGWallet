@@ -81,6 +81,40 @@ function buildTestDb() {
     withdrawals: [{ id: uuidv4(), userId: testUserId, amount: 5000, currency: 'USD', status: 'pending_review', createdAt: Date.now() }],
     kyc: [],
     auditLog: [],
+    supportTickets: [{
+      id: 'TKT-TEST-001',
+      userId: testUserId,
+      subject: 'Test support ticket',
+      description: 'Need help with fraud on my account',
+      category: 'fraud',
+      priority: 'urgent',
+      status: 'open',
+      tags: ['fraud', 'auto-escalated'],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      replies: [],
+    }],
+    disputes: [{
+      id: uuidv4(),
+      ticketNumber: 'EGW-12345',
+      userId: testUserId,
+      userEmail: 'platform-user@egwallet.test',
+      transactionId: null,
+      reason: 'unauthorized',
+      description: 'I did not authorize this transaction',
+      status: 'open',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }],
+    fraudAlerts: [{
+      id: uuidv4(),
+      userId: testUserId,
+      reason: 'Velocity check triggered',
+      severity: 'high',
+      createdAt: Date.now(),
+    }],
+    notifications: [],
+    announcements: [],
   };
 }
 
@@ -159,6 +193,10 @@ async function startTestServer() {
   const adminStatsRouter = require('../adminStats');
   const adminLogsRouter = require('../adminLogs');
   const { router: adminSettingsRouter } = require('../adminSettings');
+  const adminSupportRouter = require('../adminSupport');
+  const adminDisputesRouter = require('../adminDisputes');
+  const adminNotificationsRouter = require('../adminNotifications');
+  const adminFraudRouter = require('../adminFraud');
   const { kycUploadMiddleware, handleKycUpload } = require('../kycUpload');
   const { createAdminUser, ensureAdminPlatformTables } = require('../db/adminPlatformPostgres');
 
@@ -187,6 +225,10 @@ async function startTestServer() {
   app.use('/admin/stats', adminStatsRouter);
   app.use('/admin/logs', adminLogsRouter);
   app.use('/admin/settings', adminSettingsRouter);
+  app.use('/admin/support/tickets', adminSupportRouter);
+  app.use('/admin/disputes', adminDisputesRouter);
+  app.use('/admin/notifications', adminNotificationsRouter);
+  app.use('/admin/fraud', adminFraudRouter);
   app.use('/admin/users', adminUsersRouter);
   app.use('/admin/kyc', adminKycRouter);
   app.post('/kyc/upload', authMiddleware, kycUploadMiddleware, handleKycUpload);
@@ -419,4 +461,114 @@ test('audit entries include before and after fields', async (t) => {
   assert.ok(suspendLog.browser);
   assert.ok(suspendLog.before);
   assert.ok(suspendLog.after);
+});
+
+test('support tickets list, reply, and close', async (t) => {
+  if (!postgresReady) return t.skip('PostgreSQL unavailable');
+
+  const list = await fetch(`${baseUrl}/admin/support/tickets`, {
+    headers: { Authorization: `Bearer ${supportToken}` },
+  });
+  assert.equal(list.status, 200);
+  const tickets = await list.json();
+  assert.ok(tickets.tickets.some((tk) => tk.id === 'TKT-TEST-001'));
+
+  const reply = await fetch(`${baseUrl}/admin/support/tickets/TKT-TEST-001/reply`, {
+    method: 'POST',
+    headers: postHeaders(supportToken, supportCsrf),
+    body: JSON.stringify({ message: 'We are investigating your report.' }),
+  });
+  assert.equal(reply.status, 200);
+
+  const close = await fetch(`${baseUrl}/admin/support/tickets/TKT-TEST-001/close`, {
+    method: 'POST',
+    headers: postHeaders(supportToken, supportCsrf),
+    body: JSON.stringify({ resolution: 'Resolved after review' }),
+  });
+  assert.equal(close.status, 200);
+  const closed = await close.json();
+  assert.equal(closed.ticket.status, 'closed');
+});
+
+test('disputes list and update', async (t) => {
+  if (!postgresReady) return t.skip('PostgreSQL unavailable');
+
+  const list = await fetch(`${baseUrl}/admin/disputes`, {
+    headers: { Authorization: `Bearer ${supportToken}` },
+  });
+  assert.equal(list.status, 200);
+  const body = await list.json();
+  assert.ok(body.disputes.length >= 1);
+
+  const disputeId = body.disputes[0].id;
+  const patch = await fetch(`${baseUrl}/admin/disputes/${disputeId}`, {
+    method: 'PATCH',
+    headers: postHeaders(supportToken, supportCsrf),
+    body: JSON.stringify({ status: 'investigating', resolution: 'Reviewing transaction' }),
+  });
+  assert.equal(patch.status, 200);
+  const updated = await patch.json();
+  assert.equal(updated.dispute.status, 'investigating');
+});
+
+test('notifications send to individual and all users', async (t) => {
+  if (!postgresReady) return t.skip('PostgreSQL unavailable');
+
+  const single = await fetch(`${baseUrl}/admin/notifications/send`, {
+    method: 'POST',
+    headers: postHeaders(supportToken, supportCsrf),
+    body: JSON.stringify({
+      title: 'Test message',
+      body: 'Hello user',
+      audience: 'user_ids',
+      userIds: [testUserId],
+      type: 'admin_message',
+    }),
+  });
+  assert.equal(single.status, 200);
+  assert.equal((await single.json()).recipientCount, 1);
+
+  const all = await fetch(`${baseUrl}/admin/notifications/send`, {
+    method: 'POST',
+    headers: postHeaders(supportToken, supportCsrf),
+    body: JSON.stringify({
+      title: 'System notice',
+      body: 'Maintenance tonight',
+      audience: 'all',
+      type: 'maintenance',
+    }),
+  });
+  assert.equal(all.status, 200);
+  assert.ok((await all.json()).recipientCount >= 1);
+  assert.ok((testDb.notifications || []).length >= 2);
+});
+
+test('broadcast announcement', async (t) => {
+  if (!postgresReady) return t.skip('PostgreSQL unavailable');
+
+  const res = await fetch(`${baseUrl}/admin/notifications/announcements`, {
+    method: 'POST',
+    headers: postHeaders(superToken, superCsrf),
+    body: JSON.stringify({
+      title: 'Platform update',
+      body: 'New features available',
+      audience: 'all',
+      type: 'announcement',
+    }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.ok(body.announcement.id);
+  assert.ok(body.recipientCount >= 1);
+});
+
+test('fraud signals list', async (t) => {
+  if (!postgresReady) return t.skip('PostgreSQL unavailable');
+
+  const res = await fetch(`${baseUrl}/admin/fraud`, {
+    headers: { Authorization: `Bearer ${supportToken}` },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.ok(body.signals.some((s) => s.type === 'fraud_alert' || s.type === 'support_escalation'));
 });

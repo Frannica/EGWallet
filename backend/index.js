@@ -58,6 +58,10 @@ const {
 } = require('./adminAuth');
 const adminKycRouter = require('./adminKyc');
 const adminUsersRouter = require('./adminUsers');
+const adminSupportRouter = require('./adminSupport');
+const adminDisputesRouter = require('./adminDisputes');
+const adminNotificationsRouter = require('./adminNotifications');
+const adminFraudRouter = require('./adminFraud');
 const adminStatsRouter = require('./adminStats');
 const adminDashboardRouter = require('./adminDashboard');
 const { router: adminSearchRouter } = require('./adminSearch');
@@ -3866,6 +3870,10 @@ app.use('/admin/settings', adminSettingsRouter);
 app.use('/admin/withdrawals', adminWithdrawalsRouter);
 app.use('/admin/kyc', adminKycRouter);
 app.use('/admin/users', adminUsersRouter);
+app.use('/admin/support/tickets', adminSupportRouter);
+app.use('/admin/disputes', adminDisputesRouter);
+app.use('/admin/notifications', adminNotificationsRouter);
+app.use('/admin/fraud', adminFraudRouter);
 app.get('/admin/audit/actions', adminAuth, requirePermission('audit:read'), (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 100;
   res.json({ actions: getAdminAuditLogs({ limit }) });

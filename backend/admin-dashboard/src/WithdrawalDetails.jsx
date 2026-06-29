@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { fetchWithdrawalById } from './api';
+import { fetchWithdrawalById, transitionWithdrawal, reconcileWithdrawal, hasPermission } from './api';
+import { confirmAction, showToast } from './utils/ui';
 
 const STATUS_BADGE = {
   pending_review: 'badge-pending',
@@ -27,7 +28,9 @@ function Row({ label, value }) {
 export default function WithdrawalDetails({ id, onBack }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState('');
+  const canWrite = hasPermission('withdrawals:write');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -43,6 +46,36 @@ export default function WithdrawalDetails({ id, onBack }) {
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
+
+  async function handleTransition(status, note) {
+    const ok = await confirmAction(`Transition withdrawal to "${status}"?`);
+    if (!ok) return;
+    setActionLoading(true);
+    try {
+      await transitionWithdrawal(id, status, note);
+      showToast(`Withdrawal marked ${status}`);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleReconcile() {
+    const ok = await confirmAction('Reconcile with payment provider?');
+    if (!ok) return;
+    setActionLoading(true);
+    try {
+      const result = await reconcileWithdrawal(id);
+      showToast(`Reconcile: ${result.status}`);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  }
 
   if (loading) return <p className="loading-text">Loading withdrawal…</p>;
   if (error) return (
@@ -64,6 +97,28 @@ export default function WithdrawalDetails({ id, onBack }) {
           Withdrawal <span className="mono">{w.id}</span>
         </h2>
         <span className={`badge ${STATUS_BADGE[w.status] || ''}`}>{w.status}</span>
+        {canWrite && (
+          <div style={{ display: 'flex', gap: 8, marginLeft: 'auto', flexWrap: 'wrap' }}>
+            {w.status === 'pending_review' && (
+              <>
+                <button className="btn btn-primary btn-sm" disabled={actionLoading} onClick={() => handleTransition('approved', 'Admin approved')}>Approve</button>
+                <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => handleTransition('failed', 'Admin rejected')}>Reject</button>
+              </>
+            )}
+            {w.status === 'approved' && (
+              <button className="btn btn-primary btn-sm" disabled={actionLoading} onClick={() => handleTransition('processing', 'Start processing')}>Process</button>
+            )}
+            {w.status === 'processing' && (
+              <>
+                <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => handleReconcile()}>Reconcile</button>
+                <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => handleTransition('failed', 'Mark failed')}>Mark Failed</button>
+              </>
+            )}
+            {(w.status === 'failed' || w.status === 'reversed') && (
+              <span className="muted small">Terminal state — no further transitions</span>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="detail-grid">

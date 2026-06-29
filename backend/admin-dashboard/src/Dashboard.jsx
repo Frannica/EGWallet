@@ -9,6 +9,10 @@ import DashboardHome from './DashboardHome';
 import SystemLogs from './SystemLogs';
 import SettingsPage from './SettingsPage';
 import HealthPage from './HealthPage';
+import SupportTickets from './SupportTickets';
+import DisputesPage from './DisputesPage';
+import NotificationsPage from './NotificationsPage';
+import FraudPage from './FraudPage';
 import AuditPage from './AuditPage';
 import GlobalSearchBar from './components/GlobalSearchBar';
 import ToastContainer from './components/ToastContainer';
@@ -21,6 +25,10 @@ const ALL_TABS = [
   { id: 'users', label: 'Users', perm: 'users:read' },
   { id: 'kyc', label: 'KYC Review', perm: 'kyc:read' },
   { id: 'withdrawals', label: 'Withdrawals', perm: 'withdrawals:read' },
+  { id: 'support', label: 'Support', perm: 'tickets:read' },
+  { id: 'disputes', label: 'Disputes', perm: 'disputes:read' },
+  { id: 'fraud', label: 'Fraud', perm: 'fraud:read' },
+  { id: 'notifications', label: 'Notifications', perm: 'notifications:read' },
   { id: 'audit', label: 'Audit', perm: 'audit:read' },
   { id: 'health', label: 'Health', perm: 'health:read' },
   { id: 'logs', label: 'System Logs', perm: 'logs:read' },
@@ -34,6 +42,7 @@ export default function Dashboard({ onLogout }) {
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [timelineUserId, setTimelineUserId] = useState(null);
   const [focusKycDocumentId, setFocusKycDocumentId] = useState(null);
+  const [focusTransactionId, setFocusTransactionId] = useState(null);
   const [theme, setTheme] = useState(localStorage.getItem('adminTheme') || 'light');
 
   useEffect(() => { initTheme(); }, []);
@@ -57,19 +66,27 @@ export default function Dashboard({ onLogout }) {
     setSelectedUserId(null);
     setTimelineUserId(null);
     setFocusKycDocumentId(null);
+    setFocusTransactionId(null);
   }
 
   function selectUser(id) {
     setSelectedUserId(id);
     setTimelineUserId(null);
+    setFocusTransactionId(null);
     setTab('users');
+  }
+
+  function selectTransaction(result) {
+    if (result?.userId) {
+      selectUser(result.userId);
+    }
   }
 
   return (
     <div className="dashboard">
       <header className="header">
         <span className="header-title">EGWallet Admin</span>
-        <GlobalSearchBar onSelectUser={selectUser} />
+        <GlobalSearchBar onSelectUser={selectUser} onSelectTransaction={selectTransaction} />
         <div className="header-right">
           {admin && (
             <span className="header-admin">{admin.email} · {admin.role?.replace(/_/g, ' ')}</span>
@@ -132,6 +149,22 @@ export default function Dashboard({ onLogout }) {
           ) : (
             <WithdrawalTable onSelect={setSelectedWithdrawalId} />
           )
+        )}
+
+        {tab === 'support' && (
+          <SupportTickets onViewUser={selectUser} />
+        )}
+
+        {tab === 'disputes' && (
+          <DisputesPage onViewUser={selectUser} />
+        )}
+
+        {tab === 'fraud' && (
+          <FraudPage onViewUser={selectUser} />
+        )}
+
+        {tab === 'notifications' && (
+          <NotificationsPage />
         )}
 
         {tab === 'audit' && <AuditPage />}

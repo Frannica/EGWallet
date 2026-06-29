@@ -10,7 +10,7 @@ function emptyAppState() {
     auditLog: [], employers: [], employerEmployees: [], payrollBatches: [],
     demoIntents: [], notifications: [], passwordResetTokens: [],
     idempotencyRecords: [], withdrawals: [], ledger: [], kycIdentityClaims: {},
-    payoutLocks: [],
+    payoutLocks: [], disputes: [], announcements: [],
     rates: {
       base: 'USD',
       values: {
@@ -53,6 +53,8 @@ function hydrateAppState(state) {
   if (!state.payrollBatches) state.payrollBatches = [];
   if (!state.demoIntents) state.demoIntents = [];
   if (!state.notifications) state.notifications = [];
+  if (!state.disputes) state.disputes = [];
+  if (!state.announcements) state.announcements = [];
   if (!state.passwordResetTokens) state.passwordResetTokens = [];
   if (!state.transactions) state.transactions = [];
   if (!state.withdrawals) state.withdrawals = [];
