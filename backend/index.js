@@ -2280,7 +2280,13 @@ const corsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Idempotency-Key', 'Accept-Language']
 };
 
-app.use(cors(corsOptions));
+// CORS - Restrict origins in production (skip admin SPA static assets; Vite uses crossorigin module loads)
+app.use((req, res, next) => {
+  if (req.path.startsWith('/admin/dashboard')) {
+    return next();
+  }
+  return cors(corsOptions)(req, res, next);
+});
 
 // ── Provider webhook endpoints ─────────────────────────────────────────────────
 // MUST be registered BEFORE app.use(express.json(...)) so Stripe's raw-body
