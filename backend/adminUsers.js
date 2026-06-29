@@ -1,12 +1,15 @@
 'use strict';
 
 const express = require('express');
-const { adminAuth } = require('./adminWithdrawals');
-const { loadAppState } = require('./db/appStateStore');
+const { adminAuth, requirePermission } = require('./adminAuth');
+const { loadAppState, saveAppState } = require('./db/appStateStore');
 const { listKycDocuments, toPublicDocument } = require('./db/kycUploadPostgres');
-const { logAdminAction } = require('./adminAudit');
+const { listAdminUserNotes, insertAdminUserNote } = require('./db/adminPlatformPostgres');
+const { logAdminAction, getAdminAuditLogs } = require('./adminAudit');
 
 const router = express.Router();
+
+const MAX_LOGIN_HISTORY = 50;
 
 function sanitizeWithdrawal(w) {
   if (!w) return w;
@@ -35,6 +38,7 @@ function sanitizeUserSummary(user, db) {
     fullName: user.fullName || null,
     kycStatus: user.kycStatus || 'pending',
     kycTier: user.kycTier ?? 0,
+    accountStatus: user.accountStatus || 'active',
     createdAt: user.createdAt || null,
     walletIds: wallets.map((w) => w.id),
   };
@@ -51,8 +55,13 @@ function matchesSearch(user, db, query) {
 
 function buildRiskFlags(user, db) {
   const flags = [];
+  if (user.accountStatus === 'suspended') flags.push({ type: 'account_suspended', severity: 'high' });
+  if (user.accountStatus === 'locked') flags.push({ type: 'account_locked', severity: 'high' });
   if (user.kycDeviceBlocked) flags.push({ type: 'kyc_device_blocked', severity: 'high' });
   if (user.kycStatus === 'rejected') flags.push({ type: 'kyc_rejected', severity: 'medium' });
+  if ((user.failedLoginAttempts || 0) >= 3) {
+    flags.push({ type: 'failed_logins', severity: 'medium', count: user.failedLoginAttempts });
+  }
   const fraudLogs = (db.auditLog || []).filter(
     (entry) => entry.userId === user.id && /fraud|aml|suspicious/i.test(entry.action || entry.type || ''),
   );
@@ -62,7 +71,40 @@ function buildRiskFlags(user, db) {
   return flags;
 }
 
-router.get('/', adminAuth, async (req, res) => {
+function findUserOr404(req, res) {
+  const db = loadAppState();
+  const user = (db.users || []).find((u) => u.id === req.params.id);
+  if (!user) {
+    res.status(404).json({ error: 'User not found' });
+    return null;
+  }
+  return { db, user };
+}
+
+function appendLoginHistory(user, entry) {
+  if (!user.loginHistory) user.loginHistory = [];
+  user.loginHistory.unshift(entry);
+  if (user.loginHistory.length > MAX_LOGIN_HISTORY) {
+    user.loginHistory = user.loginHistory.slice(0, MAX_LOGIN_HISTORY);
+  }
+}
+
+router.get('/search', adminAuth, requirePermission('search:read'), (req, res) => {
+  try {
+    const db = loadAppState();
+    const q = (req.query.q || '').trim();
+    if (!q || q.length < 2) {
+      return res.status(400).json({ error: 'Query must be at least 2 characters' });
+    }
+    const users = (db.users || []).filter((user) => matchesSearch(user, db, q)).slice(0, 20);
+    logAdminAction(req, 'USER_SEARCH', { query: q, count: users.length });
+    res.json({ users: users.map((u) => sanitizeUserSummary(u, db)) });
+  } catch (_error) {
+    res.status(500).json({ error: 'Search failed' });
+  }
+});
+
+router.get('/', adminAuth, requirePermission('users:read'), async (req, res) => {
   try {
     const db = loadAppState();
     const q = (req.query.q || req.query.search || '').trim();
@@ -82,11 +124,165 @@ router.get('/', adminAuth, async (req, res) => {
   }
 });
 
-router.get('/:id', adminAuth, async (req, res) => {
+router.get('/:id/timeline', adminAuth, requirePermission('timeline:read'), async (req, res) => {
   try {
-    const db = loadAppState();
-    const user = (db.users || []).find((u) => u.id === req.params.id);
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    const found = findUserOr404(req, res);
+    if (!found) return;
+    const { db, user } = found;
+    const walletIds = new Set((db.wallets || []).filter((w) => w.userId === user.id).map((w) => w.id));
+    const events = [];
+
+    (user.loginHistory || []).forEach((entry) => {
+      events.push({
+        type: 'login',
+        timestamp: entry.timestamp,
+        summary: entry.success ? 'Successful login' : 'Failed login',
+        details: { ip: entry.ip, success: entry.success },
+      });
+    });
+
+    (db.transactions || [])
+      .filter((tx) => walletIds.has(tx.fromWalletId) || walletIds.has(tx.toWalletId))
+      .forEach((tx) => {
+        const isDeposit = tx.type === 'deposit' || (!tx.fromWalletId && tx.toWalletId);
+        const isTransfer = tx.type === 'transfer' || tx.type === 'p2p' || (tx.fromWalletId && tx.toWalletId);
+        events.push({
+          type: isDeposit ? 'deposit' : isTransfer ? 'transfer' : 'transaction',
+          timestamp: tx.createdAt || tx.timestamp,
+          summary: `${tx.type || 'transaction'} ${tx.amount} ${tx.currency}`,
+          details: { id: tx.id, status: tx.status },
+        });
+      });
+
+    (db.withdrawals || [])
+      .filter((w) => w.userId === user.id)
+      .forEach((w) => {
+        events.push({
+          type: 'withdrawal',
+          timestamp: w.createdAt,
+          summary: `Withdrawal ${w.amount} ${w.currency} — ${w.status}`,
+          details: { id: w.id, status: w.status },
+        });
+      });
+
+    (db.paymentRequests || [])
+      .filter((pr) => pr.requesterId === user.id || pr.userId === user.id || walletIds.has(pr.walletId))
+      .forEach((pr) => {
+        events.push({
+          type: 'payment_request',
+          timestamp: pr.createdAt,
+          summary: `Payment request ${pr.amount} ${pr.currency} — ${pr.status}`,
+          details: { id: pr.id, status: pr.status },
+        });
+      });
+
+    let kycDocuments = [];
+    try {
+      kycDocuments = await listKycDocuments({ userId: user.id });
+    } catch (_error) {
+      kycDocuments = [];
+    }
+    kycDocuments.forEach((doc) => {
+      events.push({
+        type: 'kyc',
+        timestamp: doc.uploadedAt,
+        summary: `KYC ${doc.documentType} — ${doc.status}`,
+        details: {
+          id: doc.id,
+          status: doc.status,
+          reviewedBy: doc.reviewedBy,
+          rejectionReason: doc.rejectionReason,
+        },
+      });
+    });
+
+    getAdminAuditLogs({ limit: 500 })
+      .filter((entry) => entry.details?.userId === user.id)
+      .forEach((entry) => {
+        events.push({
+          type: 'admin_action',
+          timestamp: entry.timestamp,
+          summary: entry.action,
+          details: { adminId: entry.adminId, ...entry.details },
+        });
+      });
+
+    events.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+    logAdminAction(req, 'USER_TIMELINE_VIEW', { userId: user.id, eventCount: events.length });
+    res.json({ userId: user.id, events, count: events.length });
+  } catch (_error) {
+    res.status(500).json({ error: 'Failed to load timeline' });
+  }
+});
+
+router.get('/:id/notes', adminAuth, requirePermission('notes:read'), async (req, res) => {
+  try {
+    const found = findUserOr404(req, res);
+    if (!found) return;
+    const notes = await listAdminUserNotes(found.user.id);
+    res.json({ notes, count: notes.length });
+  } catch (_error) {
+    res.status(500).json({ error: 'Failed to load notes' });
+  }
+});
+
+router.post('/:id/notes', adminAuth, requirePermission('notes:write'), async (req, res) => {
+  try {
+    const found = findUserOr404(req, res);
+    if (!found) return;
+    const note = (req.body?.note || '').trim();
+    if (!note) return res.status(400).json({ error: 'note is required' });
+
+    const saved = await insertAdminUserNote({
+      userId: found.user.id,
+      adminId: req.admin.id,
+      adminEmail: req.admin.email,
+      note,
+    });
+    logAdminAction(req, 'USER_NOTE_ADD', { userId: found.user.id, noteId: saved.id });
+    res.status(201).json({ note: saved });
+  } catch (_error) {
+    res.status(500).json({ error: 'Failed to save note' });
+  }
+});
+
+function accountAction(action, status) {
+  return (req, res) => {
+    const found = findUserOr404(req, res);
+    if (!found) return;
+    const { db, user } = found;
+    user.accountStatus = status;
+    user.accountStatusUpdatedAt = Date.now();
+    user.accountStatusUpdatedBy = req.admin.email;
+    saveAppState(db);
+    logAdminAction(req, action, { userId: user.id, status });
+    res.json({ success: true, userId: user.id, accountStatus: user.accountStatus });
+  };
+}
+
+router.post('/:id/suspend', adminAuth, requirePermission('users:write'), accountAction('USER_SUSPEND', 'suspended'));
+router.post('/:id/unsuspend', adminAuth, requirePermission('users:write'), accountAction('USER_UNSUSPEND', 'active'));
+router.post('/:id/lock', adminAuth, requirePermission('users:write'), accountAction('USER_LOCK', 'locked'));
+router.post('/:id/unlock', adminAuth, requirePermission('users:write'), accountAction('USER_UNLOCK', 'active'));
+
+router.post('/:id/reset-failed-logins', adminAuth, requirePermission('users:write'), (req, res) => {
+  const found = findUserOr404(req, res);
+  if (!found) return;
+  const { db, user } = found;
+  user.failedLoginAttempts = 0;
+  user.lockedUntil = null;
+  if (user.accountStatus === 'locked') user.accountStatus = 'active';
+  saveAppState(db);
+  logAdminAction(req, 'USER_RESET_FAILED_LOGINS', { userId: user.id });
+  res.json({ success: true, userId: user.id, failedLoginAttempts: 0 });
+});
+
+router.get('/:id', adminAuth, requirePermission('users:read'), async (req, res) => {
+  try {
+    const found = findUserOr404(req, res);
+    if (!found) return;
+    const { db, user } = found;
 
     const wallets = (db.wallets || [])
       .filter((w) => w.userId === user.id)
@@ -145,6 +341,13 @@ router.get('/:id', adminAuth, async (req, res) => {
       kycDocuments = [];
     }
 
+    let notes = [];
+    try {
+      notes = await listAdminUserNotes(user.id, { limit: 20 });
+    } catch (_error) {
+      notes = [];
+    }
+
     const profile = {
       id: user.id,
       email: user.email,
@@ -155,6 +358,9 @@ router.get('/:id', adminAuth, async (req, res) => {
       kycStatus: user.kycStatus || 'pending',
       kycTier: user.kycTier ?? 0,
       kycUpdatedAt: user.kycUpdatedAt || null,
+      accountStatus: user.accountStatus || 'active',
+      failedLoginAttempts: user.failedLoginAttempts || 0,
+      lockedUntil: user.lockedUntil || null,
       createdAt: user.createdAt || null,
     };
 
@@ -167,6 +373,7 @@ router.get('/:id', adminAuth, async (req, res) => {
       paymentRequests,
       withdrawals,
       kycDocuments,
+      notes,
       riskFlags: buildRiskFlags(user, db),
       readOnly: true,
     });
@@ -176,3 +383,4 @@ router.get('/:id', adminAuth, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.appendLoginHistory = appendLoginHistory;

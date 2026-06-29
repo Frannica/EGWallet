@@ -44,10 +44,22 @@ const { normalizeEmail } = require('validator');
 const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const { createWithdrawal, advanceToProcessing, markWithdrawalFailed, markWithdrawalPaid } = require('./withdrawalEngine');
-const { router: adminWithdrawalsRouter, adminAuth, adminLoginHandler, adminLogoutHandler } = require('./adminWithdrawals');
+const { router: adminWithdrawalsRouter } = require('./adminWithdrawals');
+const {
+  adminAuth,
+  adminLoginHandler,
+  adminLogoutHandler,
+  adminMeHandler,
+  bootstrapAdminIfNeeded,
+  requirePermission,
+} = require('./adminAuth');
 const adminKycRouter = require('./adminKyc');
 const adminUsersRouter = require('./adminUsers');
+const adminStatsRouter = require('./adminStats');
+const adminLogsRouter = require('./adminLogs');
+const { router: adminSettingsRouter, isMaintenanceModeEnabled } = require('./adminSettings');
 const { getAdminAuditLogs } = require('./adminAudit');
+const { appendLoginHistory } = require('./adminUsers');
 const { kycUploadMiddleware, handleKycUpload } = require('./kycUpload');
 const { executePayout, payoutRouter } = require('./payoutProviders');
 const {
@@ -151,13 +163,12 @@ if (NODE_ENV === 'production') {
     process.exit(1);
   }
 
-  const _adminSecret = process.env.ADMIN_SECRET;
-  if (!_adminSecret || _adminSecret.length < 32) {
+  const _bootstrapEmail = process.env.ADMIN_BOOTSTRAP_EMAIL;
+  const _bootstrapPassword = process.env.ADMIN_BOOTSTRAP_PASSWORD;
+  if ((!_bootstrapEmail || !_bootstrapPassword) && !process.env.DATABASE_URL) {
     console.error(
-      '❌ FATAL: ADMIN_SECRET is missing or shorter than 32 characters. ' +
-      'Without a strong ADMIN_SECRET, admin login is impossible and any pending_review ' +
-      'withdrawals cannot be approved or refunded, permanently locking user funds. ' +
-      'Set a strong ADMIN_SECRET in your Railway environment variables.'
+      '❌ FATAL: Set DATABASE_URL plus ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD ' +
+      'to create the first admin account in production.'
     );
     process.exit(1);
   }
@@ -2503,6 +2514,21 @@ app.post('/webhooks/kora',
 
 app.use(express.json({ limit: '100kb' }));
 
+app.use(async (req, res, next) => {
+  if (req.path.startsWith('/admin') || req.path === '/health' || req.path === '/healthz') {
+    return next();
+  }
+  try {
+    const enabled = await isMaintenanceModeEnabled();
+    if (enabled) {
+      return res.status(503).json({ error: 'Service temporarily unavailable', maintenance: true });
+    }
+  } catch (_error) {
+    // Non-fatal if settings table unavailable
+  }
+  next();
+});
+
 // Expose shared utilities to routers (adminWithdrawals.js uses these)
 app.locals.loadAppState = loadAppState;
 app.locals.saveAppState = saveAppState;
@@ -2940,15 +2966,46 @@ app.post('/auth/login',
   const lang = req.lang || 'en';
   
   const u = findUserByEmail(db, email);
+  const loginEntry = { timestamp: Date.now(), ip: req.clientIP, success: false };
+
   if (!u) {
     logger.warn('Login attempt - user not found', { email: maskEmail(email), ip: req.clientIP });
     return res.status(401).json({ error: t('error_invalid_credentials', lang) });
   }
-  
+
+  if (u.accountStatus === 'suspended') {
+    appendLoginHistory(u, { ...loginEntry, reason: 'suspended' });
+    saveAppState(db);
+    return res.status(403).json({ error: 'Account suspended. Contact support.' });
+  }
+
+  if (u.lockedUntil && u.lockedUntil > Date.now()) {
+    appendLoginHistory(u, { ...loginEntry, reason: 'locked' });
+    saveAppState(db);
+    return res.status(423).json({ error: 'Account temporarily locked. Try again later.' });
+  }
+
+  if (u.accountStatus === 'locked') {
+    appendLoginHistory(u, { ...loginEntry, reason: 'locked' });
+    saveAppState(db);
+    return res.status(403).json({ error: 'Account locked. Contact support.' });
+  }
+
   if (!bcrypt.compareSync(password, u.passwordHash)) {
+    u.failedLoginAttempts = (u.failedLoginAttempts || 0) + 1;
+    if (u.failedLoginAttempts >= 5) {
+      u.lockedUntil = Date.now() + 15 * 60 * 1000;
+      u.accountStatus = 'locked';
+    }
+    appendLoginHistory(u, loginEntry);
+    saveAppState(db);
     logger.warn('Login attempt - invalid password', { userId: u.id, ip: req.clientIP });
     return res.status(401).json({ error: t('error_invalid_credentials', lang) });
   }
+
+  u.failedLoginAttempts = 0;
+  u.lockedUntil = null;
+  appendLoginHistory(u, { ...loginEntry, success: true });
 
   // Check if this is a new device
   let isNewDevice = false;
@@ -3784,12 +3841,18 @@ app.post('/transactions', authMiddleware, async (req, res) => {
 });
 
 // ==================== ADMIN ROUTES ====================
-app.post('/admin/login',  adminLoginLimiter, adminLoginHandler);
-app.post('/admin/logout', adminLoginLimiter, adminLogoutHandler);
+app.post('/admin/auth/login', adminLoginLimiter, adminLoginHandler);
+app.post('/admin/login', adminLoginLimiter, adminLoginHandler);
+app.get('/admin/auth/me', adminAuth, adminMeHandler);
+app.post('/admin/auth/logout', adminAuth, adminLogoutHandler);
+app.post('/admin/logout', adminAuth, adminLogoutHandler);
+app.use('/admin/stats', adminStatsRouter);
+app.use('/admin/logs', adminLogsRouter);
+app.use('/admin/settings', adminSettingsRouter);
 app.use('/admin/withdrawals', adminWithdrawalsRouter);
 app.use('/admin/kyc', adminKycRouter);
 app.use('/admin/users', adminUsersRouter);
-app.get('/admin/audit/actions', adminAuth, (req, res) => {
+app.get('/admin/audit/actions', adminAuth, requirePermission('logs:read'), (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 100;
   res.json({ actions: getAdminAuditLogs({ limit }) });
 });
@@ -9879,6 +9942,9 @@ app.use((req, res) => {
 console.log('PORT from Railway:', process.env.PORT);
 
 const server = app.listen(PORT, '0.0.0.0', () => {
+  bootstrapAdminIfNeeded().catch((err) => {
+    console.warn('[admin] Bootstrap error:', err.message);
+  });
   console.log(`Server running on port ${PORT}`);
   console.log(`Server bound to 0.0.0.0:${PORT} — ready for connections`);
   logger.info(`EGWallet backend started`, {

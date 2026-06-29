@@ -10,7 +10,9 @@
     "db:import": "node scripts/import-db-json.js",
     "db:parity": "node scripts/verify-parity.js",
     "test:db:phase0": "node --test __tests__/db/*.test.js",
-    "test:admin": "node --test __tests__/admin-dashboard.test.js"
+    "test:admin": "node --test __tests__/admin-dashboard.test.js",
+    "test:admin-platform": "node --test __tests__/admin-platform.test.js",
+    "test:admin-all": "node --test __tests__/admin-dashboard.test.js __tests__/admin-platform.test.js"
   },
   "dependencies": {
     "axios": "^1.6.0",

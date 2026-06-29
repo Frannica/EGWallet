@@ -4,8 +4,8 @@ import {
   fetchKycDocumentBlob,
   approveKycDocument,
   rejectKycDocument,
+  hasPermission,
 } from './api';
-
 function formatDate(ts) {
   if (!ts) return '—';
   return new Date(ts).toLocaleString();
@@ -44,6 +44,7 @@ export default function KycReview({ focusDocumentId, onClearFocus, onViewUser })
     if (previewUrl) URL.revokeObjectURL(previewUrl);
   }, [previewUrl]);
 
+  const canApprove = hasPermission('kyc:approve');
   const selected = documents.find((d) => d.id === selectedId) || null;
 
   async function handlePreview(docId) {
@@ -143,32 +144,36 @@ export default function KycReview({ focusDocumentId, onClearFocus, onViewUser })
                 <img src={previewUrl} alt="KYC document" />
               </div>
             )}
-            <label className="form-label">Approve tier (0–3)</label>
-            <input
-              type="number"
-              min="0"
-              max="3"
-              className="form-input"
-              value={approveTier}
-              onChange={(e) => setApproveTier(Number(e.target.value))}
-            />
-            <button className="btn btn-primary" disabled={actionLoading} onClick={handleApprove} style={{ marginTop: 12 }}>
-              Approve KYC
-            </button>
-
-            <hr className="divider" />
-
-            <label className="form-label">Rejection reason</label>
-            <textarea
-              className="form-input"
-              rows={3}
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="Reason shown internally for audit"
-            />
-            <button className="btn btn-danger" disabled={actionLoading} onClick={handleReject} style={{ marginTop: 12 }}>
-              Reject KYC
-            </button>
+            {canApprove ? (
+              <>
+                <label className="form-label">Approve tier (0–3)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="3"
+                  className="form-input"
+                  value={approveTier}
+                  onChange={(e) => setApproveTier(Number(e.target.value))}
+                />
+                <button className="btn btn-primary" disabled={actionLoading} onClick={handleApprove} style={{ marginTop: 12 }}>
+                  Approve KYC
+                </button>
+                <hr className="divider" />
+                <label className="form-label">Rejection reason</label>
+                <textarea
+                  className="form-input"
+                  rows={3}
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  placeholder="Reason shown internally for audit"
+                />
+                <button className="btn btn-danger" disabled={actionLoading} onClick={handleReject} style={{ marginTop: 12 }}>
+                  Reject KYC
+                </button>
+              </>
+            ) : (
+              <p className="muted">Compliance role required to approve or reject KYC.</p>
+            )}
           </div>
         )}
       </div>

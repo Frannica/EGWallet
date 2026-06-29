@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { adminAuth } = require('./adminWithdrawals');
+const { adminAuth, requirePermission, getAdminActor } = require('./adminAuth');
 const { loadAppState, saveAppState } = require('./db/appStateStore');
 const {
   listKycDocuments,
@@ -11,7 +11,7 @@ const {
   updateKycDocumentReview,
   updateUserKycFields,
 } = require('./db/kycUploadPostgres');
-const { logAdminAction, getAdminActor } = require('./adminAudit');
+const { logAdminAction } = require('./adminAudit');
 
 const router = express.Router();
 
@@ -37,7 +37,7 @@ function syncUserKycInAppState(userId, { kycStatus, kycTier }) {
   return user;
 }
 
-router.get('/pending', adminAuth, async (req, res) => {
+router.get('/pending', adminAuth, requirePermission('kyc:read'), async (req, res) => {
   try {
     const pendingStatuses = ['under_review', 'pending', 'pending_verification'];
     const documents = await listKycDocuments({ status: req.query.status || undefined });
@@ -51,7 +51,7 @@ router.get('/pending', adminAuth, async (req, res) => {
   }
 });
 
-router.get('/documents', adminAuth, async (req, res) => {
+router.get('/documents', adminAuth, requirePermission('kyc:read'), async (req, res) => {
   try {
     const documents = await listKycDocuments({
       userId: req.query.userId || undefined,
@@ -68,7 +68,7 @@ router.get('/documents', adminAuth, async (req, res) => {
   }
 });
 
-router.get('/documents/:id/content', adminAuth, async (req, res) => {
+router.get('/documents/:id/content', adminAuth, requirePermission('kyc:read'), async (req, res) => {
   try {
     const payload = await readKycDocumentContent(req.params.id);
     if (!payload) return res.status(404).json({ error: 'Document not found' });
@@ -82,7 +82,7 @@ router.get('/documents/:id/content', adminAuth, async (req, res) => {
   }
 });
 
-router.get('/documents/:id', adminAuth, async (req, res) => {
+router.get('/documents/:id', adminAuth, requirePermission('kyc:read'), async (req, res) => {
   try {
     const document = await getKycDocumentById(req.params.id);
     if (!document) return res.status(404).json({ error: 'Document not found' });
@@ -93,7 +93,7 @@ router.get('/documents/:id', adminAuth, async (req, res) => {
   }
 });
 
-router.post('/documents/:id/approve', adminAuth, async (req, res) => {
+router.post('/documents/:id/approve', adminAuth, requirePermission('kyc:approve'), async (req, res) => {
   try {
     const document = await getKycDocumentById(req.params.id);
     if (!document) return res.status(404).json({ error: 'Document not found' });
@@ -142,7 +142,7 @@ router.post('/documents/:id/approve', adminAuth, async (req, res) => {
   }
 });
 
-router.post('/documents/:id/reject', adminAuth, async (req, res) => {
+router.post('/documents/:id/reject', adminAuth, requirePermission('kyc:approve'), async (req, res) => {
   try {
     const reason = (req.body?.reason || '').trim();
     if (!reason) return res.status(400).json({ error: 'reason is required' });

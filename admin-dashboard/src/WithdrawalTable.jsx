@@ -23,10 +23,18 @@ function formatAmount(amount, currency) {
   return `${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency || ''}`;
 }
 
+const QUEUE_TABS = [
+  { id: 'pending', label: 'Pending', statuses: ['pending_review', 'pending', 'submitted'] },
+  { id: 'processing', label: 'Processing', statuses: ['processing', 'approved'] },
+  { id: 'failed', label: 'Failed', statuses: ['failed', 'reversed'] },
+  { id: 'completed', label: 'Completed', statuses: ['paid', 'completed'] },
+];
+
 export default function WithdrawalTable({ onSelect }) {
+  const [queueTab, setQueueTab] = useState('pending');
   const [withdrawals, setWithdrawals] = useState([]);
+  const [allWithdrawals, setAllWithdrawals] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterCurrency, setFilterCurrency] = useState('');
   const [filterUserId, setFilterUserId] = useState('');
@@ -48,14 +56,15 @@ export default function WithdrawalTable({ onSelect }) {
       // Support both paginated shape { data, page, totalPages, totalItems }
       // and old shape { withdrawals } for safety
       if (data.data) {
-        setWithdrawals(data.data);
+        setAllWithdrawals(data.data);
         setPage(data.page);
         setTotalPages(data.totalPages);
         setTotalItems(data.totalItems);
       } else {
-        setWithdrawals(Array.isArray(data) ? data : data.withdrawals || []);
+        const list = Array.isArray(data) ? data : data.withdrawals || [];
+        setAllWithdrawals(list);
         setTotalPages(1);
-        setTotalItems((Array.isArray(data) ? data : data.withdrawals || []).length);
+        setTotalItems(list.length);
       }
     } catch (err) {
       setError(err.message);
@@ -71,11 +80,42 @@ export default function WithdrawalTable({ onSelect }) {
 
   useEffect(() => { load(page); }, [filterStatus, filterCurrency, filterUserId, page]); // eslint-disable-line
 
+  useEffect(() => {
+    const tab = QUEUE_TABS.find((t) => t.id === queueTab);
+    if (!tab) return;
+    if (queueTab === 'pending' && !filterStatus) {
+      setWithdrawals(allWithdrawals.filter((w) => tab.statuses.includes(w.status)));
+    } else if (!filterStatus) {
+      setWithdrawals(allWithdrawals.filter((w) => tab.statuses.includes(w.status)));
+    } else {
+      setWithdrawals(allWithdrawals);
+    }
+  }, [allWithdrawals, queueTab, filterStatus]);
+
+  function handleQueueTab(tabId) {
+    setQueueTab(tabId);
+    setFilterStatus('');
+    setPage(1);
+  }
+
   function handlePrev() { if (page > 1) setPage(p => p - 1); }
   function handleNext() { if (page < totalPages) setPage(p => p + 1); }
 
   return (
     <div>
+      <h2 className="page-title">Withdrawals Queue</h2>
+      <div className="queue-tabs">
+        {QUEUE_TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className={`queue-tab ${queueTab === t.id ? 'active' : ''}`}
+            onClick={() => handleQueueTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
       <div className="filter-bar">
         <div className="filter-group">
           <label className="form-label">Status</label>

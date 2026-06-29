@@ -10,6 +10,7 @@ const express = require('express');
 const crypto  = require('crypto');
 const axios   = require('axios');
 const router  = express.Router();
+const { adminAuth, requirePermission } = require('./adminAuth');
 const { adminTransition, markWithdrawalPaid, markWithdrawalFailed } = require('./withdrawalEngine');
 const { payoutRouter } = require('./payoutProviders');
 const { commitWithdrawalStateUpdate } = require('./db/withdrawalsPostgres');
@@ -31,46 +32,9 @@ function sanitizeAdmin(w) {
   };
 }
 
-// ─── Token store ──────────────────────────────────────────────────────────────
-// Map<sha256(token), expiresAt (ms)>  — raw tokens are never stored, only hashes.
-// This prevents a memory-dump or debug-log from exposing live bearer tokens.
-const TOKEN_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
-const activeTokens = new Map();
-
-function hashAdminToken(raw) {
-  return crypto.createHash('sha256').update(raw).digest('hex');
-}
-
-function issueToken() {
-  const raw       = crypto.randomBytes(32).toString('hex');
-  const expiresAt = Date.now() + TOKEN_TTL_MS;
-  activeTokens.set(hashAdminToken(raw), expiresAt);
-  return { token: raw, expiresAt };
-}
-
-function validateToken(raw) {
-  if (!raw) return false;
-  const hash      = hashAdminToken(raw);
-  const expiresAt = activeTokens.get(hash);
-  if (!expiresAt) return false;
-  if (Date.now() > expiresAt) {
-    activeTokens.delete(hash);
-    return false;
-  }
-  return true;
-}
-
-// ─── Admin authentication middleware ─────────────────────────────────────────
-function adminAuth(req, res, next) {
-  const authHeader = req.headers['authorization'] || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
-  if (!validateToken(token)) return res.status(401).json({ error: 'Unauthorized' });
-  next();
-}
-
 // ─── GET /admin/withdrawals ───────────────────────────────────────────────────
 // Optional query: ?status=pending_review&currency=XAF&userId=xxx
-router.get('/', adminAuth, (req, res) => {
+router.get('/', adminAuth, requirePermission('withdrawals:read'), (req, res) => {
   const db = loadAppState();
   let list = db.withdrawals || [];
 
@@ -95,7 +59,7 @@ router.get('/', adminAuth, (req, res) => {
 
 // ─── GET /admin/withdrawals/:id ───────────────────────────────────────────────
 // Returns withdrawal + its ledger entries
-router.get('/:id', adminAuth, (req, res) => {
+router.get('/:id', adminAuth, requirePermission('withdrawals:read'), (req, res) => {
   const db = loadAppState();
   const w = (db.withdrawals || []).find(x => x.id === req.params.id);
   if (!w) return res.status(404).json({ error: 'Withdrawal not found' });
@@ -109,11 +73,11 @@ router.get('/:id', adminAuth, (req, res) => {
 // Moves the withdrawal through the state machine.
 // C3: wrapped in withBalanceMutex — transitions to 'failed'/'reversed' issue refunds
 // that credit available balance and must be serialised with all other balance writes.
-router.post('/:id/transition', adminAuth, async (req, res) => {
+router.post('/:id/transition', adminAuth, requirePermission('withdrawals:write'), async (req, res) => {
   const { status, note } = req.body;
   if (!status) return res.status(400).json({ error: '"status" is required' });
 
-  const adminId = req.headers['x-admin-id'] || 'unknown-admin';
+  const adminId = req.admin?.email || 'unknown-admin';
 
   // withBalanceMutex is injected via app.locals in index.js; fall back to plain call
   // in environments where it is not yet set (tests, legacy callers).
@@ -176,8 +140,8 @@ router.post('/:id/transition', adminAuth, async (req, res) => {
 //   - payoutDispatchRef set but no payoutReference (mid-call crash / timeout)
 //
 // Response: { status: 'paid'|'failed'|'pending', withdrawal }
-router.post('/:id/reconcile', adminAuth, async (req, res) => {
-  const adminId           = req.headers['x-admin-id'] || 'unknown-admin';
+router.post('/:id/reconcile', adminAuth, requirePermission('withdrawals:write'), async (req, res) => {
+  const adminId           = req.admin?.email || 'unknown-admin';
   const withBalanceMutex  = req.app.locals.withBalanceMutex || ((fn) => fn());
   const { logger } = req.app.locals;
 
@@ -504,33 +468,4 @@ router.post('/:id/reconcile', adminAuth, async (req, res) => {
   });
 });
 
-// ─── Logout handler — exported so index.js can mount it at POST /admin/logout ─
-// Revokes the supplied bearer token by removing its hash from the in-memory store.
-// Deleting a non-existent key is a safe no-op, so this is idempotent.
-// No auth middleware needed — the token IS the credential being invalidated.
-function adminLogoutHandler(req, res) {
-  const authHeader = req.headers['authorization'] || '';
-  const raw = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
-  if (!raw) return res.status(400).json({ error: 'No token provided' });
-  activeTokens.delete(hashAdminToken(raw));
-  res.json({ ok: true });
-}
-
-// ─── Login handler — exported so index.js can mount it at POST /admin/login ──
-function adminLoginHandler(req, res) {
-  const { secret } = req.body || {};
-  if (!secret || !process.env.ADMIN_SECRET)
-    return res.status(401).json({ error: 'Invalid credentials' });
-  let match = false;
-  try {
-    match = crypto.timingSafeEqual(
-      Buffer.from(secret),
-      Buffer.from(process.env.ADMIN_SECRET)
-    );
-  } catch (_) {} // Different lengths — not equal
-  if (!match) return res.status(401).json({ error: 'Invalid credentials' });
-  const { token, expiresAt } = issueToken();
-  res.json({ token, expiresAt });
-}
-
-module.exports = { router, adminAuth, adminLoginHandler, adminLogoutHandler };
+module.exports = { router };

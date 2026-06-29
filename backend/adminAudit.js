@@ -30,6 +30,8 @@ function getClientIP(req) {
 }
 
 function getAdminActor(req) {
+  if (req?.admin?.email) return req.admin.email;
+  if (req?.admin?.id) return req.admin.id;
   return req.headers['x-admin-id'] || req.headers['x-admin-name'] || 'admin';
 }
 

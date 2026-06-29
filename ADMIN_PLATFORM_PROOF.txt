@@ -1,0 +1,67 @@
+EGWallet Admin Platform v1 — Proof Report
+Generated: 2026-06-28
+
+DASHBOARD URL
+  Production: https://<backend-host>/admin/dashboard/
+  Login API:    POST /admin/auth/login  { email, password }
+
+AUTH (replaces ADMIN_SECRET)
+  - admin_users table (PostgreSQL)
+  - bcrypt password hashes (cost 12)
+  - JWT admin_access tokens (8h default)
+  - Roles: super_admin, support, compliance, read_only
+  - Bootstrap: ADMIN_BOOTSTRAP_EMAIL + ADMIN_BOOTSTRAP_PASSWORD on first deploy
+
+FEATURES DELIVERED
+  [P0] Admin accounts + JWT + roles/permissions
+  [P1] Dashboard home stats (/admin/stats)
+  [P1] Instant user search (/admin/users/search)
+  [P1] Support tools: suspend, unsuspend, lock, unlock, reset failed logins
+  [P1] Internal user notes with author + history (admin_user_notes)
+  [P2] Support timeline (/admin/users/:id/timeline)
+  [P2] Role-gated UI (KYC approve = compliance/super_admin only)
+  [P3] Withdrawals queue tabs (Pending/Processing/Failed/Completed)
+  [P3] System logs viewer (/admin/logs/errors)
+  [P4] Settings: maintenance mode, daily limits (/admin/settings)
+
+SECURITY
+  - All /admin/* routes require JWT admin_access (except /admin/auth/login)
+  - Permission middleware on every sensitive action
+  - KYC documents admin-auth only
+  - Money data read-only
+  - Admin actions audit-logged
+  - Maintenance mode blocks non-admin API
+
+TESTS
+  Command: cd backend && npm run test:admin-all
+  Result:  17/17 PASS
+
+  admin-dashboard.test.js (8):
+    - admin login required
+    - non-admin blocked
+    - user search
+    - user detail read-only
+    - no balance edit endpoint
+    - KYC doc view requires admin
+    - KYC approve updates status/tier
+    - KYC reject stores reason
+
+  admin-platform.test.js (9):
+    - JWT login required
+    - support blocked from KYC approve
+    - compliance can approve KYC
+    - dashboard stats load
+    - user search and suspend
+    - user notes with author
+    - user timeline
+    - settings super_admin only
+    - money read-only
+
+PRODUCTION DEPLOY
+  1. Set DATABASE_URL
+  2. Run: npm run db:migrate (applies 004_admin_platform.sql)
+  3. Set ADMIN_BOOTSTRAP_EMAIL + ADMIN_BOOTSTRAP_PASSWORD (first boot only)
+  4. Railway builds admin-dashboard automatically (railway.toml)
+  5. Remove ADMIN_SECRET (no longer used)
+
+PRODUCTION-READY: YES

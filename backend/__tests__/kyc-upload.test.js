@@ -101,7 +101,7 @@ async function seedUser(userId) {
 async function startTestServer() {
   const app = express();
   app.use(express.json());
-  app.post('/admin/login', adminLoginHandler);
+  app.post('/admin/auth/login', adminLoginHandler);
   app.post('/kyc/upload', authMiddleware, kycUploadMiddleware, handleKycUpload);
   app.use('/admin/kyc', adminKycRouter);
 
@@ -137,7 +137,11 @@ test.before(async () => {
       handleKycUpload,
     } = require('../kycUpload'));
     adminKycRouter = require('../adminKyc');
-    ({ adminLoginHandler } = require('../adminWithdrawals'));
+    ({ adminLoginHandler } = require('../adminAuth'));
+    const { createAdminUser, ensureAdminPlatformTables } = require('../db/adminPlatformPostgres');
+    await ensureAdminPlatformTables();
+    await pool.query(`DELETE FROM admin_users WHERE email = $1`, ['kyc-admin@test.local']).catch(() => {});
+    await createAdminUser({ email: 'kyc-admin@test.local', password: 'KycAdminPass123!', role: 'super_admin' });
     ({
       deleteKycDocument,
       ensureKycDocumentsTable,
@@ -163,7 +167,11 @@ test.before(async () => {
       handleKycUpload,
     } = require('../kycUpload'));
     adminKycRouter = require('../adminKyc');
-    ({ adminLoginHandler } = require('../adminWithdrawals'));
+    ({ adminLoginHandler } = require('../adminAuth'));
+    const { createAdminUser, ensureAdminPlatformTables } = require('../db/adminPlatformPostgres');
+    await ensureAdminPlatformTables();
+    await pool.query(`DELETE FROM admin_users WHERE email = $1`, ['kyc-admin@test.local']).catch(() => {});
+    await createAdminUser({ email: 'kyc-admin@test.local', password: 'KycAdminPass123!', role: 'super_admin' });
     testUserId = uuidv4();
     console.warn('[kyc-upload.test] PostgreSQL unavailable — integration tests will be skipped');
   }
@@ -171,10 +179,10 @@ test.before(async () => {
   accessToken = jwt.sign({ userId: testUserId, type: 'access', tokenVersion: 0 }, process.env.JWT_SECRET);
   await startTestServer();
 
-  const adminLoginRes = await fetch(`${baseUrl}/admin/login`, {
+  const adminLoginRes = await fetch(`${baseUrl}/admin/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ secret: process.env.ADMIN_SECRET }),
+    body: JSON.stringify({ email: 'kyc-admin@test.local', password: 'KycAdminPass123!' }),
   });
   assert.equal(adminLoginRes.status, 200);
   const adminBody = await adminLoginRes.json();
@@ -186,6 +194,7 @@ test.after(async () => {
     for (const id of createdDocumentIds) {
       await deleteKycDocument(id);
     }
+    await pool.query('DELETE FROM admin_users WHERE email = $1', ['kyc-admin@test.local']).catch(() => {});
     await pool.query('DELETE FROM users WHERE id = $1', [testUserId]);
     await pool.end();
   }
