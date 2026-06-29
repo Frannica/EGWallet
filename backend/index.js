@@ -2280,9 +2280,9 @@ const corsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Idempotency-Key', 'Accept-Language']
 };
 
-// CORS - Restrict origins in production (skip admin SPA static assets; Vite uses crossorigin module loads)
+// CORS - Restrict origins in production (skip admin routes; same-origin admin SPA + JWT auth)
 app.use((req, res, next) => {
-  if (req.path.startsWith('/admin/dashboard')) {
+  if (req.path.startsWith('/admin')) {
     return next();
   }
   return cors(corsOptions)(req, res, next);
