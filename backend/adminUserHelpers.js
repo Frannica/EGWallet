@@ -7,6 +7,8 @@ const KYC_TIERS = {
   2: { name: 'Verified', dailyLimit: 10000, weeklyLimit: 25000, monthlyLimit: 50000 },
 };
 
+const { userVirtualCardCharges, mapVirtualCardCharge } = require('./virtualCardCharges');
+
 const ACTIVITY_CATEGORIES = [
   'deposits',
   'exchanges',
@@ -15,6 +17,7 @@ const ACTIVITY_CATEGORIES = [
   'payment_requests',
   'withdrawals',
   'virtual_cards',
+  'virtual_card_charges',
   'transactions',
 ];
 
@@ -227,6 +230,7 @@ function buildActivityCounts(db, userId, walletIds) {
     payment_requests: userPaymentRequests(db, userId, walletIds).length,
     withdrawals: userWithdrawals(db, userId).length,
     virtual_cards: userVirtualCards(db, userId).length,
+    virtual_card_charges: userVirtualCardCharges(db, userId).length,
     qr_codes: userQrCodes(db, userId).length,
   };
 }
@@ -252,6 +256,11 @@ function getUserActivity(db, user, category, page, limit) {
 
   if (category === 'virtual_cards') {
     const list = userVirtualCards(db, user.id).map(sanitizeVirtualCard);
+    return { category, ...paginate(list, page, limit) };
+  }
+
+  if (category === 'virtual_card_charges') {
+    const list = userVirtualCardCharges(db, user.id).map((c) => mapVirtualCardCharge(c, db));
     return { category, ...paginate(list, page, limit) };
   }
 

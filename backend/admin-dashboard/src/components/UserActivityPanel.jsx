@@ -19,6 +19,7 @@ const TABS = [
   { id: 'payment_requests', label: 'Request Money' },
   { id: 'withdrawals', label: 'Withdrawals' },
   { id: 'virtual_cards', label: 'Virtual Cards' },
+  { id: 'virtual_card_charges', label: 'Card Charges' },
   { id: 'transactions', label: 'All Transactions' },
 ];
 
@@ -32,6 +33,19 @@ function renderRow(category, item) {
         <td>{formatAmount(item.spentToday, item.currency)} spent today</td>
         <td>{formatAmount(item.dailyLimit, item.currency)} daily cap</td>
         <td>{formatDate(item.createdAt)}</td>
+      </tr>
+    );
+  }
+  if (category === 'virtual_card_charges') {
+    return (
+      <tr key={item.id}>
+        <td>{formatDate(item.createdAt)}</td>
+        <td className="mono">{item.maskedCard || item.cardLast4 || '—'}</td>
+        <td>{item.type}</td>
+        <td>{formatAmount(item.amount, item.currency)}</td>
+        <td>{item.merchant || '—'}</td>
+        <td>{item.status}</td>
+        <td className="mono">{item.providerReference ? String(item.providerReference).slice(0, 12) : '—'}</td>
       </tr>
     );
   }
@@ -81,6 +95,9 @@ function renderRow(category, item) {
 function tableHeaders(category) {
   if (category === 'virtual_cards') {
     return ['Card', 'Label', 'Status', 'Spent Today', 'Daily Limit', 'Created'];
+  }
+  if (category === 'virtual_card_charges') {
+    return ['Date', 'Card', 'Type', 'Amount', 'Merchant', 'Status', 'Provider Ref'];
   }
   if (category === 'qr_codes') {
     return ['ID', 'Type', 'State', 'Amount', 'Memo', 'Created'];

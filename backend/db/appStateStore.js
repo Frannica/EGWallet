@@ -5,7 +5,7 @@ const { getPostgresStateSync, setPostgresStateSync, getPostgresStatusSync } = re
 function emptyAppState() {
   return {
     users: [], wallets: [], transactions: [], paymentRequests: [],
-    virtualCards: [], budgets: [], devices: [], supportTickets: [],
+    virtualCards: [], virtualCardCharges: [], budgets: [], devices: [], supportTickets: [],
     fraudAlerts: [], savedContacts: [], qrCodes: [], refreshTokens: [],
     auditLog: [], employers: [], employerEmployees: [], payrollBatches: [],
     demoIntents: [], notifications: [], passwordResetTokens: [],
@@ -40,6 +40,7 @@ function emptyAppState() {
 function hydrateAppState(state) {
   if (!state.paymentRequests) state.paymentRequests = [];
   if (!state.virtualCards) state.virtualCards = [];
+  if (!state.virtualCardCharges) state.virtualCardCharges = [];
   if (!state.budgets) state.budgets = [];
   if (!state.devices) state.devices = [];
   if (!state.supportTickets) state.supportTickets = [];
