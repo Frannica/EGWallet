@@ -25,6 +25,9 @@ async function ensureKycDocumentsTable() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS kyc_documents_status_idx ON kyc_documents(status)
   `);
+  await pool.query(`ALTER TABLE kyc_documents ADD COLUMN IF NOT EXISTS reviewed_by TEXT`);
+  await pool.query(`ALTER TABLE kyc_documents ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE kyc_documents ADD COLUMN IF NOT EXISTS rejection_reason TEXT`);
   schemaReady = true;
 }
 
@@ -39,6 +42,9 @@ function mapDocumentRow(row) {
     sizeBytes: Number(row.size_bytes),
     status: row.status,
     uploadedAt: row.uploaded_at ? new Date(row.uploaded_at).getTime() : Date.now(),
+    reviewedBy: row.reviewed_by || null,
+    reviewedAt: row.reviewed_at ? new Date(row.reviewed_at).getTime() : null,
+    rejectionReason: row.rejection_reason || null,
   };
 }
 
@@ -51,6 +57,9 @@ function toPublicDocument(doc) {
     sizeBytes: doc.sizeBytes,
     status: doc.status,
     uploadedAt: doc.uploadedAt,
+    reviewedBy: doc.reviewedBy || null,
+    reviewedAt: doc.reviewedAt || null,
+    rejectionReason: doc.rejectionReason || null,
   };
 }
 
@@ -147,6 +156,40 @@ async function deleteKycDocument(documentId) {
   return true;
 }
 
+async function updateKycDocumentReview(documentId, {
+  status,
+  reviewedBy,
+  rejectionReason = null,
+}) {
+  await ensureKycDocumentsTable();
+  const result = await pool.query(
+    `UPDATE kyc_documents
+     SET status = $2,
+         reviewed_by = $3,
+         reviewed_at = NOW(),
+         rejection_reason = $4
+     WHERE id = $1
+     RETURNING *`,
+    [documentId, status, reviewedBy, rejectionReason],
+  );
+  return mapDocumentRow(result.rows[0]);
+}
+
+async function updateUserKycFields(userId, { kycStatus, kycTier }) {
+  await ensureKycDocumentsTable();
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_status TEXT DEFAULT 'pending'`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_tier INT DEFAULT 0`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_updated_at TIMESTAMPTZ`);
+  await pool.query(
+    `UPDATE users
+     SET kyc_status = $2,
+         kyc_tier = $3,
+         kyc_updated_at = NOW()
+     WHERE id = $1`,
+    [userId, kycStatus, kycTier],
+  );
+}
+
 module.exports = {
   ensureKycDocumentsTable,
   insertKycDocument,
@@ -154,5 +197,7 @@ module.exports = {
   getKycDocumentById,
   readKycDocumentContent,
   deleteKycDocument,
+  updateKycDocumentReview,
+  updateUserKycFields,
   toPublicDocument,
 };

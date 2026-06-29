@@ -3,7 +3,7 @@
 
 [build]
 builder = "NIXPACKS"
-buildCommand = "npm install --prefix backend"
+buildCommand = "npm install --prefix backend && npm install --prefix admin-dashboard && npm run build --prefix admin-dashboard"
 
 [deploy]
 startCommand = "npm --prefix backend start"

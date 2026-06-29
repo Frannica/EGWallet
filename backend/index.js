@@ -46,6 +46,8 @@ const { parse } = require('csv-parse/sync');
 const { createWithdrawal, advanceToProcessing, markWithdrawalFailed, markWithdrawalPaid } = require('./withdrawalEngine');
 const { router: adminWithdrawalsRouter, adminAuth, adminLoginHandler, adminLogoutHandler } = require('./adminWithdrawals');
 const adminKycRouter = require('./adminKyc');
+const adminUsersRouter = require('./adminUsers');
+const { getAdminAuditLogs } = require('./adminAudit');
 const { kycUploadMiddleware, handleKycUpload } = require('./kycUpload');
 const { executePayout, payoutRouter } = require('./payoutProviders');
 const {
@@ -3786,6 +3788,11 @@ app.post('/admin/login',  adminLoginLimiter, adminLoginHandler);
 app.post('/admin/logout', adminLoginLimiter, adminLogoutHandler);
 app.use('/admin/withdrawals', adminWithdrawalsRouter);
 app.use('/admin/kyc', adminKycRouter);
+app.use('/admin/users', adminUsersRouter);
+app.get('/admin/audit/actions', adminAuth, (req, res) => {
+  const limit = parseInt(req.query.limit, 10) || 100;
+  res.json({ actions: getAdminAuditLogs({ limit }) });
+});
 
 // Withdrawals to bank/mobile money
 app.post('/withdrawals', authMiddleware, async (req, res) => {
@@ -9847,6 +9854,15 @@ app.use((err, req, res, next) => {
   }
 });
 
+// Admin dashboard (static SPA) — served from built admin-dashboard/dist
+const adminDashboardDist = path.join(__dirname, '..', 'admin-dashboard', 'dist');
+if (fs.existsSync(adminDashboardDist)) {
+  app.use('/admin/dashboard', express.static(adminDashboardDist, { index: 'index.html' }));
+  app.get('/admin/dashboard/*', (_req, res) => {
+    res.sendFile(path.join(adminDashboardDist, 'index.html'));
+  });
+}
+
 // 404 handler
 app.use((req, res) => {
   const lang = req.lang || 'en';
@@ -9889,7 +9905,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`   Auth: POST /auth/register, /auth/login`);
   console.log(`   AI: POST /ai/chat (rate limit: ${process.env.AI_CHAT_RATE_LIMIT || 10}/min)`);
   console.log(`   GDPR: GET /gdpr/export, DELETE /gdpr/delete-account`);
-  console.log(`   Admin: GET /admin/health/detailed, /admin/audit-logs`);
+  console.log(`   Admin: GET /admin/dashboard, /admin/users, /admin/kyc, /admin/audit/actions`);
   console.log(`   Employer: POST /employer/register, /employer/add-employee, /employer/upload-payroll`);
   console.log(`   Payroll: POST /employer/bulk-payment, GET /payroll/received`);
   console.log(`   QR Codes: GET /qr/static, POST /qr/dynamic, POST /qr/validate, POST /qr/pay`);

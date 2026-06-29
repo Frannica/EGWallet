@@ -24,7 +24,7 @@ export default function Login({ onLogin }) {
     <div className="login-container">
       <div className="login-card">
         <h1 className="login-title">EGWallet Admin</h1>
-        <p className="login-subtitle">Withdrawal Management</p>
+        <p className="login-subtitle">Secure admin access for user support and KYC review</p>
         <form onSubmit={handleSubmit}>
           <label className="form-label">Admin Secret</label>
           <input
