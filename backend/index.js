@@ -9926,7 +9926,7 @@ app.use((err, req, res, next) => {
 });
 
 // Admin dashboard (static SPA) — served from built admin-dashboard/dist
-const adminDashboardDist = path.join(__dirname, '..', 'admin-dashboard', 'dist');
+const adminDashboardDist = path.join(__dirname, 'admin-dashboard', 'dist');
 if (fs.existsSync(adminDashboardDist)) {
   app.use('/admin/dashboard', express.static(adminDashboardDist, { index: 'index.html' }));
   app.get('/admin/dashboard/*', (_req, res) => {
