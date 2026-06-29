@@ -9,8 +9,11 @@ import {
   lockUser,
   unlockUser,
   resetFailedLogins,
+  exportUserCsv,
   hasPermission,
 } from './api';
+import { confirmAction, copyText, showToast } from './utils/ui';
+import KycDocumentViewer from './components/KycDocumentViewer';
 
 function formatDate(ts) {
   if (!ts) return '—';
@@ -28,6 +31,7 @@ export default function UserDetail({ userId, onBack, onReviewKyc, onViewTimeline
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [previewUrl, setPreviewUrl] = useState(null);
+  const [selectedDocId, setSelectedDocId] = useState(null);
   const [noteText, setNoteText] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
   const canWrite = hasPermission('users:write');
@@ -66,14 +70,18 @@ export default function UserDetail({ userId, onBack, onReviewKyc, onViewTimeline
     if (previewUrl) URL.revokeObjectURL(previewUrl);
   }, [previewUrl]);
 
-  async function runAction(action) {
+  async function runAction(action, confirmMsg) {
+    const ok = await confirmAction(confirmMsg, 'Confirm action');
+    if (!ok) return;
     setActionLoading(true);
     setError('');
     try {
       await action();
       await reload();
+      showToast('Action completed', 'success');
     } catch (err) {
       setError(err.message);
+      showToast(err.message, 'error');
     } finally {
       setActionLoading(false);
     }
@@ -93,6 +101,7 @@ export default function UserDetail({ userId, onBack, onReviewKyc, onViewTimeline
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       const url = await fetchKycDocumentBlob(docId);
       setPreviewUrl(url);
+      setSelectedDocId(docId);
     } catch (err) {
       setError(err.message);
     }
@@ -110,7 +119,16 @@ export default function UserDetail({ userId, onBack, onReviewKyc, onViewTimeline
       <button className="btn btn-secondary btn-sm" onClick={onBack} style={{ marginBottom: 16 }}>← Back to users</button>
       <div className="detail-header-row">
         <h2 className="page-title">User Detail</h2>
-        <button className="btn btn-secondary btn-sm" onClick={() => onViewTimeline?.(userId)}>View Timeline</button>
+        <div className="btn-row">
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => copyText(profile.id, 'User ID')}>Copy User ID</button>
+          {wallets?.[0] && (
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => copyText(wallets[0].id, 'Wallet ID')}>Copy Wallet ID</button>
+          )}
+          {hasPermission('users:export') && (
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => exportUserCsv(userId).then(() => showToast('CSV exported', 'success'))}>Export CSV</button>
+          )}
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => onViewTimeline?.(userId)}>Timeline</button>
+        </div>
       </div>
       {error && <p className="error-text">{error}</p>}
 
@@ -119,16 +137,16 @@ export default function UserDetail({ userId, onBack, onReviewKyc, onViewTimeline
           <h3>Support Tools</h3>
           <div className="btn-row">
             {status !== 'suspended' ? (
-              <button className="btn btn-danger btn-sm" disabled={actionLoading} onClick={() => runAction(() => suspendUser(userId))}>Suspend</button>
+              <button type="button" className="btn btn-danger btn-sm" disabled={actionLoading} onClick={() => runAction(() => suspendUser(userId), 'Suspend this user account?')}>Suspend</button>
             ) : (
-              <button className="btn btn-primary btn-sm" disabled={actionLoading} onClick={() => runAction(() => unsuspendUser(userId))}>Unsuspend</button>
+              <button type="button" className="btn btn-primary btn-sm" disabled={actionLoading} onClick={() => runAction(() => unsuspendUser(userId), 'Unsuspend this user account?')}>Unsuspend</button>
             )}
             {status !== 'locked' ? (
-              <button className="btn btn-danger btn-sm" disabled={actionLoading} onClick={() => runAction(() => lockUser(userId))}>Lock</button>
+              <button type="button" className="btn btn-danger btn-sm" disabled={actionLoading} onClick={() => runAction(() => lockUser(userId), 'Lock this user account?')}>Lock</button>
             ) : (
-              <button className="btn btn-primary btn-sm" disabled={actionLoading} onClick={() => runAction(() => unlockUser(userId))}>Unlock</button>
+              <button type="button" className="btn btn-primary btn-sm" disabled={actionLoading} onClick={() => runAction(() => unlockUser(userId), 'Unlock this user account?')}>Unlock</button>
             )}
-            <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => runAction(() => resetFailedLogins(userId))}>Reset Failed Logins</button>
+            <button type="button" className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => runAction(() => resetFailedLogins(userId), 'Reset failed login attempts?')}>Reset Failed Logins</button>
           </div>
           <p className="muted">Status: <strong>{status}</strong> · Failed attempts: {profile.failedLoginAttempts || 0}</p>
         </section>
@@ -261,10 +279,8 @@ export default function UserDetail({ userId, onBack, onReviewKyc, onViewTimeline
             </div>
           </div>
         ))}
-        {previewUrl && (
-          <div className="doc-preview">
-            <img src={previewUrl} alt="KYC document preview" />
-          </div>
+        {previewUrl && selectedDocId && (
+          <KycDocumentViewer blobUrl={previewUrl} documentId={selectedDocId} onClose={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); setSelectedDocId(null); }} />
         )}
         {(kycDocuments || []).length === 0 && <p className="muted">No KYC documents uploaded.</p>}
       </section>

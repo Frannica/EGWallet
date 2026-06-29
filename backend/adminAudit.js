@@ -35,20 +35,38 @@ function getAdminActor(req) {
   return req.headers['x-admin-id'] || req.headers['x-admin-name'] || 'admin';
 }
 
-function logAdminAction(req, action, details = {}) {
+function parseBrowser(userAgent) {
+  const ua = userAgent || 'unknown';
+  if (/Edg\//.test(ua)) return 'Edge';
+  if (/Chrome\//.test(ua)) return 'Chrome';
+  if (/Firefox\//.test(ua)) return 'Firefox';
+  if (/Safari\//.test(ua) && !/Chrome/.test(ua)) return 'Safari';
+  return ua.slice(0, 80);
+}
+
+function logAdminAction(req, action, payload = {}) {
+  const { before, after, ...details } = payload;
   const entry = {
     id: uuidv4(),
-    adminId: getAdminActor(req),
+    admin: getAdminActor(req),
+    adminId: req?.admin?.id || details.adminId || null,
     action,
-    details,
     timestamp: Date.now(),
     ipAddress: getClientIP(req),
+    browser: parseBrowser(req?.headers?.['user-agent']),
     userAgent: req?.headers?.['user-agent'] || 'unknown',
+    before: before ?? null,
+    after: after ?? null,
+    details,
   };
   adminAuditLogs.push(entry);
   if (adminAuditLogs.length > MAX_LOGS) adminAuditLogs.shift();
   auditLogger.info('ADMIN_ACTION', entry);
   return entry;
+}
+
+function auditChange(req, action, { before, after, ...details }) {
+  return logAdminAction(req, action, { before, after, ...details });
 }
 
 function getAdminAuditLogs({ limit = 100 } = {}) {
@@ -58,6 +76,8 @@ function getAdminAuditLogs({ limit = 100 } = {}) {
 
 module.exports = {
   logAdminAction,
+  auditChange,
   getAdminAuditLogs,
   getAdminActor,
+  parseBrowser,
 };

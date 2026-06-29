@@ -6,6 +6,8 @@ import {
   rejectKycDocument,
   hasPermission,
 } from './api';
+import { confirmAction, showToast } from './utils/ui';
+import KycDocumentViewer from './components/KycDocumentViewer';
 function formatDate(ts) {
   if (!ts) return '—';
   return new Date(ts).toLocaleString();
@@ -60,10 +62,13 @@ export default function KycReview({ focusDocumentId, onClearFocus, onViewUser })
 
   async function handleApprove() {
     if (!selected) return;
+    const ok = await confirmAction('Approve this KYC document?', 'Approve KYC');
+    if (!ok) return;
     setActionLoading(true);
     setError('');
     try {
       await approveKycDocument(selected.id, approveTier);
+      showToast('KYC approved', 'success');
       await load();
       setSelectedId(null);
       onClearFocus?.();
@@ -80,10 +85,13 @@ export default function KycReview({ focusDocumentId, onClearFocus, onViewUser })
       setError('Rejection reason is required.');
       return;
     }
+    const ok = await confirmAction('Reject this KYC submission?', 'Reject KYC');
+    if (!ok) return;
     setActionLoading(true);
     setError('');
     try {
       await rejectKycDocument(selected.id, rejectReason.trim());
+      showToast('KYC rejected', 'success');
       setRejectReason('');
       await load();
       setSelectedId(null);
@@ -140,9 +148,7 @@ export default function KycReview({ focusDocumentId, onClearFocus, onViewUser })
             <h3>Review Document</h3>
             <p className="mono">{selected.id}</p>
             {previewUrl && (
-              <div className="doc-preview">
-                <img src={previewUrl} alt="KYC document" />
-              </div>
+              <KycDocumentViewer blobUrl={previewUrl} documentId={selected.id} />
             )}
             {canApprove ? (
               <>

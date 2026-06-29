@@ -95,6 +95,8 @@ async function findAdminWithPasswordByEmail(email) {
 
 async function createAdminUser({ email, password, role = 'read_only' }) {
   await ensureAdminPlatformTables();
+  const existing = await findAdminByEmail(email);
+  if (existing) return existing;
   const id = uuidv4();
   const passwordHash = bcrypt.hashSync(password, 12);
   await pool.query(
@@ -194,6 +196,46 @@ async function upsertAdminSetting(key, value, adminId) {
   return getAdminSetting(key);
 }
 
+async function ensureRefreshTokenTable() {
+  await ensureAdminPlatformTables();
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_refresh_tokens (
+      token_hash TEXT PRIMARY KEY,
+      admin_id UUID NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+
+async function storeAdminRefreshToken({ tokenHash, adminId, expiresAt }) {
+  await ensureRefreshTokenTable();
+  await pool.query(
+    `INSERT INTO admin_refresh_tokens (token_hash, admin_id, expires_at, created_at)
+     VALUES ($1, $2, $3, NOW())`,
+    [tokenHash, adminId, new Date(expiresAt)],
+  );
+}
+
+async function findAdminRefreshToken(tokenHash) {
+  await ensureRefreshTokenTable();
+  const result = await pool.query(
+    `SELECT token_hash, admin_id, expires_at FROM admin_refresh_tokens WHERE token_hash = $1 LIMIT 1`,
+    [tokenHash],
+  );
+  return result.rows[0] || null;
+}
+
+async function deleteAdminRefreshToken(tokenHash) {
+  await ensureRefreshTokenTable();
+  await pool.query(`DELETE FROM admin_refresh_tokens WHERE token_hash = $1`, [tokenHash]);
+}
+
+async function deleteAdminRefreshTokensForUser(adminId) {
+  await ensureRefreshTokenTable();
+  await pool.query(`DELETE FROM admin_refresh_tokens WHERE admin_id = $1`, [adminId]);
+}
+
 module.exports = {
   ensureAdminPlatformTables,
   countAdminUsers,
@@ -209,4 +251,8 @@ module.exports = {
   getAdminSetting,
   getAllAdminSettings,
   upsertAdminSetting,
+  storeAdminRefreshToken,
+  findAdminRefreshToken,
+  deleteAdminRefreshToken,
+  deleteAdminRefreshTokensForUser,
 };

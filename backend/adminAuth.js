@@ -1,8 +1,8 @@
 'use strict';
 
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const { v4: uuidv4 } = require('uuid');
 const {
   ensureAdminPlatformTables,
   countAdminUsers,
@@ -11,33 +11,59 @@ const {
   findAdminById,
   recordAdminLoginSuccess,
   recordAdminLoginFailure,
+  storeAdminRefreshToken,
+  findAdminRefreshToken,
+  deleteAdminRefreshToken,
+  deleteAdminRefreshTokensForUser,
 } = require('./db/adminPlatformPostgres');
 const { logAdminAction } = require('./adminAudit');
+const {
+  issueCsrfToken,
+  revokeCsrfToken,
+  touchOnlineAdmin,
+  removeOnlineAdmin,
+  adminCsrf,
+} = require('./adminSessions');
+const winston = require('winston');
+
+const adminLogger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+    winston.format.printf(({ timestamp, level, message }) => `${timestamp} [admin] ${level}: ${message}`),
+  ),
+  transports: [new winston.transports.Console()],
+});
 
 const ADMIN_ROLES = ['super_admin', 'support', 'compliance', 'read_only'];
 
 const ROLE_PERMISSIONS = {
   super_admin: ['*'],
   support: [
-    'stats:read', 'users:read', 'users:write', 'notes:read', 'notes:write',
-    'timeline:read', 'kyc:read', 'withdrawals:read', 'logs:read', 'search:read',
+    'stats:read', 'health:read', 'audit:read', 'users:read', 'users:write', 'users:export',
+    'notes:read', 'notes:write', 'timeline:read', 'kyc:read', 'withdrawals:read', 'logs:read', 'search:read',
   ],
   compliance: [
-    'stats:read', 'users:read', 'timeline:read', 'kyc:read', 'kyc:approve',
+    'stats:read', 'health:read', 'audit:read', 'users:read', 'timeline:read', 'kyc:read', 'kyc:approve',
     'withdrawals:read', 'withdrawals:write', 'notes:read', 'search:read',
   ],
   read_only: [
-    'stats:read', 'users:read', 'timeline:read', 'kyc:read',
+    'stats:read', 'health:read', 'audit:read', 'users:read', 'timeline:read', 'kyc:read',
     'withdrawals:read', 'notes:read', 'logs:read', 'search:read',
   ],
 };
 
 const MAX_ADMIN_LOGIN_ATTEMPTS = 5;
 const ADMIN_LOCK_MS = 15 * 60 * 1000;
-const ADMIN_JWT_EXPIRY = process.env.ADMIN_JWT_EXPIRY || '8h';
+const ADMIN_JWT_EXPIRY = process.env.ADMIN_JWT_EXPIRY || '15m';
+const ADMIN_REFRESH_EXPIRY = process.env.ADMIN_REFRESH_EXPIRY || '7d';
 
 function getJwtSecret() {
   return process.env.JWT_SECRET || 'dev_secret_change_me';
+}
+
+function hashToken(raw) {
+  return crypto.createHash('sha256').update(raw).digest('hex');
 }
 
 function hasPermission(role, permission) {
@@ -47,10 +73,12 @@ function hasPermission(role, permission) {
 
 function getPermissionsForRole(role) {
   const perms = ROLE_PERMISSIONS[role] || [];
-  return perms.includes('*') ? Object.values(ROLE_PERMISSIONS).flat().filter((p) => p !== '*').concat(['*']) : perms;
+  return perms.includes('*')
+    ? Object.values(ROLE_PERMISSIONS).flat().filter((p) => p !== '*').concat(['*', 'kyc:download', 'settings:read', 'settings:write'])
+    : perms;
 }
 
-function signAdminToken(admin) {
+function signAdminAccessToken(admin) {
   return jwt.sign(
     {
       adminId: admin.id,
@@ -64,10 +92,53 @@ function signAdminToken(admin) {
   );
 }
 
-function verifyAdminToken(token) {
+function signAdminRefreshToken(admin) {
+  return jwt.sign(
+    {
+      adminId: admin.id,
+      type: 'admin_refresh',
+      tokenVersion: admin.tokenVersion || 0,
+    },
+    getJwtSecret(),
+    { expiresIn: ADMIN_REFRESH_EXPIRY },
+  );
+}
+
+function verifyAdminAccessToken(token) {
   const payload = jwt.verify(token, getJwtSecret());
   if (payload.type !== 'admin_access') throw new Error('Invalid admin token type');
   return payload;
+}
+
+async function issueAdminSession(req, admin) {
+  const accessToken = signAdminAccessToken(admin);
+  const refreshToken = signAdminRefreshToken(admin);
+  const csrfToken = issueCsrfToken(admin.id);
+  const decoded = jwt.decode(accessToken);
+  const refreshDecoded = jwt.decode(refreshToken);
+
+  await storeAdminRefreshToken({
+    tokenHash: hashToken(refreshToken),
+    adminId: admin.id,
+    expiresAt: refreshDecoded.exp * 1000,
+  });
+
+  touchOnlineAdmin({ admin, headers: req.headers, connection: req.connection });
+
+  return {
+    token: accessToken,
+    refreshToken,
+    csrfToken,
+    expiresAt: decoded.exp * 1000,
+    admin: {
+      id: admin.id,
+      email: admin.email,
+      role: admin.role,
+      lastLoginAt: admin.lastLoginAt,
+      permissions: getPermissionsForRole(admin.role),
+      twoFactorEnabled: false,
+    },
+  };
 }
 
 async function bootstrapAdminIfNeeded() {
@@ -79,13 +150,13 @@ async function bootstrapAdminIfNeeded() {
     const email = process.env.ADMIN_BOOTSTRAP_EMAIL;
     const password = process.env.ADMIN_BOOTSTRAP_PASSWORD;
     if (!email || !password) {
-      console.warn('[admin] No admin users found. Set ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD to create the first super_admin.');
+      adminLogger.warn('Set ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD for first super_admin.');
       return;
     }
     await createAdminUser({ email, password, role: 'super_admin' });
-    console.log(`[admin] Bootstrapped super_admin account for ${email.toLowerCase().trim()}`);
+    adminLogger.info(`Bootstrapped super_admin for ${email.toLowerCase().trim()}`);
   } catch (error) {
-    console.warn('[admin] Bootstrap skipped:', error.message);
+    adminLogger.warn(`Bootstrap skipped: ${error.message}`);
   }
 }
 
@@ -96,7 +167,7 @@ function adminAuth(req, res, next) {
 
   let payload;
   try {
-    payload = verifyAdminToken(token);
+    payload = verifyAdminAccessToken(token);
   } catch (_error) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
@@ -111,6 +182,7 @@ function adminAuth(req, res, next) {
       }
       req.admin = admin;
       req.adminPermissions = getPermissionsForRole(admin.role);
+      touchOnlineAdmin(req);
       next();
     })
     .catch(() => res.status(401).json({ error: 'Unauthorized' }));
@@ -149,28 +221,53 @@ async function adminLoginHandler(req, res) {
       const attempts = (admin.failedLoginAttempts || 0) + 1;
       const lockedUntil = attempts >= MAX_ADMIN_LOGIN_ATTEMPTS ? Date.now() + ADMIN_LOCK_MS : null;
       await recordAdminLoginFailure(admin.id, attempts, lockedUntil);
-      logAdminAction(req, 'ADMIN_LOGIN_FAILED', { adminId: admin.id, email: admin.email, attempts });
+      logAdminAction(req, 'ADMIN_LOGIN_FAILED', {
+        before: { failedAttempts: admin.failedLoginAttempts || 0 },
+        after: { failedAttempts: attempts, lockedUntil },
+        email: admin.email,
+      });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     await recordAdminLoginSuccess(admin.id);
     const fresh = await findAdminById(admin.id);
-    const token = signAdminToken(fresh);
-    const decoded = jwt.decode(token);
-    logAdminAction(req, 'ADMIN_LOGIN', { adminId: fresh.id, email: fresh.email, role: fresh.role });
-
-    res.json({
-      token,
-      expiresAt: decoded.exp * 1000,
-      admin: {
-        id: fresh.id,
-        email: fresh.email,
-        role: fresh.role,
-        permissions: getPermissionsForRole(fresh.role),
-      },
+    const session = await issueAdminSession(req, fresh);
+    logAdminAction(req, 'ADMIN_LOGIN', {
+      adminId: fresh.id,
+      email: fresh.email,
+      role: fresh.role,
+      after: { lastLoginAt: Date.now() },
     });
+    res.json(session);
   } catch (_error) {
     res.status(500).json({ error: 'Login failed' });
+  }
+}
+
+async function adminRefreshHandler(req, res) {
+  const { refreshToken } = req.body || {};
+  if (!refreshToken) return res.status(400).json({ error: 'refreshToken is required' });
+
+  try {
+    const payload = jwt.verify(refreshToken, getJwtSecret());
+    if (payload.type !== 'admin_refresh') return res.status(401).json({ error: 'Invalid refresh token' });
+
+    const stored = await findAdminRefreshToken(hashToken(refreshToken));
+    if (!stored || new Date(stored.expires_at).getTime() < Date.now()) {
+      return res.status(401).json({ error: 'Refresh token expired' });
+    }
+
+    const admin = await findAdminById(payload.adminId);
+    if (!admin || admin.status !== 'active') return res.status(401).json({ error: 'Unauthorized' });
+    if ((admin.tokenVersion || 0) !== (payload.tokenVersion || 0)) {
+      return res.status(401).json({ error: 'Session expired' });
+    }
+
+    await deleteAdminRefreshToken(hashToken(refreshToken));
+    const session = await issueAdminSession(req, admin);
+    res.json(session);
+  } catch (_error) {
+    res.status(401).json({ error: 'Invalid refresh token' });
   }
 }
 
@@ -180,14 +277,27 @@ function adminMeHandler(req, res) {
       id: req.admin.id,
       email: req.admin.email,
       role: req.admin.role,
+      lastLoginAt: req.admin.lastLoginAt,
       permissions: req.adminPermissions,
+      twoFactorEnabled: false,
     },
   });
 }
 
-function adminLogoutHandler(req, res) {
+async function adminLogoutHandler(req, res) {
+  const { refreshToken } = req.body || {};
+  if (refreshToken) {
+    await deleteAdminRefreshToken(hashToken(refreshToken)).catch(() => {});
+  }
+  revokeCsrfToken(req.admin?.id);
+  removeOnlineAdmin(req.admin?.id);
   logAdminAction(req, 'ADMIN_LOGOUT', { adminId: req.admin?.id });
   res.json({ ok: true });
+}
+
+function adminHeartbeatHandler(req, res) {
+  touchOnlineAdmin(req);
+  res.json({ ok: true, lastSeen: Date.now() });
 }
 
 function getAdminActor(req) {
@@ -199,14 +309,17 @@ module.exports = {
   ADMIN_ROLES,
   ROLE_PERMISSIONS,
   adminAuth,
+  adminCsrf,
   requirePermission,
   hasPermission,
   getPermissionsForRole,
-  signAdminToken,
-  verifyAdminToken,
+  signAdminAccessToken,
+  verifyAdminAccessToken,
   bootstrapAdminIfNeeded,
   adminLoginHandler,
+  adminRefreshHandler,
   adminMeHandler,
   adminLogoutHandler,
+  adminHeartbeatHandler,
   getAdminActor,
 };

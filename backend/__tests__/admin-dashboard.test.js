@@ -26,6 +26,7 @@ let pool;
 let server;
 let baseUrl;
 let adminToken;
+let adminCsrf;
 let userToken;
 let testUserId;
 let testWalletId;
@@ -205,10 +206,20 @@ test.before(async () => {
     body: JSON.stringify({ email: 'admin@test.local', password: 'AdminTestPass123!' }),
   });
   assert.equal(loginRes.status, 200);
-  adminToken = (await loginRes.json()).token;
+  const loginBody = await loginRes.json();
+  adminToken = loginBody.token;
+  adminCsrf = loginBody.csrfToken;
 
   userToken = jwt.sign({ userId: testUserId, type: 'access', tokenVersion: 0 }, process.env.JWT_SECRET);
 });
+
+function adminPostHeaders() {
+  return {
+    Authorization: `Bearer ${adminToken}`,
+    'Content-Type': 'application/json',
+    'X-CSRF-Token': adminCsrf,
+  };
+}
 
 test.after(async () => {
   restoreAppState();
@@ -301,7 +312,7 @@ test('KYC approve updates user status and tier', async (t) => {
 
   const res = await fetch(`${baseUrl}/admin/kyc/documents/${testDocumentId}/approve`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+    headers: adminPostHeaders(),
     body: JSON.stringify({ kycTier: 2 }),
   });
   assert.equal(res.status, 200);
@@ -342,7 +353,7 @@ test('KYC reject stores reason', async (t) => {
 
   const res = await fetch(`${baseUrl}/admin/kyc/documents/${rejectDocId}/reject`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+    headers: adminPostHeaders(),
     body: JSON.stringify({ reason: 'Document unreadable' }),
   });
   assert.equal(res.status, 200);

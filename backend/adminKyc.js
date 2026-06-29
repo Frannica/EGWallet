@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { adminAuth, requirePermission, getAdminActor } = require('./adminAuth');
+const { adminAuth, requirePermission, getAdminActor, adminCsrf } = require('./adminAuth');
 const { loadAppState, saveAppState } = require('./db/appStateStore');
 const {
   listKycDocuments,
@@ -68,6 +68,23 @@ router.get('/documents', adminAuth, requirePermission('kyc:read'), async (req, r
   }
 });
 
+router.get('/documents/:id/download', adminAuth, requirePermission('kyc:download'), async (req, res) => {
+  try {
+    const payload = await readKycDocumentContent(req.params.id);
+    if (!payload) return res.status(404).json({ error: 'Document not found' });
+    logAdminAction(req, 'KYC_DOCUMENT_DOWNLOAD', {
+      documentId: req.params.id,
+      userId: payload.document.userId,
+    });
+    res.set('Content-Type', payload.document.mimeType);
+    res.set('Cache-Control', 'no-store');
+    res.set('Content-Disposition', `attachment; filename="kyc-${payload.document.id}"`);
+    res.send(payload.buffer);
+  } catch (_error) {
+    res.status(500).json({ error: 'Failed to download KYC document' });
+  }
+});
+
 router.get('/documents/:id/content', adminAuth, requirePermission('kyc:read'), async (req, res) => {
   try {
     const payload = await readKycDocumentContent(req.params.id);
@@ -93,7 +110,7 @@ router.get('/documents/:id', adminAuth, requirePermission('kyc:read'), async (re
   }
 });
 
-router.post('/documents/:id/approve', adminAuth, requirePermission('kyc:approve'), async (req, res) => {
+router.post('/documents/:id/approve', adminAuth, adminCsrf, requirePermission('kyc:approve'), async (req, res) => {
   try {
     const document = await getKycDocumentById(req.params.id);
     if (!document) return res.status(404).json({ error: 'Document not found' });
@@ -142,7 +159,7 @@ router.post('/documents/:id/approve', adminAuth, requirePermission('kyc:approve'
   }
 });
 
-router.post('/documents/:id/reject', adminAuth, requirePermission('kyc:approve'), async (req, res) => {
+router.post('/documents/:id/reject', adminAuth, adminCsrf, requirePermission('kyc:approve'), async (req, res) => {
   try {
     const reason = (req.body?.reason || '').trim();
     if (!reason) return res.status(400).json({ error: 'reason is required' });

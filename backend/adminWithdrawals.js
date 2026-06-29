@@ -10,7 +10,7 @@ const express = require('express');
 const crypto  = require('crypto');
 const axios   = require('axios');
 const router  = express.Router();
-const { adminAuth, requirePermission } = require('./adminAuth');
+const { adminAuth, requirePermission, adminCsrf } = require('./adminAuth');
 const { adminTransition, markWithdrawalPaid, markWithdrawalFailed } = require('./withdrawalEngine');
 const { payoutRouter } = require('./payoutProviders');
 const { commitWithdrawalStateUpdate } = require('./db/withdrawalsPostgres');
@@ -73,7 +73,7 @@ router.get('/:id', adminAuth, requirePermission('withdrawals:read'), (req, res) 
 // Moves the withdrawal through the state machine.
 // C3: wrapped in withBalanceMutex — transitions to 'failed'/'reversed' issue refunds
 // that credit available balance and must be serialised with all other balance writes.
-router.post('/:id/transition', adminAuth, requirePermission('withdrawals:write'), async (req, res) => {
+router.post('/:id/transition', adminAuth, adminCsrf, requirePermission('withdrawals:write'), async (req, res) => {
   const { status, note } = req.body;
   if (!status) return res.status(400).json({ error: '"status" is required' });
 
@@ -140,7 +140,7 @@ router.post('/:id/transition', adminAuth, requirePermission('withdrawals:write')
 //   - payoutDispatchRef set but no payoutReference (mid-call crash / timeout)
 //
 // Response: { status: 'paid'|'failed'|'pending', withdrawal }
-router.post('/:id/reconcile', adminAuth, requirePermission('withdrawals:write'), async (req, res) => {
+router.post('/:id/reconcile', adminAuth, adminCsrf, requirePermission('withdrawals:write'), async (req, res) => {
   const adminId           = req.admin?.email || 'unknown-admin';
   const withBalanceMutex  = req.app.locals.withBalanceMutex || ((fn) => fn());
   const { logger } = req.app.locals;

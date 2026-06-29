@@ -1,11 +1,11 @@
 'use strict';
 
 const express = require('express');
-const { adminAuth, requirePermission } = require('./adminAuth');
+const { adminAuth, requirePermission, adminCsrf } = require('./adminAuth');
 const { loadAppState, saveAppState } = require('./db/appStateStore');
 const { listKycDocuments, toPublicDocument } = require('./db/kycUploadPostgres');
 const { listAdminUserNotes, insertAdminUserNote } = require('./db/adminPlatformPostgres');
-const { logAdminAction, getAdminAuditLogs } = require('./adminAudit');
+const { logAdminAction, auditChange, getAdminAuditLogs } = require('./adminAudit');
 
 const router = express.Router();
 
@@ -88,6 +88,41 @@ function appendLoginHistory(user, entry) {
     user.loginHistory = user.loginHistory.slice(0, MAX_LOGIN_HISTORY);
   }
 }
+
+router.post('/:id/impersonate', adminAuth, (_req, res) => {
+  res.status(403).json({
+    error: 'Impersonation is disabled',
+    message: 'Admin login-as-user is never permitted for security and compliance.',
+  });
+});
+
+router.get('/:id/export', adminAuth, requirePermission('users:export'), (req, res) => {
+  try {
+    const found = findUserOr404(req, res);
+    if (!found) return;
+    const { db, user } = found;
+    const wallets = (db.wallets || []).filter((w) => w.userId === user.id);
+    const rows = [
+      ['field', 'value'],
+      ['id', user.id],
+      ['email', user.email],
+      ['username', user.username || ''],
+      ['fullName', user.fullName || ''],
+      ['kycStatus', user.kycStatus || 'pending'],
+      ['kycTier', user.kycTier ?? 0],
+      ['accountStatus', user.accountStatus || 'active'],
+      ['createdAt', user.createdAt || ''],
+      ['walletIds', wallets.map((w) => w.id).join(';')],
+    ];
+    const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    logAdminAction(req, 'USER_EXPORT', { userId: user.id, format: 'csv' });
+    res.set('Content-Type', 'text/csv');
+    res.set('Content-Disposition', `attachment; filename="user-${user.id.slice(0, 8)}.csv"`);
+    res.send(csv);
+  } catch (_error) {
+    res.status(500).json({ error: 'Export failed' });
+  }
+});
 
 router.get('/search', adminAuth, requirePermission('search:read'), (req, res) => {
   try {
@@ -227,7 +262,7 @@ router.get('/:id/notes', adminAuth, requirePermission('notes:read'), async (req,
   }
 });
 
-router.post('/:id/notes', adminAuth, requirePermission('notes:write'), async (req, res) => {
+router.post('/:id/notes', adminAuth, adminCsrf, requirePermission('notes:write'), async (req, res) => {
   try {
     const found = findUserOr404(req, res);
     if (!found) return;
@@ -252,29 +287,42 @@ function accountAction(action, status) {
     const found = findUserOr404(req, res);
     if (!found) return;
     const { db, user } = found;
+    const before = { accountStatus: user.accountStatus || 'active' };
     user.accountStatus = status;
     user.accountStatusUpdatedAt = Date.now();
     user.accountStatusUpdatedBy = req.admin.email;
     saveAppState(db);
-    logAdminAction(req, action, { userId: user.id, status });
+    auditChange(req, action, {
+      userId: user.id,
+      before,
+      after: { accountStatus: user.accountStatus },
+    });
     res.json({ success: true, userId: user.id, accountStatus: user.accountStatus });
   };
 }
 
-router.post('/:id/suspend', adminAuth, requirePermission('users:write'), accountAction('USER_SUSPEND', 'suspended'));
-router.post('/:id/unsuspend', adminAuth, requirePermission('users:write'), accountAction('USER_UNSUSPEND', 'active'));
-router.post('/:id/lock', adminAuth, requirePermission('users:write'), accountAction('USER_LOCK', 'locked'));
-router.post('/:id/unlock', adminAuth, requirePermission('users:write'), accountAction('USER_UNLOCK', 'active'));
+router.post('/:id/suspend', adminAuth, adminCsrf, requirePermission('users:write'), accountAction('USER_SUSPEND', 'suspended'));
+router.post('/:id/unsuspend', adminAuth, adminCsrf, requirePermission('users:write'), accountAction('USER_UNSUSPEND', 'active'));
+router.post('/:id/lock', adminAuth, adminCsrf, requirePermission('users:write'), accountAction('USER_LOCK', 'locked'));
+router.post('/:id/unlock', adminAuth, adminCsrf, requirePermission('users:write'), accountAction('USER_UNLOCK', 'active'));
 
-router.post('/:id/reset-failed-logins', adminAuth, requirePermission('users:write'), (req, res) => {
+router.post('/:id/reset-failed-logins', adminAuth, adminCsrf, requirePermission('users:write'), (req, res) => {
   const found = findUserOr404(req, res);
   if (!found) return;
   const { db, user } = found;
+  const before = {
+    failedLoginAttempts: user.failedLoginAttempts || 0,
+    accountStatus: user.accountStatus || 'active',
+  };
   user.failedLoginAttempts = 0;
   user.lockedUntil = null;
   if (user.accountStatus === 'locked') user.accountStatus = 'active';
   saveAppState(db);
-  logAdminAction(req, 'USER_RESET_FAILED_LOGINS', { userId: user.id });
+  auditChange(req, 'USER_RESET_FAILED_LOGINS', {
+    userId: user.id,
+    before,
+    after: { failedLoginAttempts: 0, accountStatus: user.accountStatus },
+  });
   res.json({ success: true, userId: user.id, failedLoginAttempts: 0 });
 });
 

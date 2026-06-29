@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { adminAuth, requirePermission } = require('./adminAuth');
+const { adminAuth, requirePermission, adminCsrf } = require('./adminAuth');
 const { getAllAdminSettings, getAdminSetting, upsertAdminSetting } = require('./db/adminPlatformPostgres');
 const { logAdminAction } = require('./adminAudit');
 
@@ -17,7 +17,7 @@ router.get('/', adminAuth, requirePermission('settings:read'), async (req, res) 
   }
 });
 
-router.patch('/', adminAuth, requirePermission('settings:write'), async (req, res) => {
+router.patch('/', adminAuth, adminCsrf, requirePermission('settings:write'), async (req, res) => {
   try {
     const { maintenanceMode, featureFlags, dailyLimits } = req.body || {};
     const updated = {};

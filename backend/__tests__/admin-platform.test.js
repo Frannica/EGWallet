@@ -25,8 +25,11 @@ let pool;
 let server;
 let baseUrl;
 let superToken;
+let superCsrf;
 let supportToken;
+let supportCsrf;
 let complianceToken;
+let complianceCsrf;
 let userToken;
 let testUserId;
 let testWalletId;
@@ -130,7 +133,15 @@ async function adminLogin(email, password) {
   });
   const body = await res.json().catch(async () => ({ error: await res.text() }));
   assert.equal(res.status, 200, `login failed for ${email}: ${JSON.stringify(body)}`);
-  return body.token;
+  return body;
+}
+
+function postHeaders(token, csrf) {
+  return {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+    'X-CSRF-Token': csrf,
+  };
 }
 
 async function startTestServer() {
@@ -143,6 +154,8 @@ async function startTestServer() {
   } = require('../adminAuth');
   const adminUsersRouter = require('../adminUsers');
   const adminKycRouter = require('../adminKyc');
+  const adminDashboardRouter = require('../adminDashboard');
+  const { router: adminSearchRouter } = require('../adminSearch');
   const adminStatsRouter = require('../adminStats');
   const adminLogsRouter = require('../adminLogs');
   const { router: adminSettingsRouter } = require('../adminSettings');
@@ -150,6 +163,8 @@ async function startTestServer() {
   const { createAdminUser, ensureAdminPlatformTables } = require('../db/adminPlatformPostgres');
 
   await ensureAdminPlatformTables();
+  await pool.query(`DELETE FROM admin_refresh_tokens WHERE admin_id IN (SELECT id FROM admin_users WHERE email LIKE '%@test.egwallet')`).catch(() => {});
+  await pool.query(`DELETE FROM admin_user_notes WHERE admin_id IN (SELECT id FROM admin_users WHERE email LIKE '%@test.egwallet')`).catch(() => {});
   await pool.query(`DELETE FROM admin_users WHERE email LIKE '%@test.egwallet'`).catch(() => {});
 
   const superAdmin = await createAdminUser({
@@ -167,6 +182,8 @@ async function startTestServer() {
   app.post('/admin/auth/login', adminLoginHandler);
   app.get('/admin/auth/me', adminAuth, adminMeHandler);
   app.post('/admin/auth/logout', adminAuth, adminLogoutHandler);
+  app.use('/admin/overview', adminDashboardRouter);
+  app.use('/admin/search', adminSearchRouter);
   app.use('/admin/stats', adminStatsRouter);
   app.use('/admin/logs', adminLogsRouter);
   app.use('/admin/settings', adminSettingsRouter);
@@ -202,9 +219,15 @@ test.before(async () => {
   if (!postgresReady) return;
 
   await startTestServer();
-  superToken = await adminLogin('super@test.egwallet', 'SuperPass123!');
-  supportToken = await adminLogin('support@test.egwallet', 'SupportPass123!');
-  complianceToken = await adminLogin('compliance@test.egwallet', 'CompliancePass123!');
+  const superSession = await adminLogin('super@test.egwallet', 'SuperPass123!');
+  superToken = superSession.token;
+  superCsrf = superSession.csrfToken;
+  const supportSession = await adminLogin('support@test.egwallet', 'SupportPass123!');
+  supportToken = supportSession.token;
+  supportCsrf = supportSession.csrfToken;
+  const complianceSession = await adminLogin('compliance@test.egwallet', 'CompliancePass123!');
+  complianceToken = complianceSession.token;
+  complianceCsrf = complianceSession.csrfToken;
   userToken = jwt.sign({ userId: testUserId, type: 'access', tokenVersion: 0 }, process.env.JWT_SECRET);
 });
 
@@ -216,6 +239,8 @@ test.after(async () => {
       await deleteKycDocument(testDocumentId).catch(() => {});
     }
     await pool.query('DELETE FROM admin_user_notes WHERE user_id = $1', [testUserId]).catch(() => {});
+    await pool.query(`DELETE FROM admin_refresh_tokens WHERE admin_id IN (SELECT id FROM admin_users WHERE email LIKE '%@test.egwallet')`).catch(() => {});
+    await pool.query(`DELETE FROM admin_user_notes WHERE admin_id IN (SELECT id FROM admin_users WHERE email LIKE '%@test.egwallet')`).catch(() => {});
     await pool.query('DELETE FROM admin_users WHERE email LIKE $1', ['%@test.egwallet']).catch(() => {});
     await pool.end();
   }
@@ -246,7 +271,7 @@ test('support role blocked from KYC approve', async (t) => {
 
   const res = await fetch(`${baseUrl}/admin/kyc/documents/${testDocumentId}/approve`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${supportToken}`, 'Content-Type': 'application/json' },
+    headers: postHeaders(supportToken, supportCsrf),
     body: JSON.stringify({ kycTier: 1 }),
   });
   assert.equal(res.status, 403);
@@ -257,7 +282,7 @@ test('compliance can approve KYC', async (t) => {
 
   const res = await fetch(`${baseUrl}/admin/kyc/documents/${testDocumentId}/approve`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${complianceToken}`, 'Content-Type': 'application/json' },
+    headers: postHeaders(complianceToken, complianceCsrf),
     body: JSON.stringify({ kycTier: 2 }),
   });
   assert.equal(res.status, 200);
@@ -286,7 +311,7 @@ test('user search and suspend', async (t) => {
 
   const suspend = await fetch(`${baseUrl}/admin/users/${testUserId}/suspend`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${supportToken}`, 'Content-Type': 'application/json' },
+    headers: postHeaders(supportToken, supportCsrf),
     body: '{}',
   });
   assert.equal(suspend.status, 200);
@@ -299,7 +324,7 @@ test('user notes append-only with author', async (t) => {
 
   const res = await fetch(`${baseUrl}/admin/users/${testUserId}/notes`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${supportToken}`, 'Content-Type': 'application/json' },
+    headers: postHeaders(supportToken, supportCsrf),
     body: JSON.stringify({ note: 'Customer called about KYC delay.' }),
   });
   assert.equal(res.status, 201);
@@ -328,14 +353,14 @@ test('settings super_admin only write', async (t) => {
 
   const denied = await fetch(`${baseUrl}/admin/settings`, {
     method: 'PATCH',
-    headers: { Authorization: `Bearer ${supportToken}`, 'Content-Type': 'application/json' },
+    headers: postHeaders(supportToken, supportCsrf),
     body: JSON.stringify({ maintenanceMode: { enabled: true, message: 'test' } }),
   });
   assert.equal(denied.status, 403);
 
   const allowed = await fetch(`${baseUrl}/admin/settings`, {
     method: 'PATCH',
-    headers: { Authorization: `Bearer ${superToken}`, 'Content-Type': 'application/json' },
+    headers: postHeaders(superToken, superCsrf),
     body: JSON.stringify({ maintenanceMode: { enabled: false, message: 'ok' } }),
   });
   assert.equal(allowed.status, 200);
@@ -349,4 +374,49 @@ test('money data read-only on user detail', async (t) => {
   const body = await res.json();
   assert.equal(body.readOnly, true);
   assert.equal(body.wallets[0].balances[0].amount, 10000);
+});
+
+test('impersonation is permanently disabled', async (t) => {
+  if (!postgresReady) return t.skip('PostgreSQL unavailable');
+  const res = await fetch(`${baseUrl}/admin/users/${testUserId}/impersonate`, {
+    method: 'POST',
+    headers: postHeaders(superToken, superCsrf),
+    body: '{}',
+  });
+  assert.equal(res.status, 403);
+});
+
+test('dashboard overview includes activity and health', async (t) => {
+  if (!postgresReady) return t.skip('PostgreSQL unavailable');
+  const res = await fetch(`${baseUrl}/admin/overview`, {
+    headers: { Authorization: `Bearer ${superToken}` },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.ok(body.stats);
+  assert.ok(Array.isArray(body.activity));
+  assert.ok(body.health);
+});
+
+test('global search finds users by email', async (t) => {
+  if (!postgresReady) return t.skip('PostgreSQL unavailable');
+  const res = await fetch(`${baseUrl}/admin/search?q=platform`, {
+    headers: { Authorization: `Bearer ${superToken}` },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.ok(body.results.some((r) => r.type === 'user'));
+});
+
+test('audit entries include before and after fields', async (t) => {
+  if (!postgresReady) return t.skip('PostgreSQL unavailable');
+  const { getAdminAuditLogs } = require('../adminAudit');
+  const logs = getAdminAuditLogs({ limit: 20 });
+  const suspendLog = logs.find((l) => l.action === 'USER_SUSPEND');
+  assert.ok(suspendLog);
+  assert.ok(suspendLog.admin);
+  assert.ok(suspendLog.ipAddress);
+  assert.ok(suspendLog.browser);
+  assert.ok(suspendLog.before);
+  assert.ok(suspendLog.after);
 });

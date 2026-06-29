@@ -47,15 +47,20 @@ const { createWithdrawal, advanceToProcessing, markWithdrawalFailed, markWithdra
 const { router: adminWithdrawalsRouter } = require('./adminWithdrawals');
 const {
   adminAuth,
+  adminCsrf,
   adminLoginHandler,
+  adminRefreshHandler,
   adminLogoutHandler,
   adminMeHandler,
+  adminHeartbeatHandler,
   bootstrapAdminIfNeeded,
   requirePermission,
 } = require('./adminAuth');
 const adminKycRouter = require('./adminKyc');
 const adminUsersRouter = require('./adminUsers');
 const adminStatsRouter = require('./adminStats');
+const adminDashboardRouter = require('./adminDashboard');
+const { router: adminSearchRouter } = require('./adminSearch');
 const adminLogsRouter = require('./adminLogs');
 const { router: adminSettingsRouter, isMaintenanceModeEnabled } = require('./adminSettings');
 const { getAdminAuditLogs } = require('./adminAudit');
@@ -3185,8 +3190,7 @@ app.post('/auth/refresh', refreshLimiter, (req, res) => {
   });
 });
 
-// Admin login rate limiter — guards the single shared ADMIN_SECRET; 5 failed
-// attempts per 15 min per IP to block online brute-force while allowing ops use.
+// Admin login rate limiter — 5 failed attempts per 15 min per IP.
 const adminLoginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
@@ -3843,16 +3847,20 @@ app.post('/transactions', authMiddleware, async (req, res) => {
 // ==================== ADMIN ROUTES ====================
 app.post('/admin/auth/login', adminLoginLimiter, adminLoginHandler);
 app.post('/admin/login', adminLoginLimiter, adminLoginHandler);
+app.post('/admin/auth/refresh', adminRefreshHandler);
 app.get('/admin/auth/me', adminAuth, adminMeHandler);
-app.post('/admin/auth/logout', adminAuth, adminLogoutHandler);
-app.post('/admin/logout', adminAuth, adminLogoutHandler);
+app.post('/admin/auth/heartbeat', adminAuth, adminHeartbeatHandler);
+app.post('/admin/auth/logout', adminAuth, adminCsrf, adminLogoutHandler);
+app.post('/admin/logout', adminAuth, adminCsrf, adminLogoutHandler);
+app.use('/admin/overview', adminDashboardRouter);
+app.use('/admin/search', adminSearchRouter);
 app.use('/admin/stats', adminStatsRouter);
 app.use('/admin/logs', adminLogsRouter);
 app.use('/admin/settings', adminSettingsRouter);
 app.use('/admin/withdrawals', adminWithdrawalsRouter);
 app.use('/admin/kyc', adminKycRouter);
 app.use('/admin/users', adminUsersRouter);
-app.get('/admin/audit/actions', adminAuth, requirePermission('logs:read'), (req, res) => {
+app.get('/admin/audit/actions', adminAuth, requirePermission('audit:read'), (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 100;
   res.json({ actions: getAdminAuditLogs({ limit }) });
 });
@@ -9971,7 +9979,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`   Auth: POST /auth/register, /auth/login`);
   console.log(`   AI: POST /ai/chat (rate limit: ${process.env.AI_CHAT_RATE_LIMIT || 10}/min)`);
   console.log(`   GDPR: GET /gdpr/export, DELETE /gdpr/delete-account`);
-  console.log(`   Admin: GET /admin/dashboard, /admin/users, /admin/kyc, /admin/audit/actions`);
+  console.log(`   Admin: GET /admin/overview, /admin/users, /admin/kyc, /admin/audit/actions`);
   console.log(`   Employer: POST /employer/register, /employer/add-employee, /employer/upload-payroll`);
   console.log(`   Payroll: POST /employer/bulk-payment, GET /payroll/received`);
   console.log(`   QR Codes: GET /qr/static, POST /qr/dynamic, POST /qr/validate, POST /qr/pay`);
