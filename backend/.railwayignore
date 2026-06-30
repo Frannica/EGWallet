@@ -1,0 +1,14 @@
+node_modules
+logs
+*.log
+*.apk
+__tests__
+_local*
+_production*
+_prod_*
+db.proof-test.json
+admin-dashboard/logs
+admin-dashboard/node_modules
+coverage
+.env
+.env.*

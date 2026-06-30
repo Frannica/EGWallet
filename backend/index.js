@@ -2692,7 +2692,7 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     environment: NODE_ENV,
-    gitCommit: process.env.GIT_COMMIT || process.env.RAILWAY_GIT_COMMIT_SHA || null,
+    gitCommit: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT || null,
     allowDemoDeposits: ALLOW_DEMO_DEPOSITS,
     stripeConfigured: !!stripeClient,
     stripeIssuingEnabled: isStripeIssuingEnabled(),
