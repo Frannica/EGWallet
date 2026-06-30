@@ -77,6 +77,7 @@ const {
   setVirtualCardStatus,
   normalizeCard,
 } = require('./virtualCards');
+const { processStripeIssuingEvent, ISSUING_EVENT_TYPES, isStripeIssuingEnabled } = require('./stripeIssuing');
 const { executePayout, payoutRouter } = require('./payoutProviders');
 const {
   loadAppState,
@@ -2323,6 +2324,24 @@ app.post('/webhooks/stripe',
       return res.status(400).json({ error: 'Webhook signature verification failed' });
     }
 
+    // ── Stripe Issuing — virtual card authorizations / transactions (no wallet impact)
+    if (ISSUING_EVENT_TYPES.has(event.type)) {
+      try {
+        let issuingResult;
+        await withBalanceMutex(async () => {
+          const db = loadAppState();
+          issuingResult = processStripeIssuingEvent(db, event, { logger });
+          if (issuingResult.handled && (issuingResult.action === 'charge_recorded' || issuingResult.action === 'card_synced')) {
+            saveAppState(db);
+          }
+        });
+        return res.json({ received: true, issuing: issuingResult?.action || issuingResult?.reason });
+      } catch (err) {
+        logger.error('[webhook/stripe] Issuing event processing error', { eventType: event.type, error: err.message });
+        return res.status(500).json({ error: 'Processing failed' });
+      }
+    }
+
     // ── payment_intent.succeeded — deposit settlement fallback ───────────────
     // Credits the wallet from intent metadata if /deposits/confirm was never
     // called (network failure, app killed after PaymentSheet completed, etc.).
@@ -2676,6 +2695,7 @@ app.get('/health', (req, res) => {
     gitCommit: process.env.GIT_COMMIT || process.env.RAILWAY_GIT_COMMIT_SHA || null,
     allowDemoDeposits: ALLOW_DEMO_DEPOSITS,
     stripeConfigured: !!stripeClient,
+    stripeIssuingEnabled: isStripeIssuingEnabled(),
     database: isDatabaseConnected() ? 'connected' : 'missing',
     users: db.users?.length || 0,
     tickets: db.supportTickets?.length || 0,
