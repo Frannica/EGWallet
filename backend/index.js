@@ -88,6 +88,7 @@ const { getDurableP2PIdempotency, commitP2PSendPostgres } = require('./db/p2pSen
 const { getDurablePaymentRequestIdempotency, commitPaymentRequestPayPostgres } = require('./db/paymentRequestPayPostgres');
 const { getDurableExchangeIdempotency, commitExchangePostgres } = require('./db/exchangePostgres');
 const { commitDepositConfirmPostgres } = require('./db/depositConfirmPostgres');
+const { settleStripePaymentIntentDeposit } = require('./stripeDepositSettlement');
 const {
   getDurableWithdrawalIdempotency,
   commitCreateWithdrawalPostgres,
@@ -247,6 +248,14 @@ if (NODE_ENV === 'production') {
       '❌ FATAL: STRIPE_SECRET_KEY is set but STRIPE_WEBHOOK_SECRET is missing. ' +
       'Stripe settlement webhooks will be silently dropped, permanently locking user holdBalance. ' +
       'Set STRIPE_WEBHOOK_SECRET from your Stripe dashboard (Developers → Webhooks).'
+    );
+    process.exit(1);
+  }
+  if (process.env.STRIPE_SECRET_KEY && !process.env.STRIPE_PUBLISHABLE_KEY) {
+    console.error(
+      '❌ FATAL: STRIPE_SECRET_KEY is set but STRIPE_PUBLISHABLE_KEY is missing. ' +
+      'Mobile PaymentSheet requires the publishable key from /deposits/create-intent. ' +
+      'Set STRIPE_PUBLISHABLE_KEY from your Stripe dashboard (Developers → API keys).'
     );
     process.exit(1);
   }
@@ -2357,58 +2366,17 @@ app.post('/webhooks/stripe',
           { intentId: intent.id });
         return res.json({ received: true });
       }
-      const { userId: intentUserId, walletId: intentWalletId,
-              netCredited: netCreditedStr, feeAmount: feeAmountStr,
-              feeRate: feeRateStr } = intent.metadata || {};
-      if (!intentUserId || !intentWalletId) {
+      if (!intent.metadata?.userId || !intent.metadata?.walletId) {
         logger.warn('[webhook/stripe] payment_intent.succeeded missing metadata', { intentId: intent.id });
         return res.json({ received: true });
       }
       try {
         await withBalanceMutex(async () => {
           const db = loadAppState();
-          // Idempotency — already credited by /deposits/confirm or a prior webhook delivery?
-          if ((db.transactions || []).some(tx => tx.stripeIntentId === intent.id)) {
-            logger.info('[webhook/stripe] payment_intent.succeeded already credited — idempotent', { intentId: intent.id });
-            return;
+          const result = await settleStripePaymentIntentDeposit(db, intent, { logger });
+          if (result.handled && result.reason === 'credited') {
+            saveAppState(db);
           }
-          const wallet = (db.wallets || []).find(
-            w => w.id === intentWalletId && w.userId === intentUserId
-          );
-          if (!wallet) {
-            logger.error('[webhook/stripe] Wallet not found for payment_intent.succeeded',
-              { intentId: intent.id, intentUserId, intentWalletId });
-            throw new Error('Wallet not found');
-          }
-          const netCredited = Number(netCreditedStr) || intent.amount;
-          const feeAmount   = Number(feeAmountStr)   || 0;
-          const feeRate     = Number(feeRateStr)     || 0;
-          const currency    = (intent.currency || '').toUpperCase();
-          let balance = wallet.balances.find(b => b.currency === currency);
-          if (!balance) { balance = { currency, amount: 0 }; wallet.balances.push(balance); }
-          balance.amount += netCredited;
-          db.transactions.push({
-            id: uuidv4(),
-            type: 'deposit',
-            fromWalletId: null,
-            toWalletId: intentWalletId,
-            amount: netCredited,
-            currency,
-            receivedAmount: netCredited,
-            receivedCurrency: currency,
-            wasConverted: false,
-            feeAmount,
-            feeRate,
-            grossAmount: netCredited + feeAmount,
-            status: 'completed',
-            timestamp: Date.now(),
-            memo: 'Deposit via Stripe (webhook settlement)',
-            direction: 'in',
-            stripeIntentId: intent.id,
-          });
-          saveAppState(db);
-          logger.info('[webhook/stripe] payment_intent.succeeded — wallet credited via webhook',
-            { intentId: intent.id, intentUserId, intentWalletId, netCredited, currency });
         });
         return res.json({ received: true });
       } catch (err) {
@@ -2695,6 +2663,8 @@ app.get('/health', (req, res) => {
     gitCommit: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT || null,
     allowDemoDeposits: ALLOW_DEMO_DEPOSITS,
     stripeConfigured: !!stripeClient,
+    stripePublishableKeyConfigured: !!process.env.STRIPE_PUBLISHABLE_KEY,
+    stripeWebhookConfigured: !!process.env.STRIPE_WEBHOOK_SECRET,
     stripeIssuingEnabled: isStripeIssuingEnabled(),
     database: isDatabaseConnected() ? 'connected' : 'missing',
     users: db.users?.length || 0,
@@ -4692,6 +4662,11 @@ app.post('/deposits/create-intent', authMiddleware,
     const netCredited  = amount;                      // wallet always receives the amount entered
 
     if (stripeClient) {
+      const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
+      if (!publishableKey) {
+        logger.error('Stripe secret key configured but STRIPE_PUBLISHABLE_KEY is missing', { userId: req.user.userId });
+        return res.status(503).json({ error: 'Stripe deposit configuration is incomplete. Contact support.' });
+      }
       // Real Stripe PaymentIntent — charge total (including fee)
       try {
         const intent = await stripeClient.paymentIntents.create({
@@ -4710,7 +4685,7 @@ app.post('/deposits/create-intent', authMiddleware,
         return res.json({
           clientSecret: intent.client_secret,
           intentId: intent.id,
-          publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
+          publishableKey,
           resolvedWalletId: effectiveWalletId,
           mode: 'stripe',
           feeBreakdown: {

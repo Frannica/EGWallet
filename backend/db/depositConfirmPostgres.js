@@ -109,7 +109,7 @@ async function syncRuntimeWalletGraph(client, { stateDb, userId, walletId }) {
     await client.query(
       `INSERT INTO wallet_balances(wallet_id, currency, amount)
        VALUES ($1, $2, $3)
-       ON CONFLICT (wallet_id, currency) DO UPDATE SET amount = EXCLUDED.amount`,
+       ON CONFLICT (wallet_id, currency) DO NOTHING`,
       [wallet.id, bal.currency, Number(bal.amount || 0)]
     );
   }
