@@ -10,7 +10,6 @@
  *      The backend creates a real Stripe PaymentIntent; this screen renders
  *      the native Stripe PaymentSheet via @stripe/stripe-react-native.
  *      Requires a custom dev build (EAS Build / expo prebuild).
- *      To enable: `npx expo install @stripe/stripe-react-native` then rebuild.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -29,21 +28,11 @@ import { majorToMinor, formatCurrency, getCurrencySymbol, getCurrencyName, CURRE
 import { creditLocalBalance } from '../utils/localBalance';
 import { TOPUP_FREE_LIMIT, TOPUP_FEE_RATE } from '../config/fees';
 import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
-
-// ---------------------------------------------------------------------------
-// Stripe PaymentSheet — guarded import so the app still compiles without the
-// @stripe/stripe-react-native native package (e.g. inside Expo Go).
-// ---------------------------------------------------------------------------
-let StripeProvider: React.ComponentType<any> | null = null;
-let useStripe: (() => { initPaymentSheet: Function; presentPaymentSheet: Function }) | null = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const stripeModule = require('@stripe/stripe-react-native');
-  StripeProvider = stripeModule.StripeProvider;
-  useStripe = stripeModule.useStripe;
-} catch {
-  // Package not installed — demo mode
-}
+import {
+  STRIPE_SDK_AVAILABLE,
+  StripeProvider,
+  useStripe,
+} from '../stripe/stripeSdk';
 
 const PRESET_AMOUNTS = [
   { label: '1,000', value: 1000 },
@@ -91,7 +80,7 @@ function StripeDepositButton({
   loading: boolean;
   onPaymentSheetDeposit: (initAndPresent: () => Promise<boolean>) => void;
 }) {
-  const stripe = useStripe!();
+  const stripe = useStripe();
 
   async function initAndPresent(): Promise<boolean> {
     // This function is invoked by the parent which already has clientSecret etc.
@@ -123,7 +112,7 @@ function StripePaymentSheetFlow({
   onSuccess: () => void;
   onError: (msg: string) => void;
 }) {
-  const stripe = useStripe!();
+  const stripe = useStripe();
   const [ready, setReady] = useState(false);
   const { t } = useLanguage();
 
@@ -668,7 +657,7 @@ export default function DepositScreen() {
         </View>
 
         {/* Mode Banner — Stripe only */}
-        {mode === null && !stripeIntent && StripeProvider && (
+        {mode === null && !stripeIntent && STRIPE_SDK_AVAILABLE && (
           <View style={styles.infoBanner}>
             <Ionicons name="information-circle-outline" size={18} color="#1565C0" />
             <Text style={styles.infoBannerText}>
@@ -902,7 +891,7 @@ export default function DepositScreen() {
             </TouchableOpacity>
           </Animated.View>
         ) : (
-          stripeIntent.publishableKey && StripeProvider && useStripe
+          stripeIntent.publishableKey && STRIPE_SDK_AVAILABLE
             ? (
               <StripeProvider publishableKey={stripeIntent.publishableKey} merchantIdentifier="merchant.com.egwallet">
                 <StripePaymentSheetFlow
@@ -914,31 +903,12 @@ export default function DepositScreen() {
               </StripeProvider>
             )
             : (
-              <Animated.View style={[styles.buttonWrapper, { transform: [{ scale: buttonScale }] }]}>
-                <TouchableOpacity
-                  style={[styles.primaryButtonOuter, loading && styles.buttonDisabled]}
-                  onPress={() => { animatePress(); handleStripeSuccess(); }}
-                  disabled={loading}
-                  activeOpacity={1}
-                >
-                  <LinearGradient
-                    colors={['#1565C0', '#0A3D7C']}
-                    style={styles.primaryButtonGradient}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                  >
-                    {loading
-                      ? <ActivityIndicator color="#fff" size="small" />
-                      : (
-                        <>
-                          <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
-                          <Text style={styles.primaryButtonText}>{t('deposit.confirm')}</Text>
-                        </>
-                      )
-                    }
-                  </LinearGradient>
-                </TouchableOpacity>
-              </Animated.View>
+              <View style={styles.stripeUnavailableBanner}>
+                <Ionicons name="warning-outline" size={22} color="#C62828" />
+                <Text style={styles.stripeUnavailableText}>
+                  {t('deposit.stripeSdkUnavailable')}
+                </Text>
+              </View>
             )
         )}
 
@@ -954,7 +924,7 @@ export default function DepositScreen() {
         {/* How it works */}
         <View style={styles.howItWorks}>
           <Text style={styles.howTitle}>{t('deposit.howItWorks')}</Text>
-          {StripeProvider ? (
+          {STRIPE_SDK_AVAILABLE ? (
             <>
               <View style={styles.howItem}><View style={styles.howDot} /><Text style={styles.howItemText}>{t('deposit.how1')}</Text></View>
               <View style={styles.howItem}><View style={styles.howDot} /><Text style={styles.howItemText}>{t('deposit.how2')}</Text></View>
@@ -1035,6 +1005,24 @@ const styles = StyleSheet.create({
     color: '#1A4A8A',
     lineHeight: 19,
     fontWeight: '500',
+  },
+  stripeUnavailableBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(255,235,238,0.95)',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 8,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(198,40,40,0.25)',
+  },
+  stripeUnavailableText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#B71C1C',
+    lineHeight: 20,
+    fontWeight: '600',
   },
   card: {
     backgroundColor: 'rgba(255,255,255,0.84)',

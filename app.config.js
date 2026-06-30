@@ -58,6 +58,13 @@ export default ({ config }) => ({
       "organization": process.env.SENTRY_ORG || "egwallet-hu",
       "project": process.env.SENTRY_PROJECT || "react-native",
       "authToken": process.env.SENTRY_AUTH_TOKEN
-    }]
+    }],
+    [
+      "@stripe/stripe-react-native",
+      {
+        merchantIdentifier: "merchant.com.egwallet",
+        enableGooglePay: true
+      }
+    ]
   ]
 });
