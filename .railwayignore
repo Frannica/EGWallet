@@ -7,7 +7,7 @@ _phone_base.apk
 .git
 android
 ios
-src
+/src
 assets
 __tests__
 backend/__tests__
