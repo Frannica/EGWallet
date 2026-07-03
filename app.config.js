@@ -2,7 +2,7 @@ export default ({ config }) => ({
   ...config,
   name: "EGWallet",
   slug: "EGWalletSimple",
-  version: "1.2.6",
+  version: "1.3.0",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "light",
@@ -23,7 +23,7 @@ export default ({ config }) => ({
     },
     edgeToEdgeEnabled: true,
     package: "com.francisco1953.egwalletmobile",
-    versionCode: 80
+    versionCode: 84
   },
   web: {
     favicon: "./assets/favicon.png"

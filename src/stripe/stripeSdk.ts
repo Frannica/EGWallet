@@ -12,4 +12,4 @@ export function isStripeSdkAvailable(): boolean {
 }
 
 export const STRIPE_SDK_AVAILABLE = isStripeSdkAvailable();
-export { StripeProvider, useStripe };
+export { StripeProvider, useStripe, LinkDisplay } from '@stripe/stripe-react-native';

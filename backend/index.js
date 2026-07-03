@@ -89,6 +89,7 @@ const { getDurablePaymentRequestIdempotency, commitPaymentRequestPayPostgres } =
 const { getDurableExchangeIdempotency, commitExchangePostgres } = require('./db/exchangePostgres');
 const { commitDepositConfirmPostgres } = require('./db/depositConfirmPostgres');
 const { settleStripePaymentIntentDeposit } = require('./stripeDepositSettlement');
+const { minDepositMinor } = require('./depositLimits');
 const {
   getDurableWithdrawalIdempotency,
   commitCreateWithdrawalPostgres,
@@ -4639,10 +4640,29 @@ app.get('/deposits/fee-info', authMiddleware, (req, res) => {
 // Returns clientSecret for use with @stripe/stripe-react-native PaymentSheet
 app.post('/deposits/create-intent', authMiddleware,
   validateInput([
-    body('amount').isInt({ min: 100 }),   // amount in minor units, min 1 USD
+    body('amount').isInt({ min: 1 }).withMessage('Amount must be a positive integer in minor units'),
     body('currency').isString().isLength({ min: 3, max: 5 }),
-    body('walletId').isString(),
+    body('walletId').isString().notEmpty().withMessage('walletId is required'),
   ]),
+  (req, res, next) => {
+    const { amount, currency } = req.body;
+    const minimumMinor = minDepositMinor(currency);
+    if (amount < minimumMinor) {
+      logger.warn('Deposit below minimum', {
+        userId: req.user?.userId,
+        currency,
+        amount,
+        minimumMinor,
+      });
+      return res.status(400).json({
+        error: 'Deposit amount too small',
+        errorCode: 'error_deposit_minimum',
+        minimumMinor,
+        currency: String(currency || '').toUpperCase(),
+      });
+    }
+    next();
+  },
   async (req, res) => {
     const db = loadAppState();
     const { amount, currency, walletId } = req.body;
@@ -4672,6 +4692,7 @@ app.post('/deposits/create-intent', authMiddleware,
         const intent = await stripeClient.paymentIntents.create({
           amount: Math.round(totalCharged),
           currency: currency.toLowerCase(),
+          payment_method_types: ['card'],
           metadata: {
             userId: req.user.userId,
             walletId: effectiveWalletId,
@@ -4679,7 +4700,6 @@ app.post('/deposits/create-intent', authMiddleware,
             feeAmount: String(feeInfo.feeAmount),
             feeRate: String(feeInfo.rate),
           },
-          automatic_payment_methods: { enabled: true },
         });
         logger.info('Stripe PaymentIntent created', { intentId: intent.id, userId: req.user.userId, amount, totalCharged, currency });
         return res.json({

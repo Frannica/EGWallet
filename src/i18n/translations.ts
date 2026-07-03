@@ -718,6 +718,7 @@ const en: TranslationMap = {
   'apiError.requestNotFound': 'This request was not found.',
   'apiError.internalError': 'Something went wrong. Please try again.',
   'apiError.requestFailed': 'The request could not be completed. Please try again.',
+  'apiError.depositMinimum': 'Minimum deposit is $1 (or 100 FCFA / similar). Increase the amount and try again.',
   'common.serverUnreachable': 'Unable to reach the server.',
   'common.areYouSure': 'Are you sure?',
   'common.invalidAmount': 'Invalid Amount',

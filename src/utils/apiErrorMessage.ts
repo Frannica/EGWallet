@@ -16,6 +16,7 @@ const ERROR_CODE_TO_I18N: Record<string, string> = {
   error_missing_token: 'apiError.invalidToken',
   error_wallet_not_found: 'apiError.walletNotFound',
   error_request_not_found: 'apiError.requestNotFound',
+  error_deposit_minimum: 'apiError.depositMinimum',
   error_internal: 'apiError.internalError',
 };
 

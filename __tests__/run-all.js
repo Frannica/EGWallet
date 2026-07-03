@@ -24,6 +24,7 @@ const SUITES = [
   ['Phase 19 — Username creation + localized API errors', require('./regression/phase19.test')],
   ['Withdrawal stale FX — SendScreen guard scope', require('./send-withdrawal-stale-rates.node.test.js')],
   ['KYC upload flow — crop recovery + preview', require('./kyc-upload-flow.node.test.js')],
+  ['Stripe deposit — card-only PaymentIntent + minimum', require('../backend/__tests__/deposit-stripe-config.test.js')],
   ['Money flow — $300 split + idempotent pay',            require('../backend/__tests__/money-flow.test.js')],
 ];
 

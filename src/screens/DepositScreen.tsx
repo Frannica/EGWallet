@@ -24,6 +24,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { API_BASE } from '../api/client';
 import { useLanguage } from '../i18n/LanguageContext';
 import { getApiErrorMessage } from '../utils/apiErrorMessage';
+import { formatMinDepositLabel, minDepositMajor } from '../utils/depositLimits';
 import { majorToMinor, formatCurrency, getCurrencySymbol, getCurrencyName, CURRENCY_INFO } from '../utils/currency';
 import { creditLocalBalance } from '../utils/localBalance';
 import { TOPUP_FREE_LIMIT, TOPUP_FEE_RATE } from '../config/fees';
@@ -32,6 +33,7 @@ import {
   STRIPE_SDK_AVAILABLE,
   StripeProvider,
   useStripe,
+  LinkDisplay,
 } from '../stripe/stripeSdk';
 
 const PRESET_AMOUNTS = [
@@ -120,6 +122,9 @@ function StripePaymentSheetFlow({
     stripe.initPaymentSheet({
       paymentIntentClientSecret: clientSecret,
       merchantDisplayName: 'EGWallet',
+      allowsDelayedPaymentMethods: false,
+      link: { display: LinkDisplay.NEVER },
+      paymentMethodOrder: ['card'],
     }).then(({ error }: any) => {
       if (!error) setReady(true);
       else onError(error.message);
@@ -312,8 +317,12 @@ export default function DepositScreen() {
     }
     if (__DEV__) console.log('[Deposit] button pressed');
     const numAmount = parsedAmount();
-    if (numAmount < 1) {
-      Alert.alert(t('common.error'), t('deposit.tooSmall'));
+    const minimumMajor = minDepositMajor(currency);
+    if (numAmount < minimumMajor) {
+      Alert.alert(
+        t('common.error'),
+        `${t('deposit.tooSmall')} (${formatMinDepositLabel(currency)})`,
+      );
       return;
     }
     // Convert major units (what user types) → minor units (what backend/wallet stores)
@@ -332,6 +341,8 @@ export default function DepositScreen() {
         const err: any = new Error(data.error || data.message || 'Create intent failed');
         err.status = res.status;
         err.errorCode = data.errorCode;
+        err.minimumMinor = data.minimumMinor;
+        err.currency = data.currency;
         throw err;
       }
 
@@ -359,8 +370,13 @@ export default function DepositScreen() {
         if (!refreshed) {
           Alert.alert(t('common.sessionExpired'), t('deposit.sessionExpired'));
         } else {
-          Alert.alert(t('common.error'), t('apiError.requestFailed'));
+          const friendly = getApiErrorMessage({
+            message: e?.message,
+            errorCode: e?.errorCode,
+          }, t);
+          Alert.alert(t('common.error'), friendly);
         }
+        return;
       } else {
         const friendly = getApiErrorMessage({
           message: e?.message,
@@ -383,7 +399,12 @@ export default function DepositScreen() {
       body: JSON.stringify({ intentId, walletId: wid }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Confirm failed');
+    if (!res.ok) {
+      const err: any = new Error(data.error || data.message || 'Confirm failed');
+      err.status = res.status;
+      err.errorCode = data.errorCode;
+      throw err;
+    }
 
     // Keep local balance in sync with backend (credit the net amount)
     const netMinor = data.feeBreakdown?.addedToWallet ?? majorToMinor(parsedAmount(), currency);
@@ -858,9 +879,9 @@ export default function DepositScreen() {
         {!stripeIntent ? (
           <Animated.View style={[styles.buttonWrapper, { transform: [{ scale: buttonScale }] }]}>
             <TouchableOpacity
-              style={[styles.primaryButtonOuter, (loading || numAmount < 100 || !walletId) && styles.buttonDisabled]}
+              style={[styles.primaryButtonOuter, (loading || numAmount < minDepositMajor(currency) || !walletId) && styles.buttonDisabled]}
               onPress={() => { animatePress(); setShowPaymentMethodModal(true); }}
-              disabled={loading || numAmount < 100 || !walletId}
+              disabled={loading || numAmount < minDepositMajor(currency) || !walletId}
               activeOpacity={1}
             >
               <LinearGradient
