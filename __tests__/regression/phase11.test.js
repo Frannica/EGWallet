@@ -18,30 +18,29 @@ const SETTINGS = fs.readFileSync(path.resolve(__dirname, '../../src/screens/Sett
 
 module.exports = function phase11(check) {
   // ════════════════════════════════════════════════════════════════════════════
-  // A) DepositScreen — CVC removal
+  // A) DepositScreen — Stripe-only deposit (no fake card modal)
   // ════════════════════════════════════════════════════════════════════════════
 
   check(
-    '[Deposit] CVC / CVV TextInput rendered in deposit card modal (required for real card processing)',
-    DEPOSIT.includes("fieldLabel}>CVC / CVV</Text>") &&
-    DEPOSIT.includes('value={cardCvc}'),
+    '[Deposit] Depositar goes straight to handleDeposit (no payment method modal)',
+    DEPOSIT.includes('animatePress(); handleDeposit()') &&
+    !DEPOSIT.includes('showPaymentMethodModal'),
   );
   check(
-    '[Deposit] handleAddDepositMethod gates on cardCvc (required field)',
-    DEPOSIT.includes('cardCvc.trim()'),
+    '[Deposit] No in-app PAN/CVC/bank collection for deposits',
+    !DEPOSIT.includes('cardNumber') &&
+    !DEPOSIT.includes('cardCvc') &&
+    !DEPOSIT.includes('handleAddDepositMethod'),
   );
   check(
-    '[Deposit] resetAddCardForm clears cardCvc on form reset',
-    DEPOSIT.includes("setCardCvc('');"),
+    '[Deposit] Stripe PaymentSheet auto-presents after create-intent',
+    DEPOSIT.includes('presentPaymentSheet()') &&
+    DEPOSIT.includes('buildCardOnlyPaymentSheetParams('),
   );
   check(
-    '[Deposit] CVC is NOT sent raw in any fetch body (must go through payment processor only)',
+    '[Deposit] Card data is NOT sent raw in any fetch body',
     !DEPOSIT.includes('"cvc"') && !DEPOSIT.includes("'cvc'") &&
     !DEPOSIT.includes('"cvv"') && !DEPOSIT.includes("'cvv'"),
-  );
-  check(
-    '[Deposit] Card form validates cardNumber, cardHolder, cardExpiry, cardCvc',
-    DEPOSIT.includes('!cardNumber.trim() || !cardHolder.trim() || !cardExpiry.trim() || !cardCvc.trim()'),
   );
 
   // ════════════════════════════════════════════════════════════════════════════

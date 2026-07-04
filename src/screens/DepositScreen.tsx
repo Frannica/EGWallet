@@ -15,7 +15,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
-  ScrollView, Alert, ActivityIndicator, Animated, Modal, KeyboardAvoidingView, Platform
+  ScrollView, Alert, ActivityIndicator, Animated, Modal
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -33,7 +33,7 @@ import {
   STRIPE_SDK_AVAILABLE,
   StripeProvider,
   useStripe,
-  LinkDisplay,
+  buildCardOnlyPaymentSheetParams,
 } from '../stripe/stripeSdk';
 
 const PRESET_AMOUNTS = [
@@ -74,81 +74,76 @@ const WORLD_CURRENCIES_SORTED = ALL_CURRENCIES.filter(c => !AFRICAN_CURRENCY_COD
     return a.localeCompare(b);
   });
 
-// Strip the guarded Stripe hook into a component so Rules of Hooks are satisfied
-function StripeDepositButton({
-  disabled, loading, onPaymentSheetDeposit,
-}: {
-  disabled: boolean;
-  loading: boolean;
-  onPaymentSheetDeposit: (initAndPresent: () => Promise<boolean>) => void;
-}) {
-  const stripe = useStripe();
-
-  async function initAndPresent(): Promise<boolean> {
-    // This function is invoked by the parent which already has clientSecret etc.
-    // Parent passes it back via onPaymentSheetDeposit — see usage below.
-    return false; // placeholder — real logic is wired by parent
-  }
-
-  // Expose the stripe hooks to the parent via the callback
-  React.useEffect(() => {
-    onPaymentSheetDeposit(async () => {
-      // Will be replaced by the real flow in the parent
-      return false;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  return null; // rendered inline by parent
-}
-
-// Inner component — receives publishableKey and does the PaymentSheet flow
+// Stripe PaymentSheet — init + auto-present (no in-app card form; Stripe collects card data)
 function StripePaymentSheetFlow({
-  publishableKey,
   clientSecret,
   onSuccess,
   onError,
+  onCancel,
 }: {
-  publishableKey: string;
   clientSecret: string;
   onSuccess: () => void;
   onError: (msg: string) => void;
+  onCancel: () => void;
 }) {
   const stripe = useStripe();
-  const [ready, setReady] = useState(false);
   const { t } = useLanguage();
+  const [phase, setPhase] = useState<'init' | 'presenting' | 'failed'>('init');
+  const runIdRef = useRef(0);
+  const onSuccessRef = useRef(onSuccess);
+  const onErrorRef = useRef(onError);
+  const onCancelRef = useRef(onCancel);
+  onSuccessRef.current = onSuccess;
+  onErrorRef.current = onError;
+  onCancelRef.current = onCancel;
 
   useEffect(() => {
-    stripe.initPaymentSheet({
-      paymentIntentClientSecret: clientSecret,
-      merchantDisplayName: 'EGWallet',
-      allowsDelayedPaymentMethods: false,
-      link: { display: LinkDisplay.NEVER },
-      paymentMethodOrder: ['card'],
-    }).then(({ error }: any) => {
-      if (!error) setReady(true);
-      else onError(error.message);
-    });
-  }, [clientSecret]);
+    const runId = ++runIdRef.current;
+    let cancelled = false;
 
-  async function present() {
-    const { error } = await stripe.presentPaymentSheet();
-    if (error) {
-      if (error.code !== 'Canceled') onError(error.message);
-    } else {
-      onSuccess();
-    }
+    (async () => {
+      setPhase('init');
+      const { error: initError } = await stripe.initPaymentSheet(
+        buildCardOnlyPaymentSheetParams(clientSecret, 'EGWallet'),
+      );
+      if (cancelled || runId !== runIdRef.current) return;
+      if (initError) {
+        setPhase('failed');
+        onErrorRef.current(initError.message);
+        return;
+      }
+
+      setPhase('presenting');
+      const { error: presentError } = await stripe.presentPaymentSheet();
+      if (cancelled || runId !== runIdRef.current) return;
+      if (presentError) {
+        if (presentError.code === 'Canceled') {
+          onCancelRef.current();
+        } else {
+          setPhase('failed');
+          onErrorRef.current(presentError.message);
+        }
+      } else {
+        onSuccessRef.current();
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [clientSecret, stripe]);
+
+  if (phase === 'failed') {
+    return (
+      <TouchableOpacity style={styles.primaryButton} onPress={onCancel}>
+        <Text style={styles.primaryButtonText}>{t('common.cancel')}</Text>
+      </TouchableOpacity>
+    );
   }
 
   return (
-    <TouchableOpacity
-      style={[styles.primaryButton, !ready && styles.buttonDisabled]}
-      onPress={present}
-      disabled={!ready}
-    >
-      <Ionicons name="card" size={18} color="#fff" />
-      <Text style={styles.primaryButtonText}>{t('deposit.payWithCard')}</Text>
-    </TouchableOpacity>
+    <View style={styles.paymentProcessing}>
+      <ActivityIndicator color="#1565C0" size="large" />
+      <Text style={styles.paymentProcessingText}>{t('common.loading')}</Text>
+    </View>
   );
 }
 
@@ -183,80 +178,6 @@ export default function DepositScreen() {
     feeRate: number;
     freeLimit: number;
   } | null>(null);
-
-  // Payment method state
-  interface DepositPaymentMethod {
-    id: string;
-    type: 'debit' | 'credit' | 'bank';
-    label: string;
-    last4: string;
-  }
-  const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
-  const [savedPaymentMethods, setSavedPaymentMethods] = useState<DepositPaymentMethod[]>([]);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<DepositPaymentMethod | null>(null);
-  const [showAddCardForm, setShowAddCardForm] = useState(false);
-  const [addCardType, setAddCardType] = useState<'debit' | 'credit' | 'bank' | null>(null);
-  const [cardNumber, setCardNumber] = useState('');
-  const [cardHolder, setCardHolder] = useState('');
-  const [cardExpiry, setCardExpiry] = useState('');
-  const [cardCvc, setCardCvc] = useState('');
-  const [bankAccountNum, setBankAccountNum] = useState('');
-  const [bankRoutingNum, setBankRoutingNum] = useState('');
-
-  function pmIcon(type: DepositPaymentMethod['type']) {
-    if (type === 'bank') return 'business-outline';
-    if (type === 'credit') return 'card-outline';
-    return 'card';
-  }
-  function pmColor(type: DepositPaymentMethod['type']) {
-    if (type === 'bank') return '#2E7D32';
-    if (type === 'credit') return '#6A1B9A';
-    return '#1565C0';
-  }
-
-  function resetAddCardForm() {
-    setCardNumber('');
-    setCardHolder('');
-    setCardExpiry('');
-    setCardCvc('');
-    setBankAccountNum('');
-    setBankRoutingNum('');
-    setShowAddCardForm(false);
-    setAddCardType(null);
-  }
-
-  async function handleAddDepositMethod() {
-    if (addCardType === 'bank') {
-      if (!bankAccountNum.trim() || !bankRoutingNum.trim() || !cardHolder.trim()) {
-        Alert.alert(t('send.missingInfo'), t('deposit.missingBankFields'));
-        return;
-      }
-      const last4 = bankAccountNum.slice(-4).padStart(4, '*');
-      const method: DepositPaymentMethod = { id: Date.now().toString(), type: 'bank', label: 'Bank Account', last4 };
-      setSavedPaymentMethods(prev => [...prev, method]);
-      setSelectedPaymentMethod(method);
-      resetAddCardForm();
-      setShowPaymentMethodModal(false);
-      await handleDeposit();
-    } else {
-      if (!cardNumber.trim() || !cardHolder.trim() || !cardExpiry.trim() || !cardCvc.trim()) {
-        Alert.alert(t('send.missingInfo'), t('deposit.missingCardFields'));
-        return;
-      }
-      const last4 = cardNumber.replace(/\s/g, '').slice(-4);
-      const method: DepositPaymentMethod = {
-        id: Date.now().toString(),
-        type: addCardType ?? 'debit',
-        label: addCardType === 'credit' ? 'Credit Card' : 'Debit Card',
-        last4,
-      };
-      setSavedPaymentMethods(prev => [...prev, method]);
-      setSelectedPaymentMethod(method);
-      resetAddCardForm();
-      setShowPaymentMethodModal(false);
-      await handleDeposit();
-    }
-  }
 
   // Animations & UI helpers
   const buttonScale = useRef(new Animated.Value(1)).current;
@@ -479,185 +400,16 @@ export default function DepositScreen() {
 
   const btnColors: [string, string] = depositSuccess ? ['#2e7d32', '#388e3c'] : ['#1565C0', '#0A3D7C'];
 
-  // ── Payment Method Modal ──────────────────────────────────────────────────
-  const paymentMethodModal = (
-    <Modal
-      visible={showPaymentMethodModal}
-      transparent
-      animationType="slide"
-      onRequestClose={() => { setShowPaymentMethodModal(false); resetAddCardForm(); }}
-    >
-      <View style={pmStyles.overlay}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%' }}>
-          <View style={pmStyles.sheet}>
-            <View style={pmStyles.header}>
-              <Text style={pmStyles.title}>
-                {showAddCardForm
-                  ? addCardType === 'bank' ? t('deposit.addBankAccount')
-                  : addCardType === 'credit' ? t('deposit.addCreditCard')
-                  : t('deposit.addDebitCard')
-                  : t('deposit.choosePaymentMethod')}
-              </Text>
-              <TouchableOpacity onPress={() => { setShowPaymentMethodModal(false); resetAddCardForm(); }}>
-                <Ionicons name="close" size={24} color="#14171A" />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={{ maxHeight: 480 }}>
-              {!showAddCardForm ? (
-                <>
-                  {/* Selected method badge */}
-                  {selectedPaymentMethod && (
-                    <View style={pmStyles.selectedBanner}>
-                      <Ionicons name={pmIcon(selectedPaymentMethod.type) as any} size={18} color={pmColor(selectedPaymentMethod.type)} />
-                      <Text style={pmStyles.selectedText}>
-                        {selectedPaymentMethod.label} **** {selectedPaymentMethod.last4} {t('deposit.selectedSuffix')}
-                      </Text>
-                    </View>
-                  )}
-
-                  {/* Saved methods */}
-                  {savedPaymentMethods.length > 0 && (
-                    <>
-                      <Text style={pmStyles.sectionLabel}>{t('deposit.savedMethods')}</Text>
-                      {savedPaymentMethods.map(m => (
-                        <TouchableOpacity
-                          key={m.id}
-                          style={pmStyles.option}
-                          onPress={() => {
-                            setSelectedPaymentMethod(m);
-                            setShowPaymentMethodModal(false);
-                            handleDeposit();
-                          }}
-                        >
-                          <View style={[pmStyles.iconCircle, { backgroundColor: pmColor(m.type) + '18' }]}>
-                            <Ionicons name={pmIcon(m.type) as any} size={22} color={pmColor(m.type)} />
-                          </View>
-                          <View style={{ flex: 1 }}>
-                            <Text style={pmStyles.optionLabel}>{m.label}</Text>
-                            <Text style={pmStyles.optionSub}>**** {m.last4}</Text>
-                          </View>
-                          <Ionicons name="chevron-forward" size={18} color="#9BAAB8" />
-                        </TouchableOpacity>
-                      ))}
-                      <View style={pmStyles.divider} />
-                      <Text style={pmStyles.sectionLabel}>{t('deposit.addNew')}</Text>
-                    </>
-                  )}
-
-                  {/* Add new options */}
-                  <TouchableOpacity style={pmStyles.option} onPress={() => { setAddCardType('debit'); setShowAddCardForm(true); }}>
-                    <View style={[pmStyles.iconCircle, { backgroundColor: '#1565C018' }]}>
-                      <Ionicons name="card" size={22} color="#1565C0" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={pmStyles.optionLabel}>{t('send.debitCard')}</Text>
-                      <Text style={pmStyles.optionSub}>{t('deposit.visaMcVerve')}</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color="#9BAAB8" />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={pmStyles.option} onPress={() => { setAddCardType('credit'); setShowAddCardForm(true); }}>
-                    <View style={[pmStyles.iconCircle, { backgroundColor: '#6A1B9A18' }]}>
-                      <Ionicons name="card-outline" size={22} color="#6A1B9A" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={pmStyles.optionLabel}>{t('send.creditCard')}</Text>
-                      <Text style={pmStyles.optionSub}>{t('deposit.visaMcAmex')}</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color="#9BAAB8" />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={pmStyles.option} onPress={() => { setAddCardType('bank'); setShowAddCardForm(true); }}>
-                    <View style={[pmStyles.iconCircle, { backgroundColor: '#2E7D3218' }]}>
-                      <Ionicons name="business-outline" size={22} color="#2E7D32" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={pmStyles.optionLabel}>{t('deposit.bankAccount')}</Text>
-                      <Text style={pmStyles.optionSub}>{t('deposit.directBankTransfer')}</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color="#9BAAB8" />
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <>
-                  <TouchableOpacity style={pmStyles.backRow} onPress={() => { setShowAddCardForm(false); setAddCardType(null); }}>
-                    <Ionicons name="arrow-back" size={18} color="#1565C0" />
-                    <Text style={pmStyles.backText}>{t('deposit.back')}</Text>
-                  </TouchableOpacity>
-
-                  {addCardType === 'bank' ? (
-                    <>
-                      <Text style={pmStyles.fieldLabel}>{t('deposit.accountHolderName')}</Text>
-                      <TextInput value={cardHolder} onChangeText={setCardHolder} placeholder={t('deposit.fullName')} placeholderTextColor="#AAB8C2" style={pmStyles.input} />
-                      <Text style={pmStyles.fieldLabel}>{t('deposit.accountNumber')}</Text>
-                      <TextInput value={bankAccountNum} onChangeText={setBankAccountNum} placeholder={t('deposit.enterAccountNum')} placeholderTextColor="#AAB8C2" keyboardType="number-pad" style={pmStyles.input} />
-                      <Text style={pmStyles.fieldLabel}>{t('deposit.routingCode')}</Text>
-                      <TextInput value={bankRoutingNum} onChangeText={setBankRoutingNum} placeholder={t('deposit.enterRoutingNum')} placeholderTextColor="#AAB8C2" keyboardType="number-pad" style={pmStyles.input} />
-                    </>
-                  ) : (
-                    <>
-                      <Text style={pmStyles.fieldLabel}>{t('deposit.cardNumber')}</Text>
-                      <TextInput
-                        value={cardNumber}
-                        onChangeText={v => setCardNumber(v.replace(/\D/g, '').replace(/(.{4})/g, '$1 ').trim())}
-                        placeholder="1234 5678 9012 3456"
-                        placeholderTextColor="#AAB8C2"
-                        keyboardType="number-pad"
-                        maxLength={19}
-                        style={pmStyles.input}
-                      />
-                      <Text style={pmStyles.fieldLabel}>{t('deposit.cardholderName')}</Text>
-                      <TextInput value={cardHolder} onChangeText={setCardHolder} placeholder={t('deposit.nameAsOnCard')} placeholderTextColor="#AAB8C2" style={pmStyles.input} />
-                      <Text style={pmStyles.fieldLabel}>{t('deposit.expiryDate')}</Text>
-                      <TextInput
-                        value={cardExpiry}
-                        onChangeText={v => {
-                          const d = v.replace(/\D/g, '');
-                          if (d.length <= 2) setCardExpiry(d);
-                          else setCardExpiry(d.slice(0, 2) + '/' + d.slice(2, 4));
-                        }}
-                        placeholder="MM/YY"
-                        placeholderTextColor="#AAB8C2"
-                        keyboardType="number-pad"
-                        maxLength={5}
-                        style={pmStyles.input}
-                      />
-                      <Text style={pmStyles.fieldLabel}>CVC / CVV</Text>
-                      <TextInput
-                        value={cardCvc}
-                        onChangeText={v => setCardCvc(v.replace(/\D/g, '').slice(0, 4))}
-                        placeholder="123"
-                        placeholderTextColor="#AAB8C2"
-                        keyboardType="number-pad"
-                        maxLength={4}
-                        secureTextEntry
-                        style={pmStyles.input}
-                      />
-                    </>
-                  )}
-
-                  <TouchableOpacity style={pmStyles.confirmButton} onPress={handleAddDepositMethod} disabled={loading}>
-                    {loading
-                      ? <ActivityIndicator color="#FFF" />
-                      : <Text style={pmStyles.confirmButtonText}>{t('deposit.confirmDeposit')}</Text>}
-                  </TouchableOpacity>
-                  <Text style={pmStyles.secureNote}>{t('deposit.secureNote')}</Text>
-                </>
-              )}
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </View>
-    </Modal>
-  );
+  function clearStripeFlow() {
+    setStripeIntent(null);
+    setMode(null);
+  }
 
   return (
     <LinearGradient
       colors={['#C5DFF8', '#DEEEFF', '#EBF4FE', '#F5F9FF', '#FFFFFF']}
       style={styles.gradient}
     >
-      {paymentMethodModal}
       <Animated.ScrollView
         style={{ flex: 1, opacity: fadeAnim }}
         contentContainerStyle={styles.content}
@@ -880,7 +632,7 @@ export default function DepositScreen() {
           <Animated.View style={[styles.buttonWrapper, { transform: [{ scale: buttonScale }] }]}>
             <TouchableOpacity
               style={[styles.primaryButtonOuter, (loading || numAmount < minDepositMajor(currency) || !walletId) && styles.buttonDisabled]}
-              onPress={() => { animatePress(); setShowPaymentMethodModal(true); }}
+              onPress={() => { animatePress(); handleDeposit(); }}
               disabled={loading || numAmount < minDepositMajor(currency) || !walletId}
               activeOpacity={1}
             >
@@ -916,10 +668,10 @@ export default function DepositScreen() {
             ? (
               <StripeProvider publishableKey={stripeIntent.publishableKey} merchantIdentifier="merchant.com.egwallet">
                 <StripePaymentSheetFlow
-                  publishableKey={stripeIntent.publishableKey}
                   clientSecret={stripeIntent.clientSecret}
                   onSuccess={handleStripeSuccess}
                   onError={msg => Alert.alert(t('common.error'), getApiErrorMessage({ message: msg }, t))}
+                  onCancel={clearStripeFlow}
                 />
               </StripeProvider>
             )
@@ -936,7 +688,7 @@ export default function DepositScreen() {
         {stripeIntent && (
           <TouchableOpacity
             style={styles.cancelButton}
-            onPress={() => { setStripeIntent(null); setMode(null); }}
+            onPress={clearStripeFlow}
           >
             <Text style={styles.cancelText}>{t('common.cancel')}</Text>
           </TouchableOpacity>
@@ -1401,6 +1153,18 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     elevation: 8,
   },
+  paymentProcessing: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
+    gap: 12,
+    marginBottom: 12,
+  },
+  paymentProcessingText: {
+    fontSize: 14,
+    color: '#657786',
+    fontWeight: '600',
+  },
   primaryButtonText: {
     color: '#fff',
     fontSize: 16,
@@ -1471,132 +1235,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#1565C0',
     fontWeight: '700',
-  },
-});
-
-const pmStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    paddingBottom: 36,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#0D1B2E',
-  },
-  selectedBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#E8F5E9',
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 14,
-  },
-  selectedText: {
-    fontSize: 13,
-    color: '#2E7D32',
-    fontWeight: '600',
-  },
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#9BAAB8',
-    letterSpacing: 0.8,
-    marginBottom: 8,
-    marginTop: 4,
-  },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F4F8',
-  },
-  iconCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  optionLabel: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#0D1B2E',
-  },
-  optionSub: {
-    fontSize: 12,
-    color: '#657786',
-    marginTop: 1,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#EFF3F6',
-    marginVertical: 12,
-  },
-  backRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 16,
-  },
-  backText: {
-    fontSize: 14,
-    color: '#1565C0',
-    fontWeight: '600',
-  },
-  fieldLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#9BAAB8',
-    letterSpacing: 0.7,
-    marginBottom: 6,
-    marginTop: 12,
-  },
-  input: {
-    borderWidth: 1.5,
-    borderColor: '#DDE6EE',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    fontSize: 15,
-    color: '#0D1B2E',
-    backgroundColor: '#F7FAFC',
-  },
-  confirmButton: {
-    backgroundColor: '#1565C0',
-    borderRadius: 12,
-    paddingVertical: 15,
-    alignItems: 'center',
-    marginTop: 20,
-    marginBottom: 8,
-  },
-  confirmButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  secureNote: {
-    fontSize: 12,
-    color: '#9BAAB8',
-    textAlign: 'center',
-    marginTop: 4,
   },
 });
 
