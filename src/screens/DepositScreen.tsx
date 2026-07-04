@@ -33,7 +33,7 @@ import {
   STRIPE_SDK_AVAILABLE,
   StripeProvider,
   useStripe,
-  buildCardOnlyPaymentSheetParams,
+  runDepositPaymentSheetOnce,
 } from '../stripe/stripeSdk';
 
 const PRESET_AMOUNTS = [
@@ -89,7 +89,7 @@ function StripePaymentSheetFlow({
   const stripe = useStripe();
   const { t } = useLanguage();
   const [phase, setPhase] = useState<'init' | 'presenting' | 'failed'>('init');
-  const runIdRef = useRef(0);
+  const startedForSecretRef = useRef<string | null>(null);
   const onSuccessRef = useRef(onSuccess);
   const onErrorRef = useRef(onError);
   const onCancelRef = useRef(onCancel);
@@ -98,38 +98,31 @@ function StripePaymentSheetFlow({
   onCancelRef.current = onCancel;
 
   useEffect(() => {
-    const runId = ++runIdRef.current;
+    if (startedForSecretRef.current === clientSecret) return;
+    startedForSecretRef.current = clientSecret;
     let cancelled = false;
 
     (async () => {
       setPhase('init');
-      const { error: initError } = await stripe.initPaymentSheet(
-        buildCardOnlyPaymentSheetParams(clientSecret, 'EGWallet'),
-      );
-      if (cancelled || runId !== runIdRef.current) return;
-      if (initError) {
-        setPhase('failed');
-        onErrorRef.current(initError.message);
+      const result = await runDepositPaymentSheetOnce(stripe, clientSecret, 'EGWallet');
+      if (cancelled) return;
+
+      if (result.status === 'success') {
+        onSuccessRef.current();
         return;
       }
-
-      setPhase('presenting');
-      const { error: presentError } = await stripe.presentPaymentSheet();
-      if (cancelled || runId !== runIdRef.current) return;
-      if (presentError) {
-        if (presentError.code === 'Canceled') {
-          onCancelRef.current();
-        } else {
-          setPhase('failed');
-          onErrorRef.current(presentError.message);
-        }
-      } else {
-        onSuccessRef.current();
+      if (result.status === 'cancelled') {
+        onCancelRef.current();
+        return;
       }
+      setPhase('failed');
+      onErrorRef.current(result.message);
     })();
 
     return () => { cancelled = true; };
-  }, [clientSecret, stripe]);
+    // clientSecret only — stripe hook identity changes on parent re-renders and must NOT re-present
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientSecret]);
 
   if (phase === 'failed') {
     return (

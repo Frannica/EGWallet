@@ -18,11 +18,11 @@ module.exports = function paymentSheetCardOnly(check) {
     stripeSdk.includes('buildCardOnlyPaymentSheetParams'));
 
   check('DepositScreen initializes PaymentSheet through card-only helper',
-    depositScreen.includes('buildCardOnlyPaymentSheetParams(') &&
+    depositScreen.includes('runDepositPaymentSheetOnce(') &&
     !/link:\s*\{\s*display:\s*LinkDisplay\.NEVER/.test(depositScreen));
 
   check('DepositScreen auto-presents PaymentSheet (no second pay button)',
-    depositScreen.includes('presentPaymentSheet()') &&
+    depositScreen.includes('runDepositPaymentSheetOnce(') &&
     !depositScreen.includes('showPaymentMethodModal') &&
     !depositScreen.includes('handleAddDepositMethod'));
 };

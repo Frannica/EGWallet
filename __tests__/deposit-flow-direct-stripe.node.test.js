@@ -35,9 +35,8 @@ module.exports = function depositFlowDirectStripe(check) {
 
   check(
     '[Deposit] PaymentSheet init + auto-present in one flow',
-    depositScreen.includes('buildCardOnlyPaymentSheetParams(') &&
-    depositScreen.includes('initPaymentSheet(') &&
-    depositScreen.includes('presentPaymentSheet()'),
+    depositScreen.includes('runDepositPaymentSheetOnce(') &&
+    depositScreen.includes('startedForSecretRef'),
   );
 
   check(

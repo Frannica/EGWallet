@@ -30,7 +30,7 @@ module.exports = function depositStripeConfig(check) {
     /error_deposit_minimum/.test(indexSource) && /minDepositMinor\(currency\)/.test(indexSource));
 
   check('DepositScreen PaymentSheet disables Link and delayed methods',
-    /buildCardOnlyPaymentSheetParams\(/.test(depositScreen) &&
+    /runDepositPaymentSheetOnce\(/.test(depositScreen) &&
     /allowsDelayedPaymentMethods:\s*false/.test(stripeSdk) &&
     /link:\s*\{\s*display:\s*LinkDisplay\.NEVER\s*\}/.test(stripeSdk) &&
     /paymentMethodOrder:\s*\['card'\]/.test(stripeSdk));

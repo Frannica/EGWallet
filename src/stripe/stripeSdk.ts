@@ -42,4 +42,23 @@ export function buildCardOnlyPaymentSheetParams(
   };
 }
 
+import {
+  runCardOnlyPaymentSheetOnce,
+  type PaymentSheetFlowResult,
+} from './paymentSheetSingleFlight';
+
+export type { PaymentSheetFlowResult };
+
+export function runDepositPaymentSheetOnce(
+  stripe: Parameters<typeof runCardOnlyPaymentSheetOnce>[0],
+  clientSecret: string,
+  merchantDisplayName = 'EGWallet',
+): Promise<PaymentSheetFlowResult> {
+  return runCardOnlyPaymentSheetOnce(
+    stripe,
+    clientSecret,
+    buildCardOnlyPaymentSheetParams(clientSecret, merchantDisplayName),
+  );
+}
+
 export { StripeProvider, useStripe, LinkDisplay };

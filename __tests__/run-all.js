@@ -27,6 +27,7 @@ const SUITES = [
   ['Stripe deposit — card-only PaymentIntent + minimum', require('../backend/__tests__/deposit-stripe-config.test.js')],
   ['Deposit flow — direct Stripe PaymentSheet (no fake card form)', require('./deposit-flow-direct-stripe.node.test.js')],
   ['PaymentSheet — card-only init helper', require('./payment-sheet-card-only.node.test.js')],
+  ['PaymentSheet — single-flight guard (no stacked sheets)', require('./payment-sheet-single-flight.node.test.js')],
   ['Money flow — $300 split + idempotent pay',            require('../backend/__tests__/money-flow.test.js')],
 ];
 

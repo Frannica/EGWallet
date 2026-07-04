@@ -34,8 +34,8 @@ module.exports = function phase11(check) {
   );
   check(
     '[Deposit] Stripe PaymentSheet auto-presents after create-intent',
-    DEPOSIT.includes('presentPaymentSheet()') &&
-    DEPOSIT.includes('buildCardOnlyPaymentSheetParams('),
+    DEPOSIT.includes('runDepositPaymentSheetOnce(') &&
+    DEPOSIT.includes('startedForSecretRef'),
   );
   check(
     '[Deposit] Card data is NOT sent raw in any fetch body',
