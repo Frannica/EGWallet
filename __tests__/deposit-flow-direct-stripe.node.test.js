@@ -40,9 +40,10 @@ module.exports = function depositFlowDirectStripe(check) {
   );
 
   check(
-    '[Deposit] PaymentSheet cancel clears stripe intent (no stuck spinner state)',
-    depositScreen.includes('onCancel={clearStripeFlow}') &&
-    depositScreen.includes('function clearStripeFlow()'),
+    '[Deposit] StripeProvider wraps screen (pre-warm) not only after create-intent',
+    depositScreen.includes('stripePublishableKey') &&
+    depositScreen.includes('readCachedStripePublishableKey') &&
+    !depositScreen.includes('<StripeProvider publishableKey={stripeIntent.publishableKey}'),
   );
 
   check(

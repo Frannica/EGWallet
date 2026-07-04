@@ -4633,6 +4633,10 @@ app.get('/deposits/fee-info', authMiddleware, (req, res) => {
     feeRate: isFree ? 0 : FEES.TOPUP_FEE_RATE,
     feeRatePct: isFree ? '0%' : `${(FEES.TOPUP_FEE_RATE * 100).toFixed(1)}%`,
     freeLimit: FEES.TOPUP_FREE_LIMIT,
+    // Public key — safe to expose; lets mobile warm StripeProvider before create-intent
+    publishableKey: stripeClient && process.env.STRIPE_PUBLISHABLE_KEY
+      ? process.env.STRIPE_PUBLISHABLE_KEY
+      : null,
   });
 });
 

@@ -35,6 +35,10 @@ import {
   useStripe,
   runDepositPaymentSheetOnce,
 } from '../stripe/stripeSdk';
+import {
+  cacheStripePublishableKey,
+  readCachedStripePublishableKey,
+} from '../stripe/stripePublishableKeyCache';
 
 const PRESET_AMOUNTS = [
   { label: '1,000', value: 1000 },
@@ -161,9 +165,10 @@ export default function DepositScreen() {
   const [stripeIntent, setStripeIntent] = useState<{
     clientSecret: string;
     intentId: string;
-    publishableKey: string | null;
     resolvedWalletId: string;
   } | null>(null);
+  /** Warm Stripe SDK on screen open — not tied to a specific PaymentIntent */
+  const [stripePublishableKey, setStripePublishableKey] = useState<string | null>(null);
   const [feeInfo, setFeeInfo] = useState<{
     depositCount: number;
     freeTopupsRemaining: number;
@@ -178,7 +183,15 @@ export default function DepositScreen() {
   const [depositSuccess, setDepositSuccess] = useState(false);
 
   useEffect(() => {
-    Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }).start();
+    Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+  }, []);
+
+  // Pre-load publishable key so StripeProvider mounts before user taps Depositar
+  useEffect(() => {
+    if (!STRIPE_SDK_AVAILABLE) return;
+    readCachedStripePublishableKey().then(cached => {
+      if (cached) setStripePublishableKey(prev => prev ?? cached);
+    });
   }, []);
 
   function formatAmount(text: string): string {
@@ -213,7 +226,15 @@ export default function DepositScreen() {
     }
     fetchWithTokenRefresh(`${API_BASE}/deposits/fee-info`, { headers })
       .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data) setFeeInfo(data); })
+      .then(data => {
+        if (!data) return;
+        const { publishableKey, ...feeFields } = data;
+        setFeeInfo(feeFields);
+        if (publishableKey) {
+          setStripePublishableKey(prev => prev ?? publishableKey);
+          cacheStripePublishableKey(publishableKey);
+        }
+      })
       .catch(() => {});
   }, [auth.token]);
 
@@ -266,11 +287,13 @@ export default function DepositScreen() {
         // Demo mode: confirm immediately using the wallet ID resolved by the backend
         await confirmDeposit(data.intentId, data.resolvedWalletId || walletId);
       } else {
-        // Stripe mode: store intent so the PaymentSheet component can render
+        if (data.publishableKey) {
+          setStripePublishableKey(data.publishableKey);
+          cacheStripePublishableKey(data.publishableKey);
+        }
         setStripeIntent({
           clientSecret: data.clientSecret,
           intentId: data.intentId,
-          publishableKey: data.publishableKey,
           resolvedWalletId: data.resolvedWalletId || walletId,
         });
       }
@@ -398,7 +421,7 @@ export default function DepositScreen() {
     setMode(null);
   }
 
-  return (
+  const depositContent = (
     <LinearGradient
       colors={['#C5DFF8', '#DEEEFF', '#EBF4FE', '#F5F9FF', '#FFFFFF']}
       style={styles.gradient}
@@ -657,25 +680,23 @@ export default function DepositScreen() {
             </TouchableOpacity>
           </Animated.View>
         ) : (
-          stripeIntent.publishableKey && STRIPE_SDK_AVAILABLE
+          stripeIntent && STRIPE_SDK_AVAILABLE && stripePublishableKey
             ? (
-              <StripeProvider publishableKey={stripeIntent.publishableKey} merchantIdentifier="merchant.com.egwallet">
-                <StripePaymentSheetFlow
-                  clientSecret={stripeIntent.clientSecret}
-                  onSuccess={handleStripeSuccess}
-                  onError={msg => Alert.alert(t('common.error'), getApiErrorMessage({ message: msg }, t))}
-                  onCancel={clearStripeFlow}
-                />
-              </StripeProvider>
+              <StripePaymentSheetFlow
+                clientSecret={stripeIntent.clientSecret}
+                onSuccess={handleStripeSuccess}
+                onError={msg => Alert.alert(t('common.error'), getApiErrorMessage({ message: msg }, t))}
+                onCancel={clearStripeFlow}
+              />
             )
-            : (
-              <View style={styles.stripeUnavailableBanner}>
-                <Ionicons name="warning-outline" size={22} color="#C62828" />
-                <Text style={styles.stripeUnavailableText}>
-                  {t('deposit.stripeSdkUnavailable')}
-                </Text>
-              </View>
-            )
+            : stripeIntent
+              ? (
+                <View style={styles.paymentProcessing}>
+                  <ActivityIndicator color="#1565C0" size="large" />
+                  <Text style={styles.paymentProcessingText}>{t('common.loading')}</Text>
+                </View>
+              )
+              : null
         )}
 
         {stripeIntent && (
@@ -706,6 +727,19 @@ export default function DepositScreen() {
       </Animated.ScrollView>
     </LinearGradient>
   );
+
+  if (STRIPE_SDK_AVAILABLE && stripePublishableKey) {
+    return (
+      <StripeProvider
+        publishableKey={stripePublishableKey}
+        merchantIdentifier="merchant.com.egwallet"
+      >
+        {depositContent}
+      </StripeProvider>
+    );
+  }
+
+  return depositContent;
 }
 
 const styles = StyleSheet.create({
