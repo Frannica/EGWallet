@@ -16,11 +16,13 @@ const MONEY_ROUTES = [
   { name: 'Bulk payroll', pattern: /app\.post\('\/employer\/bulk-payment',[\s\S]*?enforceMoneyOperationPolicy/ },
 ];
 
-test('adminInterventionPolicy documents permanent three-case rule', () => {
+test('adminInterventionPolicy documents permanent intervention rule', () => {
   assert.match(policySource, /PERMANENT PRODUCT RULE/);
   assert.match(policySource, /Fraud or risk is detected/);
   assert.match(policySource, /AML \/ compliance requires review/);
-  assert.match(policySource, /account is restricted/);
+  assert.match(policySource, /Sanctions match or hold/);
+  assert.match(policySource, /Court order \/ legal hold/);
+  assert.match(policySource, /restricted or frozen/);
   assert.match(policySource, /Do not add routine admin-approval gates outside this module/);
 });
 

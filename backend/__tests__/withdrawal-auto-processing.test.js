@@ -39,9 +39,8 @@ test('POST /withdrawals blocks restricted accounts via policy', () => {
   assert.match(block, /requiresAdminIntervention\(withdrawUser,\s*db\)/);
 });
 
-test('isPayoutProviderReady checks Stripe Connect and Kora configuration', () => {
-  assert.match(payoutSource, /function isPayoutProviderReady/);
-  assert.match(payoutSource, /STRIPE_CONNECT_READY/);
-  assert.match(payoutSource, /STRIPE_CONNECT_ACCOUNT/);
-  assert.match(payoutSource, /KORA_API_KEY/);
+test('POST /withdrawals does not apply send KYC limits', () => {
+  const block = extractWithdrawalsBlock();
+  assert.doesNotMatch(block, /checkKYCLimits\(withdrawUser/);
+  assert.doesNotMatch(block, /updateLimitTracking\(withdrawUser/);
 });

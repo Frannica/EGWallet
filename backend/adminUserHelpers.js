@@ -1,11 +1,6 @@
 'use strict';
 
-/** Read-only mirror of KYC_TIERS in index.js — keep in sync for Admin display. */
-const KYC_TIERS = {
-  0: { name: 'Starter', dailyLimit: 300, weeklyLimit: 1000, monthlyLimit: 2000 },
-  1: { name: 'Basic KYC', dailyLimit: 2000, weeklyLimit: 5000, monthlyLimit: 10000 },
-  2: { name: 'Verified', dailyLimit: 10000, weeklyLimit: 25000, monthlyLimit: 50000 },
-};
+const { KYC_TIERS, getEffectiveKycTier } = require('./kycLimits');
 
 const { userVirtualCardCharges, mapVirtualCardCharge } = require('./virtualCardCharges');
 const {
@@ -66,7 +61,7 @@ function applyLimitResets(user) {
 
 function buildLimitSummary(user) {
   applyLimitResets(user);
-  const tierLevel = user.kycTier || 0;
+  const tierLevel = getEffectiveKycTier(user);
   const tier = KYC_TIERS[tierLevel] || KYC_TIERS[0];
   const lt = user.limitTracking || {};
   const dailyUsed = lt.dailyUsedUSD || 0;
@@ -75,6 +70,8 @@ function buildLimitSummary(user) {
   return {
     tierLevel,
     tierName: tier.name,
+    scope: 'send',
+    withdrawalsUnlimited: true,
     daily: { usedUSD: dailyUsed, limitUSD: tier.dailyLimit, remainingUSD: Math.max(0, tier.dailyLimit - dailyUsed) },
     weekly: { usedUSD: weeklyUsed, limitUSD: tier.weeklyLimit, remainingUSD: Math.max(0, tier.weeklyLimit - weeklyUsed) },
     monthly: { usedUSD: monthlyUsed, limitUSD: tier.monthlyLimit, remainingUSD: Math.max(0, tier.monthlyLimit - monthlyUsed) },

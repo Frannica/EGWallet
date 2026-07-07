@@ -17,19 +17,20 @@ function LimitBar({ label, used, limit, remaining }) {
 }
 
 export default function UserLimitsPanel({ limits }) {
-  if (!limits) return null;
+  if (!limits?.daily || !limits?.weekly || !limits?.monthly) return null;
   return (
     <section className="detail-section">
       <h3>
-        KYC Tier Limits
-        <span className="read-only-tag">Enforced on mobile</span>
+        KYC Send Limits
+        <span className="read-only-tag">Send / pay / exchange only</span>
       </h3>
       <p className="muted small" style={{ marginBottom: 12 }}>
-        Tier {limits.tierLevel} — {limits.tierName}. Limits reset by UTC calendar day/week/month.
+        Tier {limits.tierLevel} — {limits.tierName}. Send limits reset by UTC calendar day/week/month.
+        Withdrawals are not subject to these caps.
       </p>
-      <LimitBar label="Daily" used={limits.daily.usedUSD} limit={limits.daily.limitUSD} remaining={limits.daily.remainingUSD} />
-      <LimitBar label="Weekly" used={limits.weekly.usedUSD} limit={limits.weekly.limitUSD} remaining={limits.weekly.remainingUSD} />
-      <LimitBar label="Monthly" used={limits.monthly.usedUSD} limit={limits.monthly.limitUSD} remaining={limits.monthly.remainingUSD} />
+      <LimitBar label="Daily send" used={limits.daily.usedUSD} limit={limits.daily.limitUSD} remaining={limits.daily.remainingUSD} />
+      <LimitBar label="Weekly send" used={limits.weekly.usedUSD} limit={limits.weekly.limitUSD} remaining={limits.weekly.remainingUSD} />
+      <LimitBar label="Monthly send" used={limits.monthly.usedUSD} limit={limits.monthly.limitUSD} remaining={limits.monthly.remainingUSD} />
     </section>
   );
 }

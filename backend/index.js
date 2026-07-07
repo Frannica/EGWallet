@@ -85,6 +85,11 @@ const {
   isAccountRestricted,
 } = require('./adminInterventionPolicy');
 const {
+  KYC_TIERS,
+  getEffectiveKycTier,
+  getTierLimitsForUser,
+} = require('./kycLimits');
+const {
   loadAppState,
   saveAppState: persistAppState,
   isDatabaseConnected,
@@ -877,7 +882,6 @@ function needsStructuredData(message) {
 // Get account-aware context for personalized responses
 function getUserContext(userId, db) {
   const user = db.users.find(u => u.id === userId);
-  const kyc = (db.kyc || []).find(k => k.userId === userId);
   const userCards = (db.virtualCards || []).filter(c => c.userId === userId && c.status === 'active');
   const userTransactions = (db.transactions || []).filter(t => t.userId === userId).slice(-10);
 
@@ -888,25 +892,36 @@ function getUserContext(userId, db) {
   const failedTxs = userTransactions.filter(t => t.status === 'failed');
   const pendingTxs = userTransactions.filter(t => t.status === 'pending');
 
-  const kycTier = kyc?.status === 'approved' ? 'verified' : (kyc?.status === 'under_review' ? 'pending' : 'unverified');
-  const dailyLimit = kycTier === 'verified' ? 50000 : (kycTier === 'pending' ? 5000 : 2000);
-  
-  // Calculate today's spending
-  const todayStart = new Date().setHours(0, 0, 0, 0);
-  const todaySpent = userTransactions
-    .filter(t => t.timestamp >= todayStart && t.type === 'send')
-    .reduce((sum, t) => sum + (t.amount || 0), 0);
-  
+  const effectiveTier = getEffectiveKycTier(user);
+  const tier = KYC_TIERS[effectiveTier] || KYC_TIERS[0];
+  const isFullKyc = (user?.kycTier || 0) >= 2 && user?.kycStatus === 'approved';
+  const kycTierLabel = isFullKyc
+    ? 'verified'
+    : (user?.kycStatus === 'under_review' ? 'pending' : ((user?.kycTier || 0) >= 1 ? 'basic' : 'unverified'));
+
+  if (user) applyLimitResets(user);
+  const lt = user?.limitTracking || {};
+  const dailyUsed = lt.dailyUsedUSD || 0;
+  const weeklyUsed = lt.weeklyUsedUSD || 0;
+  const monthlyUsed = lt.monthlyUsedUSD || 0;
+
   return {
     email: maskEmail(user?.email),
     username: user?.username || (user?.email ? user.email.split('@')[0] : 'User'),
     walletId: wallet?.id ? wallet.id.slice(-8).toUpperCase() : 'N/A',
     balance: primaryBal ? minorToMajor(primaryBal.amount, primaryBal.currency).toFixed(decimalsFor(primaryBal.currency)) : '0.00',
     currency: primaryBal?.currency || 'USD',
-    kycTier,
-    dailyLimit,
-    dailySpent: todaySpent,
-    dailyRemaining: dailyLimit - todaySpent,
+    kycTier: kycTierLabel,
+    dailyLimit: tier.dailyLimit,
+    weeklyLimit: tier.weeklyLimit,
+    monthlyLimit: tier.monthlyLimit,
+    dailySpent: dailyUsed,
+    weeklySpent: weeklyUsed,
+    monthlySpent: monthlyUsed,
+    dailyRemaining: Math.max(0, tier.dailyLimit - dailyUsed),
+    weeklyRemaining: Math.max(0, tier.weeklyLimit - weeklyUsed),
+    monthlyRemaining: Math.max(0, tier.monthlyLimit - monthlyUsed),
+    limitsScope: 'send',
     cardCount: userCards.length,
     recentTxCount: userTransactions.length,
     failedTxCount: failedTxs.length,
@@ -958,8 +973,8 @@ const translations = {
     email_updates: "✓ You'll receive email updates about your ticket",
     track_status: "✓ Track status anytime in the Support section",
     security_email: "🛡 For immediate security assistance, also email: SUPPORT@EGWALLETFINANCE.COM",
-    account_limits: "📊 Your Account Limits:\n- Daily limit: ${dailyLimit}\n- Used today: ${dailySpent}\n- Remaining: ${dailyRemaining}",
-    get_verified: "💡 Get verified to unlock $50,000+ daily limits!",
+    account_limits: "📊 Your Send Limits:\n- Daily sending: ${dailyLimit}\n- Used today: ${dailySpent}\n- Remaining: ${dailyRemaining}\n\nWithdrawals are not subject to daily send caps.",
+    get_verified: "💡 Get verified to unlock $5,000/day sending limits!",
     verification_pending: "⏳ Your verification is under review. Higher limits coming soon!",
     data_collection_reason: "To investigate this issue thoroughly, I need a few more details:",
     data_collection_help: "This helps us investigate faster and saves back-and-forth messages.",
@@ -968,7 +983,7 @@ const translations = {
     contact_support: "Contact support",
     provide_details: "Provide details",
     skip_ticket: "Skip and create ticket",
-    verified_status: "✓ Your identity is verified!\n\nYou have access to:\n- $50,000+ daily transaction limits\n- Instant withdrawals\n- International transfers\n- Premium features",
+    verified_status: "✓ Your identity is verified!\n\nYou have access to:\n- $5,000/day sending limit ($25,000/week, $50,000/month)\n- Withdraw your full available balance (no E.G. Wallet daily cap)\n- International transfers\n- Premium features",
     fraud_theft_alert: "I'm really sorry this happened — this could be an unauthorized transaction. I've created an urgent security case now (Ticket #{ticketId}).",
     security_lockdown_title: "🔒 IMMEDIATE SECURITY STEPS:",
     security_step_password: "1. Change your password NOW",
@@ -1004,8 +1019,8 @@ const translations = {
     card_general_s1: "Create card", card_general_s2: "View cards", card_general_s3: "Card security",
     kyc_pending_response: "⏳ Your documents are under review.\n\nWe'll notify you within 1-2 business days. Thank you for your patience!\n\nCurrent limit: ${currentLimit}/day",
     kyc_pending_s1: "Check status", kyc_pending_s2: "Upload additional documents", kyc_pending_s3: "Contact support",
-    kyc_unverified: "Get verified to unlock higher limits!\n\nBenefits:\n- $50,000+ transaction limits\n- Instant withdrawals\n- International transfers\n",
-    kyc_unverified_current: "Currently: ${currentLimit}/day\nAfter verification: $50,000+/day\n\nVerification takes ~5 minutes. You'll need a government-issued ID.",
+    kyc_unverified: "Get verified to unlock higher sending limits!\n\nBenefits:\n- $5,000/day sending ($25,000/week, $50,000/month)\n- Withdraw your full available balance\n- International transfers\n",
+    kyc_unverified_current: "Currently: ${currentLimit}/day sending\nAfter full verification: $5,000/day sending\n\nVerification takes ~5 minutes. You'll need a government-issued ID.",
     kyc_unverified_s1: "Start verification", kyc_unverified_s2: "Required documents", kyc_unverified_s3: "Learn more",
     security_response: "Your security is our priority! EGWallet protects you with:\n\n- Biometric authentication\n- Device tracking\n- End-to-end encryption\n- Transaction confirmations\n- 24/7 fraud monitoring\n\nEnable biometric lock in Settings for extra protection!",
     security_s1: "Enable biometric", security_s2: "Trusted devices", security_s3: "Security tips",
@@ -1100,8 +1115,8 @@ const translations = {
     email_updates: "✓ Recibirás actualizaciones por correo sobre tu ticket",
     track_status: "✓ Rastrea el estado en cualquier momento en la sección de Soporte",
     security_email: "🛡 Para asistencia de seguridad inmediata, también envía correo a: SUPPORT@EGWALLETFINANCE.COM",
-    account_limits: "📊 Límites de tu Cuenta:\n- Límite diario: ${dailyLimit}\n- Usado hoy: ${dailySpent}\n- Restante: ${dailyRemaining}",
-    get_verified: "💡 ¡Verifica tu cuenta para desbloquear límites diarios de $50,000+!",
+    account_limits: "📊 Límites de envío:\n- Envío diario: ${dailyLimit}\n- Usado hoy: ${dailySpent}\n- Restante: ${dailyRemaining}\n\nLos retiros no tienen límite diario de E.G. Wallet.",
+    get_verified: "💡 ¡Verifica tu cuenta para desbloquear $5,000/día en envíos!",
     verification_pending: "⏳ Tu verificación está en revisión. ¡Límites más altos próximamente!",
     data_collection_reason: "Para investigar este problema a fondo, necesito algunos detalles más:",
     data_collection_help: "Esto nos ayuda a investigar más rápido y ahorra mensajes de ida y vuelta.",
@@ -1110,7 +1125,7 @@ const translations = {
     contact_support: "Contactar soporte",
     provide_details: "Proporcionar detalles",
     skip_ticket: "Omitir y crear ticket",
-    verified_status: "✓ ¡Tu identidad está verificada!\n\nTienes acceso a:\n- Límites de transacción diarios de $50,000+\n- Retiros instantáneos\n- Transferencias internacionales\n- Funciones premium",
+    verified_status: "✓ ¡Tu identidad está verificada!\n\nTienes acceso a:\n- $5,000/día en envíos ($25,000/semana, $50,000/mes)\n- Retirar todo tu saldo disponible (sin límite diario de E.G. Wallet)\n- Transferencias internacionales\n- Funciones premium",
     fraud_theft_alert: "Lamento mucho que esto haya sucedido — esto podría ser una transacción no autorizada. He creado un caso de seguridad urgente ahora (Ticket #{ticketId}).",
     security_lockdown_title: "🔒 PASOS DE SEGURIDAD INMEDIATOS:",
     security_step_password: "1. Cambia tu contraseña AHORA",
@@ -1146,8 +1161,8 @@ const translations = {
     card_general_s1: "Crear tarjeta", card_general_s2: "Ver tarjetas", card_general_s3: "Seguridad de la tarjeta",
     kyc_pending_response: "⏳ Tus documentos están siendo revisados.\n\nTe notificaremos en 1-2 días hábiles. ¡Gracias por tu paciencia!\n\nLímite actual: ${currentLimit}/día",
     kyc_pending_s1: "Verificar estado", kyc_pending_s2: "Subir documentos adicionales", kyc_pending_s3: "Contactar soporte",
-    kyc_unverified: "¡Verifica tu identidad para desbloquear límites más altos!\n\nBeneficios:\n- Límites de transacción de $50,000+\n- Retiros instantáneos\n- Transferencias internacionales\n",
-    kyc_unverified_current: "Actualmente: ${currentLimit}/día\nTras la verificación: $50,000+/día\n\nLa verificación tarda ~5 minutos. Necesitarás un documento de identidad oficial.",
+    kyc_unverified: "¡Verifica tu identidad para desbloquear límites de envío más altos!\n\nBeneficios:\n- $5,000/día en envíos ($25,000/semana, $50,000/mes)\n- Retirar todo tu saldo disponible\n- Transferencias internacionales\n",
+    kyc_unverified_current: "Actualmente: ${currentLimit}/día en envíos\nTras verificación completa: $5,000/día en envíos\n\nLa verificación tarda ~5 minutos. Necesitarás un documento de identidad oficial.",
     kyc_unverified_s1: "Iniciar verificación", kyc_unverified_s2: "Documentos requeridos", kyc_unverified_s3: "Saber más",
     security_response: "¡Tu seguridad es nuestra prioridad! EGWallet te protege con:\n\n- Autenticación biométrica\n- Rastreo de dispositivos\n- Cifrado de extremo a extremo\n- Confirmaciones de transacciones\n- Monitoreo de fraude 24/7\n\n¡Activa el bloqueo biométrico en Configuración para mayor protección!",
     security_s1: "Activar biométrico", security_s2: "Dispositivos de confianza", security_s3: "Consejos de seguridad",
@@ -1242,8 +1257,8 @@ const translations = {
     email_updates: "✓ Vous recevrez des mises à jour par e-mail sur votre ticket",
     track_status: "✓ Suivez l'état à tout moment dans la section Support",
     security_email: "🛡 Pour une assistance de sécurité immédiate, envoyez également un e-mail à : SUPPORT@EGWALLETFINANCE.COM",
-    account_limits: "📊 Limites de votre compte :\n- Limite quotidienne : ${dailyLimit}\n- Utilisé aujourd'hui : ${dailySpent}\n- Restant : ${dailyRemaining}",
-    get_verified: "💡 Vérifiez-vous pour débloquer des limites quotidiennes de $50,000+ !",
+    account_limits: "📊 Limites d'envoi :\n- Envoi quotidien : ${dailyLimit}\n- Utilisé aujourd'hui : ${dailySpent}\n- Restant : ${dailyRemaining}\n\nLes retraits n'ont pas de plafond quotidien E.G. Wallet.",
+    get_verified: "💡 Vérifiez-vous pour débloquer 5 000 $/jour d'envois !",
     verification_pending: "⏳ Votre vérification est en cours de révision. Des limites plus élevées bientôt !",
     data_collection_reason: "Pour enquêter sur ce problème en profondeur, j'ai besoin de quelques détails supplémentaires :",
     data_collection_help: "Cela nous aide à enquêter plus rapidement et évite les messages aller-retour.",
@@ -1252,7 +1267,7 @@ const translations = {
     contact_support: "Contacter le support",
     provide_details: "Fournir les détails",
     skip_ticket: "Passer et créer un ticket",
-    verified_status: "✓ Votre identité est vérifiée !\n\nVous avez accès à :\n- Limites de transaction quotidiennes de $50,000+\n- Retraits instantanés\n- Virements internationaux\n- Fonctionnalités premium",
+    verified_status: "✓ Votre identité est vérifiée !\n\nVous avez accès à :\n- 5 000 $/jour d'envois (25 000 $/semaine, 50 000 $/mois)\n- Retirer tout votre solde disponible (sans plafond quotidien E.G. Wallet)\n- Virements internationaux\n- Fonctionnalités premium",
     fraud_theft_alert: "Je suis vraiment désolé que cela se soit produit — il pourrait s'agir d'une transaction non autorisée. J'ai créé un cas de sécurité urgent maintenant (Ticket #{ticketId}).",
     security_lockdown_title: "🔒 ÉTAPES DE SÉCURITÉ IMMÉDIATES :",
     security_step_password: "1. Changez votre mot de passe MAINTENANT",
@@ -1288,8 +1303,8 @@ const translations = {
     card_general_s1: "Créer une carte", card_general_s2: "Voir les cartes", card_general_s3: "Sécurité des cartes",
     kyc_pending_response: "⏳ Vos documents sont en cours d'examen.\n\nNous vous notifierons dans 1-2 jours ouvrables. Merci de votre patience !\n\nLimite actuelle : ${currentLimit}/jour",
     kyc_pending_s1: "Vérifier le statut", kyc_pending_s2: "Télécharger des documents supplémentaires", kyc_pending_s3: "Contacter le support",
-    kyc_unverified: "Faites vérifier votre identité pour débloquer des limites plus élevées !\n\nAvantages :\n- Limites de transaction de 50 000 $+\n- Retraits instantanés\n- Transferts internationaux\n",
-    kyc_unverified_current: "Actuellement : ${currentLimit}/jour\nAprès vérification : 50 000 $+/jour\n\nLa vérification prend ~5 minutes. Vous aurez besoin d'une pièce d'identité officielle.",
+    kyc_unverified: "Faites vérifier votre identité pour débloquer des limites d'envoi plus élevées !\n\nAvantages :\n- 5 000 $/jour d'envois (25 000 $/semaine, 50 000 $/mois)\n- Retirer tout votre solde disponible\n- Transferts internationaux\n",
+    kyc_unverified_current: "Actuellement : ${currentLimit}/jour d'envoi\nAprès vérification complète : 5 000 $/jour d'envoi\n\nLa vérification prend ~5 minutes. Vous aurez besoin d'une pièce d'identité officielle.",
     kyc_unverified_s1: "Commencer la vérification", kyc_unverified_s2: "Documents requis", kyc_unverified_s3: "En savoir plus",
     security_response: "Votre sécurité est notre priorité ! EGWallet vous protège avec :\n\n- Authentification biométrique\n- Suivi des appareils\n- Chiffrement de bout en bout\n- Confirmations de transactions\n- Surveillance des fraudes 24/7\n\nActivez le verrouillage biométrique dans Paramètres pour une protection supplémentaire !",
     security_s1: "Activer la biométrie", security_s2: "Appareils de confiance", security_s3: "Conseils de sécurité",
@@ -1384,8 +1399,8 @@ const translations = {
     email_updates: "✓ Você receberá atualizações por e-mail sobre seu ticket",
     track_status: "✓ Acompanhe o status a qualquer momento na seção de Suporte",
     security_email: "🛡 Para assistência de segurança imediata, envie também um e-mail para: SUPPORT@EGWALLETFINANCE.COM",
-    account_limits: "📊 Limites da sua Conta:\n- Limite diário: ${dailyLimit}\n- Usado hoje: ${dailySpent}\n- Restante: ${dailyRemaining}",
-    get_verified: "💡 Verifique-se para desbloquear limites diários de $50,000+!",
+    account_limits: "📊 Limites de envio:\n- Envio diário: ${dailyLimit}\n- Usado hoje: ${dailySpent}\n- Restante: ${dailyRemaining}\n\nSaques não têm limite diário da E.G. Wallet.",
+    get_verified: "💡 Verifique-se para desbloquear $5.000/dia em envios!",
     verification_pending: "⏳ Sua verificação está em revisão. Limites mais altos em breve!",
     data_collection_reason: "Para investigar este problema minuciosamente, preciso de mais alguns detalhes:",
     data_collection_help: "Isso nos ajuda a investigar mais rápido e economiza mensagens de ida e volta.",
@@ -1394,7 +1409,7 @@ const translations = {
     contact_support: "Contatar suporte",
     provide_details: "Fornecer detalhes",
     skip_ticket: "Pular e criar ticket",
-    verified_status: "✓ Sua identidade está verificada!\n\nVocê tem acesso a:\n- Limites de transação diários de $50,000+\n- Saques instantâneos\n- Transferências internacionais\n- Recursos premium",
+    verified_status: "✓ Sua identidade está verificada!\n\nVocê tem acesso a:\n- $5.000/dia em envios ($25.000/semana, $50.000/mês)\n- Sacar todo o saldo disponível (sem limite diário da E.G. Wallet)\n- Transferências internacionais\n- Recursos premium",
     fraud_theft_alert: "Sinto muito que isso tenha acontecido — isso pode ser uma transação não autorizada. Criei um caso de segurança urgente agora (Ticket #{ticketId}).",
     security_lockdown_title: "🔒 PASSOS DE SEGURANÇA IMEDIATOS:",
     security_step_password: "1. Altere sua senha AGORA",
@@ -1430,8 +1445,8 @@ const translations = {
     card_general_s1: "Criar cartão", card_general_s2: "Ver cartões", card_general_s3: "Segurança do cartão",
     kyc_pending_response: "⏳ Seus documentos estão sendo analisados.\n\nVamos te notificar em 1-2 dias úteis. Obrigado pela sua paciência!\n\nLimite atual: ${currentLimit}/dia",
     kyc_pending_s1: "Verificar status", kyc_pending_s2: "Enviar documentos adicionais", kyc_pending_s3: "Contatar suporte",
-    kyc_unverified: "Verifique sua identidade para desbloquear limites maiores!\n\nBenefícios:\n- Limites de transação de $50.000+\n- Saques instantâneos\n- Transferências internacionais\n",
-    kyc_unverified_current: "Atualmente: ${currentLimit}/dia\nApós verificação: $50.000+/dia\n\nA verificação leva ~5 minutos. Você precisará de um documento de identidade oficial.",
+    kyc_unverified: "Verifique sua identidade para desbloquear limites de envio maiores!\n\nBenefícios:\n- $5.000/dia em envios ($25.000/semana, $50.000/mês)\n- Sacar todo o saldo disponível\n- Transferências internacionais\n",
+    kyc_unverified_current: "Atualmente: ${currentLimit}/dia em envios\nApós verificação completa: $5.000/dia em envios\n\nA verificação leva ~5 minutos. Você precisará de um documento de identidade oficial.",
     kyc_unverified_s1: "Iniciar verificação", kyc_unverified_s2: "Documentos necessários", kyc_unverified_s3: "Saber mais",
     security_response: "Sua segurança é nossa prioridade! EGWallet te protege com:\n\n- Autenticação biométrica\n- Rastreamento de dispositivos\n- Criptografia de ponta a ponta\n- Confirmações de transações\n- Monitoramento de fraudes 24/7\n\nAtive o bloqueio biométrico nas Configurações para proteção extra!",
     security_s1: "Ativar biometria", security_s2: "Dispositivos confiáveis", security_s3: "Dicas de segurança",
@@ -1526,8 +1541,8 @@ const translations = {
     email_updates: "✓ 您将收到有关工单的电子邮件更新",
     track_status: "✓ 随时在支持部分跟踪状态",
     security_email: "🛡 如需立即获得安全协助，请发送电子邮件至：SUPPORT@EGWALLETFINANCE.COM",
-    account_limits: "📊 您的账户限额：\n- 每日限额：${dailyLimit}\n- 今日已用：${dailySpent}\n- 剩余：${dailyRemaining}",
-    get_verified: "💡 验证身份以解锁 $50,000+ 每日限额！",
+    account_limits: "📊 发送限额：\n- 每日发送：${dailyLimit}\n- 今日已用：${dailySpent}\n- 剩余：${dailyRemaining}\n\n提款不受 E.G. Wallet 每日发送限额限制。",
+    get_verified: "💡 验证身份以解锁每日 $5,000 发送限额！",
     verification_pending: "⏳ 您的验证正在审核中。更高限额即将到来！",
     data_collection_reason: "为了彻底调查此问题，我需要更多详细信息：",
     data_collection_help: "这有助于我们更快地调查并节省来回消息。",
@@ -1536,7 +1551,7 @@ const translations = {
     contact_support: "联系支持",
     provide_details: "提供详细信息",
     skip_ticket: "跳过并创建工单",
-    verified_status: "✓ 您的身份已验证！\n\n您可以访问：\n- $50,000+ 每日交易限额\n- 即时提款\n- 国际转账\n- 高级功能",
+    verified_status: "✓ 您的身份已验证！\n\n您可以访问：\n- 每日发送 $5,000（每周 $25,000，每月 $50,000）\n- 可提取全部可用余额（无 E.G. Wallet 每日提款上限）\n- 国际转账\n- 高级功能",
     fraud_theft_alert: "很抱歉发生这种情况 — 这可能是未经授权的交易。我现在已创建紧急安全案例（工单 #{ticketId}）。",
     security_lockdown_title: "🔒 立即安全步骤：",
     security_step_password: "1. 立即更改您的密码",
@@ -1572,8 +1587,8 @@ const translations = {
     card_general_s1: "创建卡片", card_general_s2: "查看卡片", card_general_s3: "卡片安全",
     kyc_pending_response: "⏳ 您的文件正在审核中。\n\n我们将在1-2个工作日内通知您。感谢您的耐心！\n\n当前限额：${currentLimit}/天",
     kyc_pending_s1: "检查状态", kyc_pending_s2: "上传补充文件", kyc_pending_s3: "联系客服",
-    kyc_unverified: "完成身份认证以解锁更高限额！\n\n优势：\n- 每日交易限额$50,000+\n- 即时提款\n- 国际转账\n",
-    kyc_unverified_current: "目前：${currentLimit}/天\n认证后：$50,000+/天\n\n认证仅需约5分钟，需要一张政府颁发的证件。",
+    kyc_unverified: "完成身份认证以解锁更高发送限额！\n\n优势：\n- 每日发送 $5,000（每周 $25,000，每月 $50,000）\n- 可提取全部可用余额\n- 国际转账\n",
+    kyc_unverified_current: "目前：${currentLimit}/天发送\n完整认证后：每日 $5,000 发送\n\n认证仅需约5分钟，需要一张政府颁发的证件。",
     kyc_unverified_s1: "开始认证", kyc_unverified_s2: "所需文件", kyc_unverified_s3: "了解更多",
     security_response: "您的安全是我们的首要任务！EGWallet通过以下方式保护您：\n\n- 生物特征认证\n- 设备追踪\n- 端到端加密\n- 交易确认\n- 24/7欺诈监控\n\n在设置中启用生物锁定以获得额外保护！",
     security_s1: "启用生物识别", security_s2: "信任设备", security_s3: "安全提示",
@@ -1668,8 +1683,8 @@ const translations = {
     email_updates: "✓ チケットに関するメール更新を受け取ります",
     track_status: "✓ サポートセクションでいつでもステータスを追跡できます",
     security_email: "🛡 緊急のセキュリティサポートが必要な場合は、次のアドレスにもメールしてください：SUPPORT@EGWALLETFINANCE.COM",
-    account_limits: "📊 アカウントの制限：\n- 1日の制限：${dailyLimit}\n- 本日使用：${dailySpent}\n- 残り：${dailyRemaining}",
-    get_verified: "💡 本人確認をして $50,000+ の1日制限を解除しましょう！",
+    account_limits: "📊 送金上限：\n- 1日の送金：${dailyLimit}\n- 本日使用：${dailySpent}\n- 残り：${dailyRemaining}\n\n出金は E.G. Wallet の日次送金上限の対象外です。",
+    get_verified: "💡 本人確認で1日$5,000の送金上限を解除！",
     verification_pending: "⏳ 本人確認は審査中です。より高い制限がまもなく利用可能になります！",
     data_collection_reason: "この問題を徹底的に調査するために、いくつかの詳細が必要です：",
     data_collection_help: "これにより、調査が迅速化され、やり取りが節約されます。",
@@ -1678,7 +1693,7 @@ const translations = {
     contact_support: "サポートに連絡",
     provide_details: "詳細を提供",
     skip_ticket: "スキップしてチケットを作成",
-    verified_status: "✓ 本人確認が完了しました！\n\nアクセス可能：\n- $50,000+ の1日取引制限\n- 即時出金\n- 国際送金\n- プレミアム機能",
+    verified_status: "✓ 本人確認が完了しました！\n\nアクセス可能：\n- 1日$5,000送金（週$25,000、月$50,000）\n- 利用可能残高の全額出金（E.G. Walletの日次出金上限なし）\n- 国際送金\n- プレミアム機能",
     fraud_theft_alert: "申し訳ございません — これは不正な取引である可能性があります。緊急セキュリティケースを作成しました（チケット #{ticketId}）。",
     security_lockdown_title: "🔒 緊急セキュリティ手順：",
     security_step_password: "1. 今すぐパスワードを変更してください",
@@ -1714,8 +1729,8 @@ const translations = {
     card_general_s1: "カードを作成", card_general_s2: "カードを見る", card_general_s3: "カードのセキュリティ",
     kyc_pending_response: "⏳ 書類を審査中です。\n\n1〜2営業日以内にご連絡いたします。ご辛抱いただきありがとうございます！\n\n現在の限度額：${currentLimit}/日",
     kyc_pending_s1: "ステータスを確認", kyc_pending_s2: "追加書類をアップロード", kyc_pending_s3: "サポートに連絡",
-    kyc_unverified: "より高い限度額を解除するために本人確認を完了してください！\n\n特典：\n- $50,000以上の取引限度額\n- 即時出金\n- 国際送金\n",
-    kyc_unverified_current: "現在：${currentLimit}/日\n確認後：$50,000以上/日\n\n確認には約5分かかります。政府発行の身分証明書が必要です。",
+    kyc_unverified: "より高い送金上限を解除するために本人確認を完了してください！\n\n特典：\n- 1日$5,000送金（週$25,000、月$50,000）\n- 利用可能残高の全額出金\n- 国際送金\n",
+    kyc_unverified_current: "現在：${currentLimit}/日（送金）\n完全確認後：1日$5,000送金\n\n確認には約5分かかります。政府発行の身分証明書が必要です。",
     kyc_unverified_s1: "確認を開始", kyc_unverified_s2: "必要な書類", kyc_unverified_s3: "詳細を見る",
     security_response: "お客様のセキュリティが私たちの最優先事項です！EGWalletは以下の方法でお客様を保護します：\n\n- 生体認証\n- デバイス追跡\n- エンドツーエンド暗号化\n- 取引確認\n- 24時間365日の不正監視\n\n追加の保護のために設定で生体認証ロックを有効にしてください！",
     security_s1: "生体認証を有効にする", security_s2: "信頼できるデバイス", security_s3: "セキュリティのヒント",
@@ -1810,8 +1825,8 @@ const translations = {
     email_updates: "✓ Вы будете получать обновления по электронной почте о вашей заявке",
     track_status: "✓ Отслеживайте статус в любое время в разделе Поддержка",
     security_email: "🛡 Для немедленной помощи по вопросам безопасности также отправьте письмо на: SUPPORT@EGWALLETFINANCE.COM",
-    account_limits: "📊 Лимиты вашей учетной записи:\n- Дневной лимит: ${dailyLimit}\n- Использовано сегодня: ${dailySpent}\n- Осталось: ${dailyRemaining}",
-    get_verified: "💡 Пройдите верификацию, чтобы разблокировать дневные лимиты $50,000+!",
+    account_limits: "📊 Лимиты отправки:\n- Ежедневная отправка: ${dailyLimit}\n- Использовано сегодня: ${dailySpent}\n- Осталось: ${dailyRemaining}\n\nВывод средств не ограничен дневным лимитом отправки E.G. Wallet.",
+    get_verified: "💡 Пройдите верификацию для лимита отправки $5,000/день!",
     verification_pending: "⏳ Ваша верификация находится на рассмотрении. Более высокие лимиты скоро!",
     data_collection_reason: "Чтобы тщательно расследовать эту проблему, мне нужно несколько дополнительных деталей:",
     data_collection_help: "Это помогает нам быстрее расследовать и экономит переписку.",
@@ -1820,7 +1835,7 @@ const translations = {
     contact_support: "Связаться с поддержкой",
     provide_details: "Предоставить детали",
     skip_ticket: "Пропустить и создать заявку",
-    verified_status: "✓ Ваша личность подтверждена!\n\nУ вас есть доступ к:\n- Дневные лимиты транзакций $50,000+\n- Мгновенные выводы\n- Международные переводы\n- Премиум функции",
+    verified_status: "✓ Ваша личность подтверждена!\n\nУ вас есть доступ к:\n- $5,000/день отправка ($25,000/неделя, $50,000/месяц)\n- Вывод всего доступного баланса (без дневного лимита E.G. Wallet)\n- Международные переводы\n- Премиум функции",
     fraud_theft_alert: "Мне очень жаль, что это произошло — это может быть несанкционированная транзакция. Я создал срочное дело безопасности (Заявка #{ticketId}).",
     security_lockdown_title: "🔒 НЕМЕДЛЕННЫЕ МЕРЫ БЕЗОПАСНОСТИ:",
     security_step_password: "1. Измените пароль СЕЙЧАС",
@@ -1856,8 +1871,8 @@ const translations = {
     card_general_s1: "Создать карту", card_general_s2: "Просмотреть карты", card_general_s3: "Безопасность карты",
     kyc_pending_response: "⏳ Ваши документы рассматриваются.\n\nМы уведомим вас в течение 1-2 рабочих дней. Спасибо за терпение!\n\nТекущий лимит: ${currentLimit}/день",
     kyc_pending_s1: "Проверить статус", kyc_pending_s2: "Загрузить дополнительные документы", kyc_pending_s3: "Связаться с поддержкой",
-    kyc_unverified: "Пройдите верификацию для разблокировки более высоких лимитов!\n\nПреимущества:\n- Лимиты транзакций $50,000+\n- Мгновенный вывод\n- Международные переводы\n",
-    kyc_unverified_current: "Сейчас: ${currentLimit}/день\nПосле верификации: $50,000+/день\n\nВерификация занимает ~5 минут. Потребуется удостоверение личности государственного образца.",
+    kyc_unverified: "Пройдите верификацию для более высоких лимитов отправки!\n\nПреимущества:\n- $5,000/день отправка ($25,000/неделя, $50,000/месяц)\n- Вывод всего доступного баланса\n- Международные переводы\n",
+    kyc_unverified_current: "Сейчас: ${currentLimit}/день отправка\nПосле полной верификации: $5,000/день отправка\n\nВерификация занимает ~5 минут. Потребуется удостоверение личности государственного образца.",
     kyc_unverified_s1: "Начать верификацию", kyc_unverified_s2: "Необходимые документы", kyc_unverified_s3: "Узнать больше",
     security_response: "Ваша безопасность — наш приоритет! EGWallet защищает вас:\n\n- Биометрическая аутентификация\n- Отслеживание устройств\n- Сквозное шифрование\n- Подтверждения транзакций\n- Мониторинг мошенничества 24/7\n\nВключите биометрическую блокировку в Настройках для дополнительной защиты!",
     security_s1: "Включить биометрию", security_s2: "Доверенные устройства", security_s3: "Советы по безопасности",
@@ -1952,8 +1967,8 @@ const translations = {
     email_updates: "✓ Sie erhalten E-Mail-Updates zu Ihrem Ticket",
     track_status: "✓ Verfolgen Sie den Status jederzeit im Support-Bereich",
     security_email: "🛡 Für sofortige Sicherheitshilfe senden Sie auch eine E-Mail an: SUPPORT@EGWALLETFINANCE.COM",
-    account_limits: "📊 Ihre Kontolimits:\n- Tageslimit: ${dailyLimit}\n- Heute verwendet: ${dailySpent}\n- Verbleibend: ${dailyRemaining}",
-    get_verified: "💡 Verifizieren Sie sich, um Tageslimits von $50,000+ freizuschalten!",
+    account_limits: "📊 Sendelimits:\n- Tägliches Senden: ${dailyLimit}\n- Heute verwendet: ${dailySpent}\n- Verbleibend: ${dailyRemaining}\n\nAuszahlungen unterliegen keinem täglichen E.G.-Wallet-Sendelimit.",
+    get_verified: "💡 Verifizieren Sie sich für $5.000/Tag Sendelimit!",
     verification_pending: "⏳ Ihre Verifizierung wird überprüft. Höhere Limits kommen bald!",
     data_collection_reason: "Um dieses Problem gründlich zu untersuchen, benötige ich einige weitere Details:",
     data_collection_help: "Dies hilft uns, schneller zu ermitteln und spart Hin- und Her-Nachrichten.",
@@ -1962,7 +1977,7 @@ const translations = {
     contact_support: "Support kontaktieren",
     provide_details: "Details angeben",
     skip_ticket: "Überspringen und Ticket erstellen",
-    verified_status: "✓ Ihre Identität ist verifiziert!\n\nSie haben Zugriff auf:\n- $50,000+ tägliche Transaktionslimits\n- Sofortige Auszahlungen\n- Internationale Überweisungen\n- Premium-Funktionen",
+    verified_status: "✓ Ihre Identität ist verifiziert!\n\nSie haben Zugriff auf:\n- $5.000/Tag Senden ($25.000/Woche, $50.000/Monat)\n- Gesamtes verfügbares Guthaben auszahlen (kein tägliches E.G.-Wallet-Limit)\n- Internationale Überweisungen\n- Premium-Funktionen",
     fraud_theft_alert: "Es tut mir wirklich leid, dass dies passiert ist — dies könnte eine nicht autorisierte Transaktion sein. Ich habe jetzt einen dringenden Sicherheitsfall erstellt (Ticket #{ticketId}).",
     security_lockdown_title: "🔒 SOFORTIGE SICHERHEITSMASSNAHMEN:",
     security_step_password: "1. Ändern Sie Ihr Passwort JETZT",
@@ -1998,8 +2013,8 @@ const translations = {
     card_general_s1: "Karte erstellen", card_general_s2: "Karten ansehen", card_general_s3: "Kartensicherheit",
     kyc_pending_response: "⏳ Ihre Dokumente werden geprüft.\n\nWir werden Sie innerhalb von 1-2 Werktagen benachrichtigen. Vielen Dank für Ihre Geduld!\n\nAktuelles Limit: ${currentLimit}/Tag",
     kyc_pending_s1: "Status prüfen", kyc_pending_s2: "Weitere Dokumente hochladen", kyc_pending_s3: "Support kontaktieren",
-    kyc_unverified: "Verifizieren Sie sich, um höhere Limits freizuschalten!\n\nVorteile:\n- Transaktionslimits von 50.000 $+\n- Sofortauszahlungen\n- Internationale Überweisungen\n",
-    kyc_unverified_current: "Aktuell: ${currentLimit}/Tag\nNach Verifizierung: 50.000 $+/Tag\n\nDie Verifizierung dauert ~5 Minuten. Sie benötigen einen amtlichen Lichtbildausweis.",
+    kyc_unverified: "Verifizieren Sie sich für höhere Sendelimits!\n\nVorteile:\n- $5.000/Tag Senden ($25.000/Woche, $50.000/Monat)\n- Gesamtes verfügbares Guthaben auszahlen\n- Internationale Überweisungen\n",
+    kyc_unverified_current: "Aktuell: ${currentLimit}/Tag Senden\nNach vollständiger Verifizierung: $5.000/Tag Senden\n\nDie Verifizierung dauert ~5 Minuten. Sie benötigen einen amtlichen Lichtbildausweis.",
     kyc_unverified_s1: "Verifizierung starten", kyc_unverified_s2: "Erforderliche Dokumente", kyc_unverified_s3: "Mehr erfahren",
     security_response: "Ihre Sicherheit hat für uns oberste Priorität! EGWallet schützt Sie mit:\n\n- Biometrischer Authentifizierung\n- Geräteverfolgung\n- Ende-zu-Ende-Verschlüsselung\n- Transaktionsbestätigungen\n- 24/7-Betrugserkennung\n\nAktivieren Sie die biometrische Sperre in den Einstellungen für zusätzlichen Schutz!",
     security_s1: "Biometrie aktivieren", security_s2: "Vertrauenswürdige Geräte", security_s3: "Sicherheitstipps",
@@ -3096,7 +3111,7 @@ app.post('/auth/login',
   res.json({ 
     token, 
     refreshToken, 
-    user: { id: u.id, email: u.email, region: u.region, preferredCurrency: u.preferredCurrency || 'USD', autoConvertIncoming: u.autoConvertIncoming !== false, kycTier: u.kycTier || 0, kycStatus: u.kycStatus || 'pending', tierLimits: KYC_TIERS[u.kycTier || 0] },
+    user: { id: u.id, email: u.email, region: u.region, preferredCurrency: u.preferredCurrency || 'USD', autoConvertIncoming: u.autoConvertIncoming !== false, kycTier: u.kycTier || 0, kycStatus: u.kycStatus || 'pending', tierLimits: getTierLimitsForUser(u) },
     newDevice: isNewDevice,
     deviceName: deviceInfo?.name || 'Unknown Device'
   });
@@ -3106,7 +3121,7 @@ app.get('/auth/me', authMiddleware, (req, res) => {
   const db = loadAppState();
   const user = db.users.find(u => u.id === req.user.userId);
   if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
-  res.json({ id: user.id, email: user.email, username: user.username || null, preferredCurrency: user.preferredCurrency || 'USD', autoConvertIncoming: user.autoConvertIncoming !== false, kycTier: user.kycTier || 0, kycStatus: user.kycStatus || 'pending', tierLimits: KYC_TIERS[user.kycTier || 0] });
+  res.json({ id: user.id, email: user.email, username: user.username || null, preferredCurrency: user.preferredCurrency || 'USD', autoConvertIncoming: user.autoConvertIncoming !== false, kycTier: user.kycTier || 0, kycStatus: user.kycStatus || 'pending', tierLimits: getTierLimitsForUser(user) });
 });
 
 // Set or update @username — persists to database, enforces uniqueness
@@ -3985,36 +4000,22 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
     }
   }
 
-  // KYC tier limits — same enforcement as POST /transactions and POST /exchange.
-  // Checked before createWithdrawal so funds are never held if the limit is exceeded.
+  // Withdrawals are not subject to send KYC daily/weekly/monthly caps.
   const withdrawUser = db.users.find(u => u.id === req.user.userId);
   if (!withdrawUser) return res.status(404).json({ error: t('error_sender_not_found', req.lang || 'en') });
   if (isAccountRestricted(withdrawUser)) {
-    const code = withdrawUser.accountStatus === 'suspended' ? 'ACCOUNT_SUSPENDED' : 'ACCOUNT_LOCKED';
-    return res.status(403).json({
-      error: code === 'ACCOUNT_SUSPENDED'
-        ? 'Account suspended. Contact support.'
-        : 'Account locked. Contact support.',
-      code,
-    });
+    let code = 'ACCOUNT_LOCKED';
+    let error = 'Account locked. Contact support.';
+    if (withdrawUser.accountStatus === 'suspended') {
+      code = 'ACCOUNT_SUSPENDED';
+      error = 'Account suspended. Contact support.';
+    } else if (withdrawUser.accountStatus === 'frozen') {
+      code = 'ACCOUNT_FROZEN';
+      error = 'Account frozen. Contact support.';
+    }
+    return res.status(403).json({ error, code });
   }
   const withdrawIntervention = requiresAdminIntervention(withdrawUser, db);
-  const wRates       = db.rates?.values || {};
-  const withdrawMajor = minorToMajor(amount, currency);
-  const withdrawUSD   = withdrawMajor / (wRates[currency] || 1);
-  const wLimitCheck   = checkKYCLimits(withdrawUser, withdrawUSD, db);
-  if (!wLimitCheck.allowed) {
-    return res.status(403).json({
-      code:                'LIMIT_EXCEEDED',
-      error:               wLimitCheck.message,
-      limitType:           wLimitCheck.limitType,
-      remainingDailyUSD:   wLimitCheck.remainingDailyUSD,
-      remainingWeeklyUSD:  wLimitCheck.remainingWeeklyUSD,
-      remainingMonthlyUSD: wLimitCheck.remainingMonthlyUSD,
-      tierLevel:           wLimitCheck.tierLevel,
-      nextTier:            wLimitCheck.nextTier,
-    });
-  }
 
   const feeCalc = calcWithdrawFee(amount, !!isInternational);
 
@@ -4054,10 +4055,6 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
       reasons: withdrawIntervention.reasons,
     });
   }
-
-  // Increment KYC limit tracking — withdrawUser is a reference inside db.users,
-  // persisted atomically with the hold deduction by saveAppState below.
-  updateLimitTracking(withdrawUser, withdrawUSD);
 
   // Build response before saveAppState so idempotency is committed atomically with the
   // financial mutation — a crash after saveAppState always leaves a replay-safe record.
@@ -4952,7 +4949,7 @@ app.get('/me', authMiddleware, (req, res) => {
   const db = loadAppState();
   const u = db.users.find(x=>x.id===req.user.userId);
   if (!u) return res.status(404).json({ error: t('error_not_found', req.lang || 'en') });
-  res.json({ id: u.id, email: u.email, username: u.username || null, region: u.region, kycTier: u.kycTier || 0, kycStatus: u.kycStatus || 'pending', tierLimits: KYC_TIERS[u.kycTier || 0] });
+  res.json({ id: u.id, email: u.email, username: u.username || null, region: u.region, kycTier: u.kycTier || 0, kycStatus: u.kycStatus || 'pending', tierLimits: getTierLimitsForUser(u) });
 });
 
 // GET /users/lookup?q=<walletId or @username>
@@ -8543,13 +8540,8 @@ const upload = multer({
 //
 // Conversion: amount (minor units, any currency) → major → USD
 //   amountUSD = minorToMajor(amount, currency) / rates[currency]
-//   This conversion is done by the caller before calling checkKYCLimits.
-
-const KYC_TIERS = {
-  0: { name: 'Starter',   dailyLimit: 300,   weeklyLimit: 1000,  monthlyLimit: 2000  },
-  1: { name: 'Basic KYC', dailyLimit: 2000,  weeklyLimit: 5000,  monthlyLimit: 10000 },
-  2: { name: 'Verified',  dailyLimit: 10000, weeklyLimit: 25000, monthlyLimit: 50000 },
-};
+// Personal send limits (KYC tiers). Withdrawals do NOT use this bucket.
+// amountUSD is converted by the caller before calling checkKYCLimits.
 
 /** Returns today's UTC calendar key: 'YYYY-MM-DD' */
 function getDayKey()   { return new Date().toISOString().slice(0, 10); }
@@ -8615,7 +8607,7 @@ function checkKYCLimits(user, amountUSD, _db) {
   // _db kept for signature compatibility; not needed with stored tracking
   applyLimitResets(user); // apply calendar resets (read-only side-effect on in-memory object)
 
-  const tierLevel = user.kycTier || 0;
+  const tierLevel = getEffectiveKycTier(user);
   const tier      = KYC_TIERS[tierLevel] || KYC_TIERS[0];
   const lt        = user.limitTracking;
   const lang      = user.language || 'en';

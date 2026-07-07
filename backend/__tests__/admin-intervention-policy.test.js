@@ -7,6 +7,8 @@ const {
   isAccountRestricted,
   hasFraudRisk,
   requiresAmlComplianceReview,
+  requiresSanctionsReview,
+  requiresLegalHoldReview,
   requiresAdminIntervention,
   blockMoneyOperation,
 } = require('../adminInterventionPolicy');
@@ -20,9 +22,10 @@ const baseUser = {
 
 const emptyDb = { fraudAlerts: [], disputes: [] };
 
-test('isAccountRestricted blocks suspended, locked, and timed lock', () => {
+test('isAccountRestricted blocks suspended, locked, frozen, and timed lock', () => {
   assert.equal(isAccountRestricted({ ...baseUser, accountStatus: 'suspended' }), true);
   assert.equal(isAccountRestricted({ ...baseUser, accountStatus: 'locked' }), true);
+  assert.equal(isAccountRestricted({ ...baseUser, accountStatus: 'frozen' }), true);
   assert.equal(isAccountRestricted({ ...baseUser, lockedUntil: Date.now() + 60_000 }), true);
   assert.equal(isAccountRestricted(baseUser), false);
 });
@@ -48,7 +51,16 @@ test('requiresAmlComplianceReview detects compliance holds and under_review KYC'
   assert.equal(requiresAmlComplianceReview(baseUser), false);
 });
 
-test('requiresAdminIntervention only for fraud/risk and AML — not normal users', () => {
+test('requiresSanctionsReview and requiresLegalHoldReview detect holds', () => {
+  assert.equal(requiresSanctionsReview({ ...baseUser, sanctionsHold: true }), true);
+  assert.equal(requiresSanctionsReview({ ...baseUser, sanctionsMatch: true }), true);
+  assert.equal(requiresSanctionsReview(baseUser), false);
+  assert.equal(requiresLegalHoldReview({ ...baseUser, courtOrderHold: true }), true);
+  assert.equal(requiresLegalHoldReview({ ...baseUser, legalHold: true }), true);
+  assert.equal(requiresLegalHoldReview(baseUser), false);
+});
+
+test('requiresAdminIntervention only for fraud/risk, AML, sanctions, legal — not normal users', () => {
   assert.deepEqual(requiresAdminIntervention(baseUser, emptyDb), { required: false, reasons: [] });
   const fraud = requiresAdminIntervention({ ...baseUser, fraudHold: true }, emptyDb);
   assert.equal(fraud.required, true);
@@ -56,6 +68,12 @@ test('requiresAdminIntervention only for fraud/risk and AML — not normal users
   const aml = requiresAdminIntervention({ ...baseUser, kycStatus: 'under_review' }, emptyDb);
   assert.equal(aml.required, true);
   assert.ok(aml.reasons.includes(INTERVENTION_REASONS.AML_COMPLIANCE));
+  const sanctions = requiresAdminIntervention({ ...baseUser, sanctionsHold: true }, emptyDb);
+  assert.equal(sanctions.required, true);
+  assert.ok(sanctions.reasons.includes(INTERVENTION_REASONS.SANCTIONS));
+  const legal = requiresAdminIntervention({ ...baseUser, legalHold: true }, emptyDb);
+  assert.equal(legal.required, true);
+  assert.ok(legal.reasons.includes(INTERVENTION_REASONS.LEGAL_HOLD));
 });
 
 test('blockMoneyOperation returns 403 for restricted and review-required users', () => {
@@ -70,6 +88,18 @@ test('blockMoneyOperation returns 403 for restricted and review-required users',
   const aml = blockMoneyOperation({ ...baseUser, amlHold: true }, emptyDb);
   assert.equal(aml.status, 403);
   assert.equal(aml.body.code, 'COMPLIANCE_REVIEW_REQUIRED');
+
+  const frozen = blockMoneyOperation({ ...baseUser, accountStatus: 'frozen' }, emptyDb);
+  assert.equal(frozen.status, 403);
+  assert.equal(frozen.body.code, 'ACCOUNT_FROZEN');
+
+  const sanctions = blockMoneyOperation({ ...baseUser, sanctionsHold: true }, emptyDb);
+  assert.equal(sanctions.status, 403);
+  assert.equal(sanctions.body.code, 'SANCTIONS_REVIEW_REQUIRED');
+
+  const legal = blockMoneyOperation({ ...baseUser, courtOrderHold: true }, emptyDb);
+  assert.equal(legal.status, 403);
+  assert.equal(legal.body.code, 'LEGAL_HOLD_REVIEW_REQUIRED');
 
   assert.equal(blockMoneyOperation(baseUser, emptyDb), null);
 });
