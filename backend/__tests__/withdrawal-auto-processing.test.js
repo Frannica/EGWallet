@@ -20,9 +20,10 @@ test('POST /withdrawals auto-advances without admin approval in all environments
   assert.match(block, /advanceToProcessing\(db,\s*withdrawal\.id\)/);
 });
 
-test('POST /withdrawals dispatches executePayout without production gate', () => {
+test('POST /withdrawals dispatches executePayout when no admin intervention required', () => {
   const block = extractWithdrawalsBlock();
-  assert.doesNotMatch(block, /NODE_ENV\s*!==\s*'production'[\s\S]*executePayout/);
+  assert.match(block, /_withdrawNeedsAdminReview/);
+  assert.match(block, /if \(!_withdrawNeedsAdminReview && _capturedWithdrawalId\)/);
   assert.match(block, /executePayout\(_capturedWithdrawalId/);
 });
 
@@ -32,10 +33,10 @@ test('POST /withdrawals uses isPayoutProviderReady for production provider check
   assert.doesNotMatch(block, /stripeReady\s*=\s*false/);
 });
 
-test('POST /withdrawals blocks suspended and locked accounts', () => {
+test('POST /withdrawals blocks restricted accounts via policy', () => {
   const block = extractWithdrawalsBlock();
-  assert.match(block, /accountStatus\s*===\s*'suspended'/);
-  assert.match(block, /accountStatus\s*===\s*'locked'/);
+  assert.match(block, /isAccountRestricted\(withdrawUser\)/);
+  assert.match(block, /requiresAdminIntervention\(withdrawUser,\s*db\)/);
 });
 
 test('isPayoutProviderReady checks Stripe Connect and Kora configuration', () => {

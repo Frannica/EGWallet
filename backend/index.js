@@ -80,6 +80,11 @@ const {
 const { processStripeIssuingEvent, ISSUING_EVENT_TYPES, isStripeIssuingEnabled } = require('./stripeIssuing');
 const { executePayout, isPayoutProviderReady } = require('./payoutProviders');
 const {
+  blockMoneyOperation,
+  requiresAdminIntervention,
+  isAccountRestricted,
+} = require('./adminInterventionPolicy');
+const {
   loadAppState,
   saveAppState: persistAppState,
   isDatabaseConnected,
@@ -2783,6 +2788,14 @@ function adminMiddleware(req, res, next) {
   next();
 }
 
+/** Permanent policy: block money ops unless automatic path is allowed. */
+function enforceMoneyOperationPolicy(user, db, lang, res) {
+  const block = blockMoneyOperation(user, db, lang);
+  if (!block) return true;
+  res.status(block.status).json(block.body);
+  return false;
+}
+
 // Fields whose submitted values must never appear in logs or API responses.
 const SENSITIVE_FIELDS = new Set([
   'password', 'passwordConfirm', 'currentPassword', 'newPassword',
@@ -3632,6 +3645,7 @@ app.post('/transactions', authMiddleware, async (req, res) => {
   // CHECK #1: KYC tier limits (daily / weekly / monthly rolling windows)
   const senderUser = db.users.find(u => u.id === req.user.userId);
   if (!senderUser) return res.status(404).json({ error: t('error_sender_not_found', lang) });
+  if (!enforceMoneyOperationPolicy(senderUser, db, lang, res)) return;
 
   const limitCheck = checkKYCLimits(senderUser, toAmountInUSD, db);
   if (!limitCheck.allowed) {
@@ -3950,6 +3964,7 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
     return res.status(200).json(cached0.response);
 
   let _capturedWithdrawalId;
+  let _withdrawNeedsAdminReview = false;
 
   await withBalanceMutex(async () => {
   const db = loadAppState();
@@ -3974,12 +3989,16 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
   // Checked before createWithdrawal so funds are never held if the limit is exceeded.
   const withdrawUser = db.users.find(u => u.id === req.user.userId);
   if (!withdrawUser) return res.status(404).json({ error: t('error_sender_not_found', req.lang || 'en') });
-  if (withdrawUser.accountStatus === 'suspended') {
-    return res.status(403).json({ error: 'Account suspended. Contact support.', code: 'ACCOUNT_SUSPENDED' });
+  if (isAccountRestricted(withdrawUser)) {
+    const code = withdrawUser.accountStatus === 'suspended' ? 'ACCOUNT_SUSPENDED' : 'ACCOUNT_LOCKED';
+    return res.status(403).json({
+      error: code === 'ACCOUNT_SUSPENDED'
+        ? 'Account suspended. Contact support.'
+        : 'Account locked. Contact support.',
+      code,
+    });
   }
-  if (withdrawUser.accountStatus === 'locked' || (withdrawUser.lockedUntil && withdrawUser.lockedUntil > Date.now())) {
-    return res.status(403).json({ error: 'Account locked. Contact support.', code: 'ACCOUNT_LOCKED' });
-  }
+  const withdrawIntervention = requiresAdminIntervention(withdrawUser, db);
   const wRates       = db.rates?.values || {};
   const withdrawMajor = minorToMajor(amount, currency);
   const withdrawUSD   = withdrawMajor / (wRates[currency] || 1);
@@ -4023,8 +4042,18 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
     return res.status(err.status || 500).json({ error: err.message });
   }
 
-  // Auto-advance to processing — users never need admin approval to withdraw their funds.
-  advanceToProcessing(db, withdrawal.id);
+  // Auto-advance unless fraud/AML requires admin review (restricted accounts blocked above).
+  _withdrawNeedsAdminReview = withdrawIntervention.required;
+  if (!withdrawIntervention.required) {
+    advanceToProcessing(db, withdrawal.id);
+  } else {
+    withdrawal.internalNote = `Admin review required: ${withdrawIntervention.reasons.join(', ')}`;
+    logger.warn('Withdrawal held for admin review', {
+      withdrawalId: withdrawal.id,
+      userId: req.user.userId,
+      reasons: withdrawIntervention.reasons,
+    });
+  }
 
   // Increment KYC limit tracking — withdrawUser is a reference inside db.users,
   // persisted atomically with the hold deduction by saveAppState below.
@@ -4108,8 +4137,8 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
   res.json(responseBody);
   }); // withBalanceMutex
 
-  // Dispatch payout immediately — no admin approval step.
-  if (_capturedWithdrawalId) {
+  // Dispatch payout immediately unless fraud/AML review is required.
+  if (!_withdrawNeedsAdminReview && _capturedWithdrawalId) {
     setImmediate(() => executePayout(_capturedWithdrawalId, logger, withBalanceMutex));
   }
 });
@@ -4329,6 +4358,7 @@ app.post('/exchange', authMiddleware, async (req, res) => {
     if (!preUser) {
       return res.status(404).json({ error: t('error_sender_not_found', lang) });
     }
+    if (!enforceMoneyOperationPolicy(preUser, preDb, lang, res)) return;
     const preFromRate = preDb.rates.values[fromCurrency];
     const preToRate = preDb.rates.values[toCurrency];
     if (!preFromRate) return res.status(400).json({ error: `Unsupported currency: ${fromCurrency}` });
@@ -5584,6 +5614,7 @@ app.post('/payment-requests/:id/pay', authMiddleware, async (req, res) => {
   // Uses debitAmount (the full cost to the payer in their currency, including any FX fee).
   const prPayerUser = db.users.find(u => u.id === req.user.userId);
   if (!prPayerUser) return res.status(404).json({ error: t('error_sender_not_found', req.lang || 'en') });
+  if (!enforceMoneyOperationPolicy(prPayerUser, db, req.lang || 'en', res)) return;
   const prDebitMajor = minorToMajor(debitAmount, debitCurrency);
   const prDebitUSD   = prDebitMajor / ((rates[debitCurrency]) || 1);
   const prLimitCheck = checkKYCLimits(prPayerUser, prDebitUSD, db);
@@ -6372,6 +6403,7 @@ app.post('/qr/pay', authMiddleware, async (req, res) => {
   // KYC tier limits — same enforcement as POST /transactions and POST /exchange
   const qrPayingUser = db.users.find(u => u.id === req.user.userId);
   if (!qrPayingUser) return res.status(404).json({ error: t('error_sender_not_found', req.lang || 'en') });
+  if (!enforceMoneyOperationPolicy(qrPayingUser, db, req.lang || 'en', res)) return;
   const qrAmountMajor = minorToMajor(paymentAmount, paymentCurrency);
   const qrAmountUSD = qrAmountMajor / ((db.rates?.values || {})[paymentCurrency] || 1);
   const qrLimitCheck = checkKYCLimits(qrPayingUser, qrAmountUSD, db);
@@ -9062,6 +9094,10 @@ app.post('/employer/bulk-payment',
     if (!employer) return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
     if (!employerCanOperate(employer)) return res.status(403).json({ error: t('error_employer_not_verified', req.lang || 'en') });
 
+    const employerUser = db.users.find(u => u.id === req.user.userId);
+    if (!employerUser) return res.status(404).json({ error: t('error_sender_not_found', req.lang || 'en') });
+    if (!enforceMoneyOperationPolicy(employerUser, db, req.lang || 'en', res)) return;
+
     const { payrollItems, payPeriod, notes } = req.body;
 
     const fundingWallet = db.wallets.find(w => w.id === employer.fundingWalletId);
@@ -9073,7 +9109,6 @@ app.post('/employer/bulk-payment',
     const resolvedItems = [];
     const validationErrors = [];
 
-    const employerUser = db.users.find(u => u.id === employer.userId);
     const employerCountry = employerUser?.region || 'GQ';
 
     for (const item of payrollItems) {
