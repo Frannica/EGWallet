@@ -242,7 +242,7 @@ async function main() {
     method: 'POST',
     token: results.token,
     headers: { 'Idempotency-Key': idem('pay') },
-    body: {},
+    body: { fromWalletId: payerWalletId },
   });
   record(10, 'Pay request', pay.status === 200 ? 'PASS' : 'FAIL', {
     status: pay.status,
