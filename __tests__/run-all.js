@@ -30,6 +30,7 @@ const SUITES = [
   ['PaymentSheet — card-only init helper', require('./payment-sheet-card-only.node.test.js')],
   ['PaymentSheet — single-flight guard (no stacked sheets)', require('./payment-sheet-single-flight.node.test.js')],
   ['Money flow — $300 split + idempotent pay',            require('../backend/__tests__/money-flow.test.js')],
+  ['Ledger sync — single-source incremental architecture', require('../backend/__tests__/ledger-sync-architecture.test.js')],
 ];
 
 // ── Runner ────────────────────────────────────────────────────────────────────

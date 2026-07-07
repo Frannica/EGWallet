@@ -2,6 +2,8 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { pool } = require('./pool');
+const { alignWalletBalanceBeforeMutation } = require('./walletBalanceAlign');
+const { upsertRuntimeWalletMetadata } = require('./runtimeWalletSync');
 
 function msToDate(ms) {
   return new Date(Number(ms || Date.now()));
@@ -76,35 +78,40 @@ async function commitExchangePostgres({
       [walletId]
     );
 
-    const fromRow = await client.query(
-      'SELECT amount FROM wallet_balances WHERE wallet_id = $1 AND currency = $2 FOR UPDATE',
-      [walletId, fromCurrency]
+    const wallet = stateDb?.wallets?.find((w) => w.id === walletId);
+    if (wallet) {
+      await upsertRuntimeWalletMetadata(client, wallet);
+    }
+
+    const fromAligned = await alignWalletBalanceBeforeMutation(
+      client,
+      walletId,
+      fromCurrency,
+      stateDb,
+      { pendingDebit: amount }
     );
-    if (fromRow.rowCount === 0 || Number(fromRow.rows[0].amount) < Number(amount)) {
+    if (fromAligned.amount < Number(amount)) {
       await client.query('ROLLBACK');
       return { insufficientFunds: true };
     }
 
-    const toRow = await client.query(
-      'SELECT amount FROM wallet_balances WHERE wallet_id = $1 AND currency = $2 FOR UPDATE',
-      [walletId, toCurrency]
+    const toAligned = await alignWalletBalanceBeforeMutation(
+      client,
+      walletId,
+      toCurrency,
+      stateDb,
+      { pendingCredit: netReceived }
     );
+    const toBefore = toAligned.amount;
 
     await client.query(
       'UPDATE wallet_balances SET amount = amount - $1 WHERE wallet_id = $2 AND currency = $3',
       [amount, walletId, fromCurrency]
     );
-    if (toRow.rowCount > 0) {
-      await client.query(
-        'UPDATE wallet_balances SET amount = amount + $1 WHERE wallet_id = $2 AND currency = $3',
-        [netReceived, walletId, toCurrency]
-      );
-    } else {
-      await client.query(
-        'INSERT INTO wallet_balances(wallet_id, currency, amount) VALUES ($1, $2, $3)',
-        [walletId, toCurrency, netReceived]
-      );
-    }
+    await client.query(
+      'UPDATE wallet_balances SET amount = amount + $1 WHERE wallet_id = $2 AND currency = $3',
+      [netReceived, walletId, toCurrency]
+    );
 
     const txRow = mapTxRow(tx);
     await client.query(
@@ -154,8 +161,8 @@ async function commitExchangePostgres({
         walletId,
         fromCurrency,
         amount,
-        Number(fromRow.rows[0].amount),
-        Number(fromRow.rows[0].amount) - Number(amount),
+        fromAligned.amount,
+        fromAligned.amount - Number(amount),
         txRow.timestamp,
         `exchange:${txRow.id}`,
         uuidv4(),
@@ -163,8 +170,8 @@ async function commitExchangePostgres({
         walletId,
         toCurrency,
         netReceived,
-        toRow.rowCount > 0 ? Number(toRow.rows[0].amount) : 0,
-        (toRow.rowCount > 0 ? Number(toRow.rows[0].amount) : 0) + Number(netReceived),
+        toBefore,
+        toBefore + Number(netReceived),
         txRow.timestamp,
         `exchange:${txRow.id}`,
       ]

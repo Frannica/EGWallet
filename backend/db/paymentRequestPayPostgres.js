@@ -1,10 +1,8 @@
 'use strict';
 
 const { pool } = require('./pool');
-
-function msToDate(ms) {
-  return new Date(Number(ms || Date.now()));
-}
+const { alignWalletBalanceBeforeMutation } = require('./walletBalanceAlign');
+const { msToDate, upsertRuntimeWalletMetadata } = require('./runtimeWalletSync');
 
 function mapTxRow(tx) {
   return {
@@ -117,30 +115,6 @@ async function upsertRuntimeUser(client, user) {
   );
 }
 
-async function upsertRuntimeWallet(client, wallet) {
-  if (!wallet || !wallet.id || !wallet.userId) return;
-  await client.query(
-    `INSERT INTO wallets (id, user_id, type, employer_id, max_limit_usd, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     ON CONFLICT (id) DO NOTHING`,
-    [
-      wallet.id,
-      wallet.userId,
-      wallet.type || null,
-      wallet.employerId || null,
-      wallet.maxLimitUSD === undefined ? null : Number(wallet.maxLimitUSD),
-      msToDate(wallet.createdAt),
-    ]
-  );
-  for (const bal of wallet.balances || []) {
-    await client.query(
-      `INSERT INTO wallet_balances(wallet_id, currency, amount)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (wallet_id, currency) DO UPDATE SET amount = EXCLUDED.amount`,
-      [wallet.id, bal.currency, Number(bal.amount || 0)]
-    );
-  }
-}
 
 async function upsertRuntimePaymentRequest(client, request) {
   if (!request || !request.id) return;
@@ -208,8 +182,8 @@ async function syncRuntimePaymentRequestGraph(client, { stateDb, requestId, paye
 
   await upsertRuntimeUser(client, payerUser);
   await upsertRuntimeUser(client, requesterUser);
-  await upsertRuntimeWallet(client, fromWallet);
-  await upsertRuntimeWallet(client, payeeWallet);
+  await upsertRuntimeWalletMetadata(client, fromWallet);
+  await upsertRuntimeWalletMetadata(client, payeeWallet);
   await upsertRuntimePaymentRequest(client, request);
 }
 
@@ -303,35 +277,34 @@ async function commitPaymentRequestPayPostgres({
       [fromWalletId, toWalletId]
     );
 
-    const payerBal = await client.query(
-      'SELECT amount FROM wallet_balances WHERE wallet_id = $1 AND currency = $2 FOR UPDATE',
-      [fromWalletId, debitCurrency]
+    const payerAligned = await alignWalletBalanceBeforeMutation(
+      client,
+      fromWalletId,
+      debitCurrency,
+      stateDb,
+      { pendingDebit: debitAmount }
     );
-    if (payerBal.rowCount === 0 || Number(payerBal.rows[0].amount) < Number(debitAmount)) {
+    if (payerAligned.amount < Number(debitAmount)) {
       await client.query('ROLLBACK');
       return { insufficientFunds: true };
     }
 
-    const payeeBal = await client.query(
-      'SELECT amount FROM wallet_balances WHERE wallet_id = $1 AND currency = $2 FOR UPDATE',
-      [toWalletId, requestCurrency]
+    await alignWalletBalanceBeforeMutation(
+      client,
+      toWalletId,
+      requestCurrency,
+      stateDb,
+      { pendingCredit: requestAmount }
     );
 
     await client.query(
       'UPDATE wallet_balances SET amount = amount - $1 WHERE wallet_id = $2 AND currency = $3',
       [debitAmount, fromWalletId, debitCurrency]
     );
-    if (payeeBal.rowCount > 0) {
-      await client.query(
-        'UPDATE wallet_balances SET amount = amount + $1 WHERE wallet_id = $2 AND currency = $3',
-        [requestAmount, toWalletId, requestCurrency]
-      );
-    } else {
-      await client.query(
-        'INSERT INTO wallet_balances(wallet_id, currency, amount) VALUES($1, $2, $3)',
-        [toWalletId, requestCurrency, requestAmount]
-      );
-    }
+    await client.query(
+      'UPDATE wallet_balances SET amount = amount + $1 WHERE wallet_id = $2 AND currency = $3',
+      [requestAmount, toWalletId, requestCurrency]
+    );
 
     const txRow = mapTxRow(tx);
     await client.query(

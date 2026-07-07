@@ -2,10 +2,8 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { pool } = require('./pool');
-
-function msToDate(ms) {
-  return new Date(Number(ms || Date.now()));
-}
+const { alignWalletBalanceBeforeMutation } = require('./walletBalanceAlign');
+const { msToDate, upsertRuntimeWalletMetadata } = require('./runtimeWalletSync');
 
 function mapTxRow(tx) {
   return {
@@ -71,31 +69,6 @@ async function upsertRuntimeUser(client, user) {
   );
 }
 
-async function upsertRuntimeWallet(client, wallet) {
-  if (!wallet || !wallet.id || !wallet.userId) return;
-  await client.query(
-    `INSERT INTO wallets (id, user_id, type, employer_id, max_limit_usd, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     ON CONFLICT (id) DO NOTHING`,
-    [
-      wallet.id,
-      wallet.userId,
-      wallet.type || null,
-      wallet.employerId || null,
-      wallet.maxLimitUSD === undefined ? null : Number(wallet.maxLimitUSD),
-      msToDate(wallet.createdAt),
-    ]
-  );
-
-  for (const bal of wallet.balances || []) {
-    await client.query(
-      `INSERT INTO wallet_balances(wallet_id, currency, amount)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (wallet_id, currency) DO UPDATE SET amount = EXCLUDED.amount`,
-      [wallet.id, bal.currency, Number(bal.amount || 0)]
-    );
-  }
-}
 
 async function syncRuntimeP2PGraph(client, { stateDb, userId, fromWalletId, toWalletId, recipientUserId }) {
   if (!stateDb) return;
@@ -107,8 +80,8 @@ async function syncRuntimeP2PGraph(client, { stateDb, userId, fromWalletId, toWa
   const receiverUser = users.find((u) => u.id === recipientUserId) || (toWallet ? users.find((u) => u.id === toWallet.userId) : null);
   await upsertRuntimeUser(client, senderUser);
   await upsertRuntimeUser(client, receiverUser);
-  await upsertRuntimeWallet(client, fromWallet);
-  await upsertRuntimeWallet(client, toWallet);
+  await upsertRuntimeWalletMetadata(client, fromWallet);
+  await upsertRuntimeWalletMetadata(client, toWallet);
 }
 
 async function getDurableP2PIdempotency(clientKey, userId) {
@@ -157,37 +130,36 @@ async function commitP2PSendPostgres({
       [fromWalletId, toWalletId]
     );
 
-    const debitRow = await client.query(
-      'SELECT amount FROM wallet_balances WHERE wallet_id = $1 AND currency = $2 FOR UPDATE',
-      [fromWalletId, debitCurrency]
+    const debitAligned = await alignWalletBalanceBeforeMutation(
+      client,
+      fromWalletId,
+      debitCurrency,
+      stateDb,
+      { pendingDebit: debitAmount }
     );
-
-    if (debitRow.rowCount === 0 || Number(debitRow.rows[0].amount) < Number(debitAmount)) {
+    if (debitAligned.amount < Number(debitAmount)) {
       await client.query('ROLLBACK');
       return { replay: false, insufficientFunds: true };
     }
 
-    const destRow = await client.query(
-      'SELECT amount FROM wallet_balances WHERE wallet_id = $1 AND currency = $2 FOR UPDATE',
-      [toWalletId, receivedCurrency]
+    const destAligned = await alignWalletBalanceBeforeMutation(
+      client,
+      toWalletId,
+      receivedCurrency,
+      stateDb,
+      { pendingCredit: receivedAmount }
     );
+    const destBefore = destAligned.amount;
 
     await client.query(
       'UPDATE wallet_balances SET amount = amount - $1 WHERE wallet_id = $2 AND currency = $3',
       [debitAmount, fromWalletId, debitCurrency]
     );
 
-    if (destRow.rowCount > 0) {
-      await client.query(
-        'UPDATE wallet_balances SET amount = amount + $1 WHERE wallet_id = $2 AND currency = $3',
-        [receivedAmount, toWalletId, receivedCurrency]
-      );
-    } else {
-      await client.query(
-        'INSERT INTO wallet_balances(wallet_id, currency, amount) VALUES($1, $2, $3)',
-        [toWalletId, receivedCurrency, receivedAmount]
-      );
-    }
+    await client.query(
+      'UPDATE wallet_balances SET amount = amount + $1 WHERE wallet_id = $2 AND currency = $3',
+      [receivedAmount, toWalletId, receivedCurrency]
+    );
 
     const txRow = mapTxRow(tx);
     await client.query(
@@ -238,8 +210,8 @@ async function commitP2PSendPostgres({
         fromWalletId,
         debitCurrency,
         debitAmount,
-        Number(debitRow.rows[0].amount),
-        Number(debitRow.rows[0].amount) - Number(debitAmount),
+        debitAligned.amount,
+        debitAligned.amount - Number(debitAmount),
         txRow.timestamp,
         `p2p:${txRow.id}`,
         uuidv4(),
@@ -247,8 +219,8 @@ async function commitP2PSendPostgres({
         toWalletId,
         receivedCurrency,
         receivedAmount,
-        destRow.rowCount > 0 ? Number(destRow.rows[0].amount) : 0,
-        (destRow.rowCount > 0 ? Number(destRow.rows[0].amount) : 0) + Number(receivedAmount),
+        destBefore,
+        destBefore + Number(receivedAmount),
         txRow.timestamp,
         `p2p:${txRow.id}`,
       ]

@@ -2,10 +2,8 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { pool } = require('./pool');
-
-function msToDate(ms) {
-  return new Date(Number(ms || Date.now()));
-}
+const { alignWalletBalanceBeforeMutation } = require('./walletBalanceAlign');
+const { msToDate, upsertRuntimeWalletMetadata } = require('./runtimeWalletSync');
 
 function mapTxRow(tx) {
   return {
@@ -88,31 +86,7 @@ async function syncRuntimeWalletGraph(client, { stateDb, userId, walletId }) {
     [userId, email, passwordHash, region, role, preferredCurrency, limitTracking, createdAt]
   );
 
-  await client.query(
-    `INSERT INTO wallets (
-      id, user_id, type, employer_id, max_limit_usd, created_at
-    ) VALUES (
-      $1, $2, $3, $4, $5, $6
-    )
-    ON CONFLICT (id) DO NOTHING`,
-    [
-      wallet.id,
-      wallet.userId,
-      wallet.type || null,
-      wallet.employerId || null,
-      wallet.maxLimitUSD === undefined ? null : Number(wallet.maxLimitUSD),
-      msToDate(wallet.createdAt || Date.now()),
-    ]
-  );
-
-  for (const bal of wallet.balances || []) {
-    await client.query(
-      `INSERT INTO wallet_balances(wallet_id, currency, amount)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (wallet_id, currency) DO NOTHING`,
-      [wallet.id, bal.currency, Number(bal.amount || 0)]
-    );
-  }
+  await upsertRuntimeWalletMetadata(client, wallet);
 }
 
 async function fetchReplayByIntent(intentId, currencyHint) {
@@ -178,24 +152,20 @@ async function commitDepositConfirmPostgres({
       };
     }
 
-    const balance = await client.query(
-      'SELECT amount FROM wallet_balances WHERE wallet_id = $1 AND currency = $2 FOR UPDATE',
-      [walletId, currency]
+    const aligned = await alignWalletBalanceBeforeMutation(
+      client,
+      walletId,
+      currency,
+      stateDb,
+      { pendingCredit: netCredited }
     );
-    const beforeAmount = balance.rowCount > 0 ? Number(balance.rows[0].amount) : 0;
+    const beforeAmount = aligned.amount;
     const afterAmount = beforeAmount + Number(netCredited);
 
-    if (balance.rowCount > 0) {
-      await client.query(
-        'UPDATE wallet_balances SET amount = amount + $1 WHERE wallet_id = $2 AND currency = $3',
-        [netCredited, walletId, currency]
-      );
-    } else {
-      await client.query(
-        'INSERT INTO wallet_balances(wallet_id, currency, amount) VALUES ($1, $2, $3)',
-        [walletId, currency, netCredited]
-      );
-    }
+    await client.query(
+      'UPDATE wallet_balances SET amount = amount + $1 WHERE wallet_id = $2 AND currency = $3',
+      [netCredited, walletId, currency]
+    );
 
     const txRow = mapTxRow(tx);
     await client.query(
