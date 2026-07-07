@@ -86,6 +86,23 @@ function payoutRouter(country) {
   return KORA_COUNTRIES.has(country.trim().toUpperCase()) ? 'kora' : 'stripe';
 }
 
+/**
+ * Returns true when the payout provider for `country` is configured and can
+ * disburse real funds.  Used by POST /withdrawals to reject requests before
+ * funds enter holdBalance when no provider is available.
+ */
+function isPayoutProviderReady(country) {
+  const provider = payoutRouter(country);
+  if (provider === 'kora') {
+    return !!process.env.KORA_API_KEY;
+  }
+  return !!(
+    stripeClient &&
+    process.env.STRIPE_CONNECT_READY &&
+    process.env.STRIPE_CONNECT_ACCOUNT
+  );
+}
+
 // ─── Stripe payout ────────────────────────────────────────────────────────────
 /**
  * Executes a payout via Stripe.
@@ -611,8 +628,8 @@ async function executePayout(withdrawalId, logger, withBalanceMutex) {
   if (isDemoMode) {
     logger.warn('[executePayout] DEMO MODE — no payment provider configured', { withdrawalId, provider });
     if (process.env.NODE_ENV === 'production') {
-      logger.error('[executePayout] PRODUCTION: refusing to simulate payout — configure STRIPE_SECRET_KEY or KORA_API_KEY. Withdrawal stays pending for manual admin review.', { withdrawalId });
-      return; // withdrawal stays pending — no ledger mutation
+      logger.error('[executePayout] PRODUCTION: refusing to simulate payout — configure STRIPE_SECRET_KEY or KORA_API_KEY. Withdrawal stays in processing until provider is configured.', { withdrawalId });
+      return; // withdrawal stays processing — no ledger mutation
     }
     // Dev / staging only: simulate a successful payout
     try {
@@ -1183,4 +1200,4 @@ async function executePayout(withdrawalId, logger, withBalanceMutex) {
   }
 }
 
-module.exports = { payoutRouter, executePayout };
+module.exports = { payoutRouter, isPayoutProviderReady, executePayout };

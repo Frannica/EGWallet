@@ -78,7 +78,7 @@ const {
   normalizeCard,
 } = require('./virtualCards');
 const { processStripeIssuingEvent, ISSUING_EVENT_TYPES, isStripeIssuingEnabled } = require('./stripeIssuing');
-const { executePayout, payoutRouter } = require('./payoutProviders');
+const { executePayout, isPayoutProviderReady } = require('./payoutProviders');
 const {
   loadAppState,
   saveAppState: persistAppState,
@@ -3933,26 +3933,13 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
 
   // ── Block in production when no payout provider is configured ────────────
   // Prevents funds entering holdBalance with no path to release them.
-  // Stripe requires BOTH an API key AND a configured Connect destination account
-  // (STRIPE_CONNECT_READY=true).  Without Connect, stripePayout() always throws
-  // in production, leaving funds permanently locked in holdBalance.
-  if (process.env.NODE_ENV === 'production') {
-    const resolvedProvider = payoutRouter(country || '');
-    // H-2: Stripe payouts currently disburse to the operator's STRIPE_CONNECT_ACCOUNT,
-    // not the user's entered bank details.  Block Stripe-routed withdrawals in
-    // production until per-user Stripe Connect external accounts are implemented.
-    const stripeReady = false;
-    const koraReady   = !!process.env.KORA_API_KEY;
-    const providerReady = (resolvedProvider === 'stripe' && stripeReady) ||
-                          (resolvedProvider === 'kora'   && koraReady);
-    if (!providerReady) {
-      logger.error('POST /withdrawals blocked — no payout provider configured for region', {
-        userId: req.user.userId, country, resolvedProvider,
-      });
-      return res.status(503).json({
-        error: 'Withdrawals are temporarily unavailable. Please contact support.',
-      });
-    }
+  if (process.env.NODE_ENV === 'production' && !isPayoutProviderReady(country || '')) {
+    logger.error('POST /withdrawals blocked — no payout provider configured for region', {
+      userId: req.user.userId, country,
+    });
+    return res.status(503).json({
+      error: 'Withdrawals are temporarily unavailable. Please contact support.',
+    });
   }
 
   // ── Client-supplied idempotency key (required) ────────────────────────────
@@ -3987,6 +3974,12 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
   // Checked before createWithdrawal so funds are never held if the limit is exceeded.
   const withdrawUser = db.users.find(u => u.id === req.user.userId);
   if (!withdrawUser) return res.status(404).json({ error: t('error_sender_not_found', req.lang || 'en') });
+  if (withdrawUser.accountStatus === 'suspended') {
+    return res.status(403).json({ error: 'Account suspended. Contact support.', code: 'ACCOUNT_SUSPENDED' });
+  }
+  if (withdrawUser.accountStatus === 'locked' || (withdrawUser.lockedUntil && withdrawUser.lockedUntil > Date.now())) {
+    return res.status(403).json({ error: 'Account locked. Contact support.', code: 'ACCOUNT_LOCKED' });
+  }
   const wRates       = db.rates?.values || {};
   const withdrawMajor = minorToMajor(amount, currency);
   const withdrawUSD   = withdrawMajor / (wRates[currency] || 1);
@@ -4030,11 +4023,8 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
     return res.status(err.status || 500).json({ error: err.message });
   }
 
-  // In production withdrawals stay pending_review for admin approval before any funds move.
-  // In dev/staging advance immediately so end-to-end payout flows can be tested.
-  if (NODE_ENV !== 'production') {
-    advanceToProcessing(db, withdrawal.id);
-  }
+  // Auto-advance to processing — users never need admin approval to withdraw their funds.
+  advanceToProcessing(db, withdrawal.id);
 
   // Increment KYC limit tracking — withdrawUser is a reference inside db.users,
   // persisted atomically with the hold deduction by saveAppState below.
@@ -4118,9 +4108,8 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
   res.json(responseBody);
   }); // withBalanceMutex
 
-  // Only fire automatic payout dispatch in dev/staging.
-  // In production, withdrawals stay pending_review and require admin approval before processing.
-  if (_capturedWithdrawalId && NODE_ENV !== 'production') {
+  // Dispatch payout immediately — no admin approval step.
+  if (_capturedWithdrawalId) {
     setImmediate(() => executePayout(_capturedWithdrawalId, logger, withBalanceMutex));
   }
 });
@@ -5034,9 +5023,9 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
       }
       
       // SECURITY CHECK: Employer must be verified
-      if (targetEmployer.verificationStatus !== 'verified') {
-        return res.status(403).json({ 
-          error: t('error_employer_unverified', req.lang || 'en') 
+      if (!employerCanOperate(targetEmployer)) {
+        return res.status(403).json({
+          error: t('error_employer_unverified', req.lang || 'en')
         });
       }
       
@@ -5187,7 +5176,7 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
     };
     
     request.complianceFlags = {
-      requiresApproval: true,
+      requiresApproval: false,
       amlChecked: true,
       employerVerified: true
     };
@@ -5218,8 +5207,8 @@ app.post('/payment-requests', authMiddleware, (req, res) => {
 
       // High-2: Re-check employer verification inside mutex.
       const lockedEmployer = (dbLocked.employers || []).find(e => e.id === legacyEmpId);
-      if (!lockedEmployer || lockedEmployer.verificationStatus !== 'verified') {
-        logger.warn('[/payment-requests legacy] Employer no longer verified inside mutex', {
+      if (!employerCanOperate(lockedEmployer)) {
+        logger.warn('[/payment-requests legacy] Employer rejected inside mutex', {
           workerId: req.user.userId, employerId: legacyEmpId
         });
         res.status(403).json({ error: t('error_employer_unverified', req.lang || 'en') });
@@ -5680,7 +5669,7 @@ app.post('/payment-requests/:id/pay', authMiddleware, async (req, res) => {
 
     // H-3: Re-verify employer status at pay time — employer may have been
     // suspended/rejected after the payroll request was created.
-    if (prPayrollEmployer.verificationStatus !== 'verified') {
+    if (!employerCanOperate(prPayrollEmployer)) {
       logger.warn('[/payment-requests/pay] Employer no longer verified at pay time', {
         requestId: request.id,
         employerId: prPayrollEmployer.id,
@@ -8719,12 +8708,20 @@ function applyPayrollLimitResets(employer) {
 }
 
 /**
+ * Employers operate without admin pre-approval. Only explicit rejection blocks payroll.
+ * New registrations are auto-verified; legacy pending records remain operational.
+ */
+function employerCanOperate(employer) {
+  return !!(employer && employer.verificationStatus !== 'rejected');
+}
+
+/**
  * Check payroll-specific limits for a prospective batch of `amountUSD`.
  *
  * Conditions for payroll limits to apply (ALL must be true):
  *   1. Transaction is initiated from a payroll flow (employer/bulk-payment endpoint)
  *   2. Sender is a registered employer (db.employers record exists)
- *   3. Employer has verificationStatus === 'verified'
+ *   3. Employer is not rejected (employerCanOperate)
  *
  * Returns { allowed, code?, limitType?, message?, remainingDailyUSD, remainingMonthlyUSD }
  */
@@ -8822,9 +8819,9 @@ app.post('/employer/register',
       taxId,
       businessLicense: businessLicense || null,
       employeeCount,
-      verificationStatus: 'pending', // pending | verified | rejected
-      verifiedAt: null,
-      verifiedBy: null,
+      verificationStatus: 'verified',
+      verifiedAt: Date.now(),
+      verifiedBy: 'auto',
       createdAt: Date.now(),
       totalPayrollSent: 0,
       totalBatches: 0,
@@ -8895,10 +8892,10 @@ app.post('/employer/upload-payroll',
       return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
     }
     
-    if (employer.verificationStatus !== 'verified') {
+    if (!employerCanOperate(employer)) {
       return res.status(403).json({ 
         error: 'Employer not verified',
-        message: 'Your employer account must be verified before sending payroll'
+        message: 'Your employer account cannot send payroll'
       });
     }
     
@@ -9063,7 +9060,7 @@ app.post('/employer/bulk-payment',
 
     const employer = db.employers.find(e => e.userId === req.user.userId);
     if (!employer) return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
-    if (employer.verificationStatus !== 'verified') return res.status(403).json({ error: t('error_employer_not_verified', req.lang || 'en') });
+    if (!employerCanOperate(employer)) return res.status(403).json({ error: t('error_employer_not_verified', req.lang || 'en') });
 
     const { payrollItems, payPeriod, notes } = req.body;
 
@@ -9484,8 +9481,8 @@ app.post('/employer/add-employee',
       return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
     }
     
-    // Must be verified employer
-    if (employer.verificationStatus !== 'verified') {
+    // Must be operational employer (not admin-rejected)
+    if (!employerCanOperate(employer)) {
       return res.status(403).json({ error: t('error_employer_not_verified', req.lang || 'en') });
     }
     
@@ -9660,7 +9657,7 @@ app.post('/employer/payment-request',
         res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
         return;
       }
-      if (employer.verificationStatus !== 'verified') {
+      if (!employerCanOperate(employer)) {
         res.status(403).json({ error: t('error_employer_not_verified', req.lang || 'en') });
         return;
       }
