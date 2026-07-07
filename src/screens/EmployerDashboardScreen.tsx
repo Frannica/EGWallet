@@ -8,6 +8,7 @@ import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
 import { majorToMinor } from '../utils/currency';
 import { useLanguage } from '../i18n/LanguageContext';
+import { getApiErrorMessage } from '../utils/apiErrorMessage';
 
 interface Balance {
   currency: string;
@@ -157,30 +158,6 @@ export default function EmployerDashboardScreen() {
     loadAll().finally(() => setInitialLoading(false));
   }, []);
 
-  // Auto-verify employer if still pending
-  useEffect(() => {
-    if (profile && profile.verificationStatus === 'pending') {
-      autoVerifyEmployer(profile.id);
-    }
-  }, [profile?.id, profile?.verificationStatus]);
-
-  async function autoVerifyEmployer(employerId: string) {
-    try {
-      await fetch(`${API_BASE}/admin/verify-employer`, {
-        method: 'POST',
-        headers: buildHeaders(),
-        body: JSON.stringify({ employerId, verificationStatus: 'verified' }),
-      });
-      await loadProfile();
-    } catch {}
-  }
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadAll();
-    setRefreshing(false);
-  };
-
   async function handleRegister() {
     if (!auth.token || !auth.user) return;
     if (!companyName.trim() || !taxId.trim()) {
@@ -189,14 +166,6 @@ export default function EmployerDashboardScreen() {
     }
     setLoading(true);
     try {
-      // Step 1: Upgrade KYC tier to 2 (required for employer registration)
-      await fetch(`${API_BASE}/admin/update-kyc-tier`, {
-        method: 'POST',
-        headers: buildHeaders(),
-        body: JSON.stringify({ userId: auth.user!.id, kycTier: 2, kycStatus: 'approved' }),
-      });
-
-      // Step 2: Register employer
       const regRes = await fetch(`${API_BASE}/employer/register`, {
         method: 'POST',
         headers: buildHeaders(),
@@ -209,24 +178,33 @@ export default function EmployerDashboardScreen() {
         }),
       });
       const regData = await regRes.json();
-      if (!regRes.ok) throw new Error(regData.error || 'Registration failed');
-
-      // Step 3: Auto-verify so payroll features unlock immediately
-      await fetch(`${API_BASE}/admin/verify-employer`, {
-        method: 'POST',
-        headers: buildHeaders(),
-        body: JSON.stringify({ employerId: regData.employer.id, verificationStatus: 'verified' }),
-      });
+      if (!regRes.ok) {
+        const err: any = new Error(regData.error || regData.message || 'Registration failed');
+        err.status = regRes.status;
+        err.errorCode = regData.errorCode;
+        throw err;
+      }
 
       await loadAll();
       Alert.alert(t('common.success'), t('employer.registrationSuccess'));
     } catch (e: any) {
-      // Backend unavailable — show demo success
-      Alert.alert(t('employer.registrationSuccessDemo'), t('employer.registrationSuccessDemo'));
+      const friendly = getApiErrorMessage({
+        message: e?.message,
+        status: typeof e?.status === 'number' ? e.status : undefined,
+        errorCode: e?.errorCode,
+        code: e?.code,
+      }, t);
+      Alert.alert(t('common.error'), friendly);
     } finally {
       setLoading(false);
     }
   }
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadAll();
+    setRefreshing(false);
+  };
 
   async function handleFundWallet() {
     if (!profile) return;
@@ -238,11 +216,22 @@ export default function EmployerDashboardScreen() {
         body: JSON.stringify({ amount: 1000000, currency: payrollCurrency }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Fund failed');
+      if (!res.ok) {
+        const err: any = new Error(data.error || data.message || 'Fund failed');
+        err.status = res.status;
+        err.errorCode = data.errorCode;
+        throw err;
+      }
       await loadProfile();
       Alert.alert(t('employer.walletFunded'), t('employer.walletFundedMsg'));
     } catch (e: any) {
-      Alert.alert(t('common.error'), e.message || t('common.somethingWentWrong'));
+      const friendly = getApiErrorMessage({
+        message: e?.message,
+        status: typeof e?.status === 'number' ? e.status : undefined,
+        errorCode: e?.errorCode,
+        code: e?.code,
+      }, t);
+      Alert.alert(t('common.error'), friendly);
     } finally {
       setLoading(false);
     }
@@ -265,7 +254,12 @@ export default function EmployerDashboardScreen() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to add employee');
+      if (!res.ok) {
+        const err: any = new Error(data.error || data.message || 'Failed to add employee');
+        err.status = res.status;
+        err.errorCode = data.errorCode;
+        throw err;
+      }
       await loadEmployees();
       Alert.alert(t('employer.employeeAddedTitle'), t('employer.employeeAdded'));
     } catch (e: any) {
@@ -365,7 +359,12 @@ export default function EmployerDashboardScreen() {
                 }),
               });
               const data = await res.json();
-              if (!res.ok) throw new Error(data.error || 'Payroll failed');
+              if (!res.ok) {
+                const err: any = new Error(data.error || data.message || 'Payroll failed');
+                err.status = res.status;
+                err.errorCode = data.errorCode;
+                throw err;
+              }
 
               // Reset key so the next distinct payroll run gets a fresh one
               payrollIdempotencyKeyRef.current = generatePayrollId();
@@ -380,9 +379,15 @@ export default function EmployerDashboardScreen() {
                 `✅ ${data.successCount} paid successfully\n❌ ${data.failureCount} failed\n\nBatch ID: ${data.batchId}`
               );
             } catch (e: any) {
+              const friendly = getApiErrorMessage({
+                message: e?.message,
+                status: typeof e?.status === 'number' ? e.status : undefined,
+                errorCode: e?.errorCode,
+                code: e?.code,
+              }, t);
               Alert.alert(
                 t('employer.payrollError') || 'Payroll Failed',
-                e.message || 'An unexpected error occurred. Please try again.',
+                friendly,
               );
             } finally {
               setLoading(false);

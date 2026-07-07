@@ -9212,7 +9212,7 @@ app.post('/employer/bulk-payment',
     // All three conditions are already met at this point:
     //   1. This is the payroll flow (employer/bulk-payment endpoint)
     //   2. Sender is a registered employer (employer record found above)
-    //   3. Employer is verified (verificationStatus check above)
+    //   3. Employer is operational (employerCanOperate)
     const batchTotalUSD = resolvedItems.reduce((sum, item) => {
       // item.amount is in minor units; convert to major before USD calculation
       return sum + convertToUSD(minorToMajor(item.amount, item.currency), item.currency, db.rates);

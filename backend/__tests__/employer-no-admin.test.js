@@ -7,7 +7,7 @@ const path = require('path');
 
 const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
 
-test('employer registration auto-verifies without admin approval', () => {
+test('employer registration returns verified status (no admin operator step)', () => {
   const block = indexSource.match(/app\.post\('\/employer\/register',[\s\S]*?res\.json\(\{[\s\S]*?\}\);\s*\n\s*\}\)/);
   assert.ok(block, 'employer register route not found');
   assert.match(block[0], /verificationStatus:\s*'verified'/);
@@ -15,7 +15,7 @@ test('employer registration auto-verifies without admin approval', () => {
   assert.doesNotMatch(block[0], /verificationStatus:\s*'pending'/);
 });
 
-test('employer payroll flows use employerCanOperate instead of admin verified gate', () => {
+test('employer payroll endpoints use employerCanOperate (only rejected employers blocked)', () => {
   assert.match(indexSource, /function employerCanOperate\(employer\)/);
   assert.doesNotMatch(indexSource, /verificationStatus !== 'verified'/);
   assert.match(indexSource, /employerCanOperate\(/);
