@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "adapters": {
+    "rail_primary_bank": {
+      "module": "adapters/noopProvider.adapter.js",
+      "enabled": true
+    },
+    "rail_secondary_bank": {
+      "module": "adapters/noopProvider.adapter.js",
+      "enabled": true
+    },
+    "rail_mobile": {
+      "module": "adapters/noopProvider.adapter.js",
+      "enabled": true
+    }
+  },
+  "corridors": {
+    "US-USD-bank": {
+      "country": "US",
+      "currency": "USD",
+      "method": "bank",
+      "requiredFields": [
+        { "name": "routingNumber", "required": true, "labelKey": "send.routingNumber" },
+        { "name": "accountNumber", "required": true, "labelKey": "send.accountLabel" },
+        { "name": "accountHolderName", "required": true, "labelKey": "send.accountHolderName" }
+      ],
+      "candidates": [
+        { "adapterId": "rail_primary_bank", "priority": 1, "costWeight": 0.5 }
+      ]
+    },
+    "NG-NGN-bank": {
+      "country": "NG",
+      "currency": "NGN",
+      "method": "bank",
+      "requiredFields": [
+        { "name": "bankCode", "required": true, "labelKey": "send.bankCode" },
+        { "name": "accountNumber", "required": true, "labelKey": "send.accountLabel" },
+        { "name": "accountHolderName", "required": true, "labelKey": "send.accountHolderName" }
+      ],
+      "amountRules": { "minorUnits": true, "step": 1 },
+      "candidates": [
+        { "adapterId": "rail_primary_bank", "priority": 1, "costWeight": 0.7 },
+        { "adapterId": "rail_secondary_bank", "priority": 2, "costWeight": 0.9 }
+      ]
+    },
+    "CM-XAF-mobile_money": {
+      "country": "CM",
+      "currency": "XAF",
+      "method": "mobile_money",
+      "requiredFields": [
+        { "name": "operatorSlug", "required": true, "labelKey": "send.mobileOperator" },
+        { "name": "accountNumber", "required": true, "labelKey": "send.phoneLabel" },
+        { "name": "accountHolderName", "required": true, "labelKey": "send.accountHolderName" }
+      ],
+      "amountRules": { "minorUnits": true, "step": 5 },
+      "candidates": [
+        { "adapterId": "rail_mobile", "priority": 1, "costWeight": 0.6 },
+        { "adapterId": "rail_secondary_bank", "priority": 2, "costWeight": 0.8 }
+      ]
+    }
+  },
+  "routingWeights": {
+    "health": 0.35,
+    "successRate": 0.25,
+    "latency": 0.2,
+    "availability": 0.15,
+    "cost": 0.05
+  }
+}

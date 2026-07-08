@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "adapters": {
+    "rail_future_demo": {
+      "module": "adapters/fakeFutureProvider.adapter.js",
+      "enabled": true
+    }
+  },
+  "corridors": {
+    "GH-GHS-bank": {
+      "country": "GH",
+      "currency": "GHS",
+      "method": "bank",
+      "requiredFields": [
+        { "name": "bankCode", "required": true, "labelKey": "send.bankCode" },
+        { "name": "accountNumber", "required": true, "labelKey": "send.accountLabel" },
+        { "name": "accountHolderName", "required": true, "labelKey": "send.accountHolderName" }
+      ],
+      "amountRules": { "minorUnits": true, "step": 1 },
+      "candidates": [
+        { "adapterId": "rail_future_demo", "priority": 1, "costWeight": 0.5 }
+      ]
+    }
+  },
+  "routingWeights": {
+    "health": 0.35,
+    "successRate": 0.25,
+    "latency": 0.2,
+    "availability": 0.15,
+    "cost": 0.05
+  }
+}
