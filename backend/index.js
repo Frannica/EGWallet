@@ -78,7 +78,7 @@ const {
   normalizeCard,
 } = require('./virtualCards');
 const { processStripeIssuingEvent, ISSUING_EVENT_TYPES, isStripeIssuingEnabled } = require('./stripeIssuing');
-const { executePayout, isPayoutProviderReady } = require('./payoutProviders');
+const { executePayout, isPayoutProviderReady, getKoraSecretKey, verifyKoraWebhookSignature } = require('./payoutProviders');
 const {
   blockMoneyOperation,
   requiresAdminIntervention,
@@ -270,11 +270,24 @@ if (NODE_ENV === 'production') {
     );
     process.exit(1);
   }
-  if (process.env.KORA_API_KEY && !process.env.KORA_WEBHOOK_SECRET) {
+  // Kora is "configured" when either the new live-mode secret key or the legacy
+  // single-key var is present. NOTE: Kora does not issue a separate webhook secret
+  // (see https://developers.korapay.com/docs/webhooks) — the same Secret Key signs
+  // webhook payloads, so there is no separate env var to require here. The webhook
+  // URL itself must still be set on the Kora dashboard (Settings → API Configuration
+  // → Notification URLs → https://<your-host>/webhooks/kora) — this cannot be
+  // verified from an env var, so it is only logged as a reminder below.
+  const KORA_SECRET_KEY_CONFIGURED = process.env.KORA_LIVE_SECRET_KEY || process.env.KORA_API_KEY;
+  if (KORA_SECRET_KEY_CONFIGURED) {
+    console.log('[Kora] Live payout provider configured — ensure the Webhook URL is set on the Kora dashboard ' +
+      '(Settings → API Configuration → Notification URLs) to https://<your-host>/webhooks/kora, or settlement confirmations will never arrive.');
+  }
+  if (process.env.KORA_LIVE_SECRET_KEY && !process.env.KORA_LIVE_PUBLIC_KEY) {
     console.error(
-      '❌ FATAL: KORA_API_KEY is set but KORA_WEBHOOK_SECRET is missing. ' +
-      'Kora settlement webhooks will be silently dropped, permanently locking user holdBalance. ' +
-      'Set KORA_WEBHOOK_SECRET from your Kora dashboard webhook settings.'
+      '❌ FATAL: KORA_LIVE_SECRET_KEY is set but KORA_LIVE_PUBLIC_KEY is missing. ' +
+      'Both keys are issued as a matched pair from the Kora dashboard (Settings → API Configuration) — ' +
+      'a mismatched or absent public key indicates a misconfigured environment. ' +
+      'Set KORA_LIVE_PUBLIC_KEY (pk_live_…) alongside KORA_LIVE_SECRET_KEY.'
     );
     process.exit(1);
   }
@@ -295,6 +308,39 @@ if (NODE_ENV === 'production') {
       '❌ FATAL: STRIPE_PUBLISHABLE_KEY starts with pk_test_ in a production environment. ' +
       'Mismatched test/live Stripe keys will cause PaymentSheet failures and indicate a ' +
       'misconfigured environment. Set a live publishable key (pk_live_…) or unset it.'
+    );
+    process.exit(1);
+  }
+
+  // Kora test-key guard — mirrors the Stripe guard above. Kora issues separate key
+  // pairs for Test and Live mode (both prefixed pk_test_/sk_test_ vs pk_live_/sk_live_);
+  // a test-mode secret key would silently reject every live disbursement.
+  if ((process.env.KORA_LIVE_SECRET_KEY || '').startsWith('sk_test_')) {
+    console.error(
+      '❌ FATAL: KORA_LIVE_SECRET_KEY starts with sk_test_ in a production environment. ' +
+      'Test-mode Kora credentials cannot disburse real funds — production withdrawals to ' +
+      'Kora-routed African countries would fail. Set your Live secret key (sk_live_…) from ' +
+      'the Kora dashboard (Settings → API Configuration).'
+    );
+    process.exit(1);
+  }
+  if ((process.env.KORA_LIVE_PUBLIC_KEY || '').startsWith('pk_test_')) {
+    console.error(
+      '❌ FATAL: KORA_LIVE_PUBLIC_KEY starts with pk_test_ in a production environment. ' +
+      'Mismatched test/live Kora keys indicate a misconfigured environment. ' +
+      'Set your Live public key (pk_live_…) or unset it.'
+    );
+    process.exit(1);
+  }
+  // KORA_LIVE_ENCRYPTION_KEY is optional (payload encryption per Kora's spec), but if set
+  // it must be exactly 32 bytes for AES-256-GCM — an undersized/oversized key would make
+  // every Kora disbursement throw at request time instead of at boot.
+  if (process.env.KORA_LIVE_ENCRYPTION_KEY &&
+      Buffer.byteLength(process.env.KORA_LIVE_ENCRYPTION_KEY, 'utf8') !== 32) {
+    console.error(
+      '❌ FATAL: KORA_LIVE_ENCRYPTION_KEY must be exactly 32 bytes for AES-256-GCM ' +
+      `(got ${Buffer.byteLength(process.env.KORA_LIVE_ENCRYPTION_KEY, 'utf8')} bytes). ` +
+      'Copy the Encryption key exactly as shown on the Kora dashboard (Settings → API Configuration).'
     );
     process.exit(1);
   }
@@ -2455,44 +2501,33 @@ app.post('/webhooks/stripe',
 
 // ─── POST /webhooks/kora ────────────────────────────────────────────────────
 // Receives signed Kora disbursement events.
-// KORA_WEBHOOK_SECRET must be set to the HMAC-SHA256 secret from Kora dashboard.
-// Kora signs with: x-korapay-signature = HMAC-SHA256(secret, <raw-body-bytes>)
-// We use express.raw to capture the raw body before any JSON parsing so the HMAC
-// is computed over the exact bytes Kora signed — re-serialising parsed JSON can
-// produce different whitespace/key order and will always fail timingSafeEqual.
+//
+// Kora does NOT issue a separate webhook-signing secret. Per
+// https://developers.korapay.com/docs/webhooks ("Verifying a Webhook Request"),
+// the x-korapay-signature header is an HMAC-SHA256 of ONLY the `data` object in
+// the payload, signed with the SAME Secret Key used for API auth:
+//   hash = HMAC_SHA256(secretKey, JSON.stringify(payload.data))
+// This intentionally parses JSON first (via express.json) and re-serialises just
+// the `data` field — matching Kora's own reference implementation exactly, which
+// signs JSON.stringify(data) rather than the raw request bytes.
 app.post('/webhooks/kora',
-  express.raw({ type: 'application/json' }),
+  express.json({ type: 'application/json' }),
   async (req, res) => {
-    const webhookSecret = process.env.KORA_WEBHOOK_SECRET;
-    if (!webhookSecret) {
-      logger.warn('[webhook/kora] KORA_WEBHOOK_SECRET not configured');
+    const koraSecretKey = getKoraSecretKey();
+    if (!koraSecretKey) {
+      logger.warn('[webhook/kora] Kora is not configured (KORA_LIVE_SECRET_KEY missing)');
       return res.status(503).json({ error: 'Webhook endpoint not configured — provider should retry' });
     }
-    const sig = req.headers['x-korapay-signature'];
-    const expected = crypto.createHmac('sha256', webhookSecret)
-      .update(req.body)   // req.body is a raw Buffer — matches Kora's signed bytes exactly
-      .digest('hex');
-    let valid = false;
-    try {
-      valid = crypto.timingSafeEqual(
-        Buffer.from(sig || '', 'hex'),
-        Buffer.from(expected,    'hex')
-      );
-    } catch (_) { /* length mismatch → not equal */ }
+
+    const koraBody  = req.body || {};
+    const data      = koraBody.data || {};
+    const sig       = req.headers['x-korapay-signature'];
+    const valid     = verifyKoraWebhookSignature(koraSecretKey, data, sig);
     if (!valid) {
       logger.warn('[webhook/kora] Signature verification failed');
       return res.status(400).json({ error: 'Webhook signature verification failed' });
     }
 
-    // Parse JSON only after signature is verified
-    let koraBody;
-    try {
-      koraBody = JSON.parse(req.body.toString('utf8'));
-    } catch (_e) {
-      return res.status(400).json({ error: 'Invalid JSON body' });
-    }
-
-    const data      = koraBody?.data || {};
     const reference = data.reference || data.transaction_reference;
     if (!reference || !reference.startsWith('egw-')) return res.json({ received: true });
 
@@ -2693,6 +2728,13 @@ app.get('/health', (req, res) => {
     freshdeskConfigured: !!(FRESHDESK_DOMAIN && FRESHDESK_API_KEY),
     passwordResetEmailConfigured: isPasswordResetEmailConfigured(),
     passwordResetEmailMode: getPasswordResetEmailMode(),
+    // TEMPORARY diagnostic (booleans only — never key values) to trace why
+    // the [Kora] boot log isn't firing despite Railway showing the vars set.
+    // Remove once the Kora runtime-visibility issue is resolved.
+    koraLivePublicKeyConfigured: !!process.env.KORA_LIVE_PUBLIC_KEY,
+    koraLiveSecretKeyConfigured: !!process.env.KORA_LIVE_SECRET_KEY,
+    koraLiveEncryptionKeyConfigured: !!process.env.KORA_LIVE_ENCRYPTION_KEY,
+    koraProviderReady: isPayoutProviderReady('NG'),
   };
   res.status(200).json(healthStatus);
 });

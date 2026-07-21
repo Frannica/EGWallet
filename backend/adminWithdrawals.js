@@ -12,7 +12,7 @@ const axios   = require('axios');
 const router  = express.Router();
 const { adminAuth, requirePermission, adminCsrf } = require('./adminAuth');
 const { adminTransition, markWithdrawalPaid, markWithdrawalFailed } = require('./withdrawalEngine');
-const { payoutRouter } = require('./payoutProviders');
+const { payoutRouter, getKoraSecretKey } = require('./payoutProviders');
 const { commitWithdrawalStateUpdate } = require('./db/withdrawalsPostgres');
 const { loadAppState, saveAppState } = require('./db/appStateStore');
 const { logAdminAction } = require('./adminAudit');
@@ -194,7 +194,8 @@ router.post('/:id/reconcile', adminAuth, adminCsrf, requirePermission('withdrawa
   // ── Query provider status ─────────────────────────────────────────────────
   const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || null;
   const stripeClient      = STRIPE_SECRET_KEY ? require('stripe')(STRIPE_SECRET_KEY) : null;
-  const KORA_API_KEY      = process.env.KORA_API_KEY || null;
+  // getKoraSecretKey() prefers KORA_LIVE_SECRET_KEY, falling back to legacy KORA_API_KEY.
+  const KORA_API_KEY      = getKoraSecretKey();
 
   // Determine provider from the withdrawal record; fall back to the same routing
   // logic used by executePayout (country-based). This is always correct because
@@ -333,7 +334,7 @@ router.post('/:id/reconcile', adminAuth, adminCsrf, requirePermission('withdrawa
 
     } else {
       return res.status(400).json({
-        error: `Provider '${provider}' is not configured — cannot query status automatically. Configure STRIPE_SECRET_KEY or KORA_API_KEY.`,
+        error: `Provider '${provider}' is not configured — cannot query status automatically. Configure STRIPE_SECRET_KEY or KORA_LIVE_SECRET_KEY.`,
         ref,
         provider,
       });

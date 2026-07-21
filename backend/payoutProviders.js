@@ -15,16 +15,95 @@
  *   Stripe:  Requires funds in your Stripe balance and an External Account
  *            (bank or debit card) registered on the connected account.
  *            For custom bank-to-bank disbursements, use Stripe Connect.
- *   Kora:    Set KORA_API_KEY env var. Kora covers NG, GH, KE, CM, SN, CI, etc.
+ *   Kora:    Live-mode credentials required for production:
+ *              KORA_LIVE_PUBLIC_KEY      — pk_live_… (non-sensitive identifier)
+ *              KORA_LIVE_SECRET_KEY      — sk_live_… (Bearer auth, server-side only)
+ *              KORA_LIVE_ENCRYPTION_KEY  — optional AES-256-GCM key; when set, the
+ *                                          disbursement payload is encrypted into
+ *                                          `encrypted_data` per Kora's payload-encryption spec.
+ *            Legacy KORA_API_KEY (single key) is still honoured as a fallback for
+ *            KORA_LIVE_SECRET_KEY so existing deployments keep working unchanged.
+ *            Kora covers NG, GH, KE, CM, SN, CI, etc.
+ *
+ *            Kora does NOT issue a separate webhook-signing secret. Per
+ *            https://developers.korapay.com/docs/webhooks ("Verifying a Webhook
+ *            Request"), the x-korapay-signature header is an HMAC-SHA256 of the
+ *            `data` object, signed with the same Secret Key used for API auth.
+ *            There is no dashboard step that generates a distinct webhook secret —
+ *            only the webhook URL is configured (Settings → API Configuration →
+ *            Notification URLs). See verifyKoraWebhookSignature() below.
  */
 
 const axios    = require('axios');
+const crypto   = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const { decryptPII } = require('./piiCipher');
 
 // ─── Stripe client ────────────────────────────────────────────────────────────
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || null;
 const stripeClient      = STRIPE_SECRET_KEY ? require('stripe')(STRIPE_SECRET_KEY) : null;
+
+// ─── Kora live credentials ────────────────────────────────────────────────────
+// Read live-mode dashboard values directly.  KORA_API_KEY (legacy single-key
+// deployments) is honoured as a fallback for the secret key so existing
+// production configs keep working unchanged after this rollout.
+function getKoraSecretKey() {
+  return process.env.KORA_LIVE_SECRET_KEY || process.env.KORA_API_KEY || null;
+}
+function getKoraPublicKey() {
+  return process.env.KORA_LIVE_PUBLIC_KEY || null;
+}
+function getKoraEncryptionKey() {
+  return process.env.KORA_LIVE_ENCRYPTION_KEY || null;
+}
+
+/**
+ * Encrypts a disbursement payload per Kora's optional payload-encryption spec:
+ * AES-256-GCM, hex-encoded `iv:ciphertext:authTag`, sent as { encrypted_data }.
+ * Mirrors Kora's own reference implementation exactly so encryption is
+ * interoperable with their decryptor: https://developers.korapay.com/docs/payout-via-api
+ *
+ * @param  {string} encryptionKey - value of KORA_LIVE_ENCRYPTION_KEY
+ * @param  {object} payload       - plain disbursement request body
+ * @returns {string} "<ivHex>:<cipherHex>:<tagHex>"
+ */
+function encryptKoraPayload(encryptionKey, payload) {
+  const paymentData = JSON.stringify(payload);
+  const iv           = crypto.randomBytes(16);
+  const cipher        = crypto.createCipheriv('aes-256-gcm', encryptionKey, iv);
+  const encrypted      = cipher.update(paymentData);
+  const ivToHex        = iv.toString('hex');
+  const encryptedToHex = Buffer.concat([encrypted, cipher.final()]).toString('hex');
+  return `${ivToHex}:${encryptedToHex}:${cipher.getAuthTag().toString('hex')}`;
+}
+
+/**
+ * Verifies a Kora webhook's `x-korapay-signature` header.
+ *
+ * Per https://developers.korapay.com/docs/webhooks, Kora does NOT issue a
+ * separate webhook secret — the signature is an HMAC-SHA256 of ONLY the `data`
+ * object in the payload, signed with the same Secret Key used for API auth:
+ *   hash = HMAC_SHA256(secretKey, JSON.stringify(payload.data))
+ *
+ * @param  {string} secretKey     - value from getKoraSecretKey()
+ * @param  {object} data          - the `data` field of the parsed webhook body
+ * @param  {string} signatureHex  - value of the x-korapay-signature header
+ * @returns {boolean}
+ */
+function verifyKoraWebhookSignature(secretKey, data, signatureHex) {
+  if (!secretKey || !signatureHex) return false;
+  const expected = crypto.createHmac('sha256', secretKey)
+    .update(JSON.stringify(data || {}))
+    .digest('hex');
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(signatureHex, 'hex'),
+      Buffer.from(expected,     'hex')
+    );
+  } catch (_) {
+    return false; // length mismatch / invalid hex → not equal
+  }
+}
 
 // ─── Engine functions (imported to avoid re-importing db helpers) ─────────────
 const { markWithdrawalPaid, markWithdrawalFailed } = require('./withdrawalEngine');
@@ -94,7 +173,7 @@ function payoutRouter(country) {
 function isPayoutProviderReady(country) {
   const provider = payoutRouter(country);
   if (provider === 'kora') {
-    return !!process.env.KORA_API_KEY;
+    return !!getKoraSecretKey();
   }
   return !!(
     stripeClient &&
@@ -212,7 +291,11 @@ async function stripePayout(w, logger) {
  * Executes a bank transfer via the Kora Disbursement API.
  *
  * API: POST https://api.korapay.com/merchant/api/v1/transactions/disburse
- * Auth: Authorization: Bearer {KORA_API_KEY}
+ * Auth: Authorization: Bearer {KORA_LIVE_SECRET_KEY}
+ *
+ * When KORA_LIVE_ENCRYPTION_KEY is set, the payload is AES-256-GCM encrypted
+ * and sent as { encrypted_data } per Kora's optional payload-encryption spec —
+ * otherwise the plain JSON payload is sent (both are accepted by Kora).
  *
  * Amounts are in major currency units (e.g. 1000 = 1000 XAF / 1000 NGN).
  *
@@ -221,9 +304,9 @@ async function stripePayout(w, logger) {
  * @returns {{ provider, reference, raw }}
  */
 async function koraPayout(w, logger) {
-  const KORA_API_KEY = process.env.KORA_API_KEY;
-  if (!KORA_API_KEY) {
-    throw new Error('Kora is not configured — KORA_API_KEY is missing');
+  const koraSecretKey = getKoraSecretKey();
+  if (!koraSecretKey) {
+    throw new Error('Kora is not configured — KORA_LIVE_SECRET_KEY is missing');
   }
 
   const amount    = toKoraAmount(w.netPayout, w.currency);
@@ -250,22 +333,28 @@ async function koraPayout(w, logger) {
     },
   };
 
+  const koraEncryptionKey = getKoraEncryptionKey();
+  const requestBody       = koraEncryptionKey
+    ? { encrypted_data: encryptKoraPayload(koraEncryptionKey, payload) }
+    : payload;
+
   logger.info('[Kora] Initiating disbursement', {
     withdrawalId: w.id,
     reference,
     amount,
     currency: w.currency,
     bank:     payload.destination.bank_account.bank,
+    encrypted: !!koraEncryptionKey,
   });
 
   let response;
   try {
     response = await axios.post(
       'https://api.korapay.com/merchant/api/v1/transactions/disburse',
-      payload,
+      requestBody,
       {
         headers: {
-          Authorization: `Bearer ${KORA_API_KEY}`,
+          Authorization: `Bearer ${koraSecretKey}`,
           'Content-Type': 'application/json',
         },
         timeout: 30_000,
@@ -623,7 +712,7 @@ async function executePayout(withdrawalId, logger, withBalanceMutex) {
   // is not configured.  Logged clearly so it is easy to spot in production.
   const isDemoMode =
     (provider === 'stripe' && !stripeClient) ||
-    (provider === 'kora'   && !process.env.KORA_API_KEY);
+    (provider === 'kora'   && !getKoraSecretKey());
 
   if (isDemoMode) {
     logger.warn('[executePayout] DEMO MODE — no payment provider configured', { withdrawalId, provider });
@@ -763,7 +852,7 @@ async function executePayout(withdrawalId, logger, withBalanceMutex) {
         // If that call timed out but Kora silently received it, a second POST would
         // double-disburse.  Query first; only allow re-POST when provider confirms
         // the transaction is absent.  Stripe uses idempotencyKey so is safe to retry.
-        const KORA_API_KEY  = process.env.KORA_API_KEY;
+        const koraSecretKey = getKoraSecretKey();
         const dispatchRef   = `egw-${withdrawalId}`;
         let koraQueryStatus = 'unknown';
         let koraQueryRef    = null;
@@ -771,7 +860,7 @@ async function executePayout(withdrawalId, logger, withBalanceMutex) {
         try {
           const statusResp = await axios.get(
             `https://api.korapay.com/merchant/api/v1/transactions/${dispatchRef}`,
-            { headers: { Authorization: `Bearer ${KORA_API_KEY}` }, timeout: 15_000 }
+            { headers: { Authorization: `Bearer ${koraSecretKey}` }, timeout: 15_000 }
           );
           const data      = statusResp.data?.data || {};
           koraQueryRef    = data.transaction_reference || data.reference || dispatchRef;
@@ -1200,4 +1289,14 @@ async function executePayout(withdrawalId, logger, withBalanceMutex) {
   }
 }
 
-module.exports = { payoutRouter, isPayoutProviderReady, executePayout };
+module.exports = {
+  payoutRouter,
+  isPayoutProviderReady,
+  executePayout,
+  // Shared Kora credential/verification helpers — used by index.js (webhook route)
+  // and adminWithdrawals.js (reconcile) so the key-resolution logic lives in one place.
+  getKoraSecretKey,
+  verifyKoraWebhookSignature,
+  // Exposed for unit testing only — not part of the runtime execution path used by index.js.
+  _test: { getKoraSecretKey, getKoraPublicKey, getKoraEncryptionKey, encryptKoraPayload, verifyKoraWebhookSignature, toKoraAmount },
+};
