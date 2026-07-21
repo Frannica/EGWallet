@@ -2,7 +2,7 @@
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "npm install --prefix backend"
+    "buildCommand": "npm install --prefix backend && npm install --prefix backend/admin-dashboard --include=dev && npm run build --prefix backend/admin-dashboard"
   },
   "deploy": {
     "startCommand": "npm --prefix backend start",
