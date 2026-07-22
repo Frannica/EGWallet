@@ -1,19 +1,64 @@
 'use strict';
 
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+process.env.PGSSLMODE = process.env.PGSSLMODE || 'disable';
+
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+const { Client } = require('pg');
 const { v4: uuidv4 } = require('uuid');
-const { pool } = require('../db/pool');
-const { settleStripePaymentIntentDeposit } = require('../stripeDepositSettlement');
-const { commitDepositConfirmPostgres } = require('../db/depositConfirmPostgres');
 
 const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
 
-function requireDb() {
-  if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL required');
+// Same local-Postgres auto-discovery convention already used by
+// admin-dashboard.test.js / employer-payroll-e2e.test.js: prefer an
+// explicit DATABASE_URL, otherwise probe the well-known local dev DB
+// started via `backend/docs/postgres-phase0-runbook.md`. This lets these
+// tests genuinely exercise real Postgres locally without requiring every
+// developer/CI shell to export DATABASE_URL manually, while still failing
+// (via t.skip, never a silent pass) when no database is reachable at all.
+const FALLBACK_DATABASE_URL = 'postgres://postgres:postgres@localhost:5432/egwallet_phase0';
+let dbReady = false;
+let pool;
+// NOTE: these two modules both import the shared `../db/pool` singleton,
+// which reads process.env.DATABASE_URL exactly once, at require() time.
+// They must therefore be required lazily — AFTER pickDatabaseUrl() has set
+// process.env.DATABASE_URL below — never at module top-level, or the pool
+// silently locks onto an empty connection string (and Postgres then
+// authenticates as the OS user instead of the intended test database).
+let settleStripePaymentIntentDeposit;
+let commitDepositConfirmPostgres;
+
+async function pickDatabaseUrl() {
+  for (const url of [process.env.DATABASE_URL, FALLBACK_DATABASE_URL].filter(Boolean)) {
+    const client = new Client({ connectionString: url, ssl: false });
+    try {
+      await client.connect();
+      await client.query('SELECT 1');
+      await client.end();
+      return url;
+    } catch (_error) {
+      try { await client.end(); } catch (_) {}
+    }
+  }
+  return null;
 }
+
+test.before(async () => {
+  const dbUrl = await pickDatabaseUrl();
+  if (!dbUrl) return;
+  process.env.DATABASE_URL = dbUrl;
+  ({ pool } = require('../db/pool'));
+  ({ settleStripePaymentIntentDeposit } = require('../stripeDepositSettlement'));
+  ({ commitDepositConfirmPostgres } = require('../db/depositConfirmPostgres'));
+  dbReady = true;
+});
+
+test.after(async () => {
+  if (dbReady && pool) await pool.end();
+});
 
 function buildRuntimeDb(userId, walletId, balance = 1000) {
   return {
@@ -124,8 +169,8 @@ test('phase1c source: webhook uses settleStripePaymentIntentDeposit', () => {
   assert.match(indexSource, /commitDepositConfirmPostgres/);
 });
 
-test('phase1c webhook settlement credits postgres and app_state', async () => {
-  requireDb();
+test('phase1c webhook settlement credits postgres and app_state', async (t) => {
+  if (!dbReady) return t.skip('PostgreSQL unavailable');
   const client = await pool.connect();
   const userId = uuidv4();
   const walletId = uuidv4();
@@ -167,8 +212,8 @@ test('phase1c webhook settlement credits postgres and app_state', async () => {
   }
 });
 
-test('phase1c webhook settlement is idempotent after confirm postgres commit', async () => {
-  requireDb();
+test('phase1c webhook settlement is idempotent after confirm postgres commit', async (t) => {
+  if (!dbReady) return t.skip('PostgreSQL unavailable');
   const client = await pool.connect();
   const userId = uuidv4();
   const walletId = uuidv4();
@@ -220,8 +265,8 @@ test('phase1c webhook settlement is idempotent after confirm postgres commit', a
   }
 });
 
-test('phase1c webhook settlement is idempotent on duplicate webhook delivery', async () => {
-  requireDb();
+test('phase1c webhook settlement is idempotent on duplicate webhook delivery', async (t) => {
+  if (!dbReady) return t.skip('PostgreSQL unavailable');
   const client = await pool.connect();
   const userId = uuidv4();
   const walletId = uuidv4();

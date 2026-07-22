@@ -548,6 +548,10 @@ const DEVICE_SIGNUP_LIMIT = 3;
 const DEVICE_SIGNUP_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 // Prune stale device_signup_tracker records from the DB every 6 hours
+// .unref() — a background maintenance timer should never, by itself, keep
+// the process alive. In production the HTTP listener already does that;
+// this only matters for tests/scripts that require this module and expect
+// the process to be able to exit once they're done with it.
 setInterval(() => {
   const db = loadAppState();
   if (!db.device_signup_tracker) return;
@@ -556,7 +560,7 @@ setInterval(() => {
     .map(rec => ({ ...rec, timestamps: rec.timestamps.filter(ts => ts > cutoff) }))
     .filter(rec => rec.timestamps.length > 0);
   saveAppState(db);
-}, 6 * 60 * 60 * 1000);
+}, 6 * 60 * 60 * 1000).unref();
 
 // ==================== FEE SCHEDULE (single source of truth) ====================
 const FEES = {
@@ -627,8 +631,8 @@ function cleanExpiredIdempotencyKeys() {
   }
 }
 
-// Clean expired keys every hour
-setInterval(cleanExpiredIdempotencyKeys, 60 * 60 * 1000);
+// Clean expired keys every hour (unref — see note above on background timers)
+setInterval(cleanExpiredIdempotencyKeys, 60 * 60 * 1000).unref();
 
 // ==================== SUPPORT API UTILITIES ====================
 
@@ -824,7 +828,7 @@ function checkFraudVelocity(userId) {
   return { suspicious: false };
 }
 
-// Clean up old velocity data every hour
+// Clean up old velocity data every hour (unref — see note above on background timers)
 setInterval(() => {
   const now = Date.now();
   for (const [userId, timestamps] of fraudVelocityTracker.entries()) {
@@ -835,7 +839,7 @@ setInterval(() => {
       fraudVelocityTracker.set(userId, recent);
     }
   }
-}, 3600000); // 1 hour
+}, 3600000).unref(); // 1 hour
 
 // Sentiment detection
 function detectSentiment(message) {
@@ -2327,8 +2331,9 @@ async function fetchLiveRates() {
 }
 
 // Refresh on startup (async, non-blocking) and every hour (open.er-api.com updates hourly)
+// .unref() — see note above on background timers.
 fetchLiveRates();
-setInterval(fetchLiveRates, 60 * 60 * 1000);
+setInterval(fetchLiveRates, 60 * 60 * 1000).unref();
 
 // Rates older than 25 hours are treated as stale — flagged in quote/exchange responses
 const FX_STALE_THRESHOLD_MS = 25 * 60 * 60 * 1000;
@@ -8119,8 +8124,8 @@ app.get('/support/ticket/:ticketId', authMiddleware, (req, res) => {
   });
 });
 
-// Start follow-up automation (runs every hour)
-setInterval(checkAndSendFollowUps, 60 * 60 * 1000);
+// Start follow-up automation (runs every hour; unref — see note above on background timers)
+setInterval(checkAndSendFollowUps, 60 * 60 * 1000).unref();
 console.log('[FOLLOW-UP SYSTEM] Automated follow-up checker started (runs every 60 min)');
 
 // Submit dispute
