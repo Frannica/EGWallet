@@ -78,7 +78,14 @@ const {
   normalizeCard,
 } = require('./virtualCards');
 const { processStripeIssuingEvent, ISSUING_EVENT_TYPES, isStripeIssuingEnabled } = require('./stripeIssuing');
-const { executePayout, isPayoutProviderReady, getKoraSecretKey, verifyKoraWebhookSignature } = require('./payoutProviders');
+const {
+  executePayout, isPayoutProviderReady, getKoraSecretKey, verifyKoraWebhookSignature,
+  payoutRouter, resolveWithdrawalCountry, normalizeCountryToISO2,
+  isKoraBankAccountSupported, isKoraMobileMoneySupported,
+  isKoraBankResolutionSupported, isKoraMobileResolutionSupported, KORA_CURRENCY_TO_COUNTRY,
+  isKoraBankAccountCountry,
+  listKoraBanks, listKoraMobileMoneyOperators, resolveKoraBankAccount, resolveKoraMobileMoneyAccount,
+} = require('./payoutProviders');
 const {
   blockMoneyOperation,
   requiresAdminIntervention,
@@ -4002,15 +4009,63 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
     sanitizedAccountNumber = String(sanitizedAccountNumber).replace(/\D/g, '').slice(-4) || null;
   }
 
+  // ── Resolve the ISO-2 country used for payout routing ─────────────────────
+  // NEVER routes on free-text country matching. Explicit `country` input is
+  // normalized to ISO-2; when absent (the mobile app's local withdrawal path
+  // never sends one) it falls back to the user's own signup region, which is
+  // already an authoritative ISO-2 value captured at account creation.
+  const routingUser      = loadAppState().users?.find(u => u.id === req.user.userId) || null;
+  const resolvedCountry  = resolveWithdrawalCountry({
+    country,
+    userRegion: routingUser?.region || null,
+    currency,
+  });
+
+  // ── Fail safely for countries with no Kora/Stripe payout corridor ─────────
+  // payoutRouter() returns null for countries that share a currency with a
+  // Kora corridor (e.g. Equatorial Guinea/XAF, Senegal/XOF) but are not
+  // themselves Kora-supported. These must NEVER silently fall through to
+  // Stripe — return a clear, permanent "not supported" error (400), distinct
+  // from the generic "provider not ready" 503 below which implies a
+  // transient/config issue rather than a corridor that plainly doesn't exist.
+  if (resolvedCountry && payoutRouter(resolvedCountry) === null) {
+    logger.warn('POST /withdrawals blocked — country has no supported payout corridor', {
+      userId: req.user.userId, country: resolvedCountry, currency,
+    });
+    return res.status(400).json({
+      error: 'Withdrawals are not currently supported for your country. Please contact support.',
+      errorCode: 'COUNTRY_NOT_SUPPORTED',
+    });
+  }
+
   // ── Block in production when no payout provider is configured ────────────
   // Prevents funds entering holdBalance with no path to release them.
-  if (process.env.NODE_ENV === 'production' && !isPayoutProviderReady(country || '')) {
+  if (process.env.NODE_ENV === 'production' && !isPayoutProviderReady(resolvedCountry || '')) {
     logger.error('POST /withdrawals blocked — no payout provider configured for region', {
-      userId: req.user.userId, country,
+      userId: req.user.userId, country: resolvedCountry,
     });
     return res.status(503).json({
       error: 'Withdrawals are temporarily unavailable. Please contact support.',
     });
+  }
+
+  // ── Block method/currency combinations Kora cannot fulfil ─────────────────
+  // e.g. Cameroon (XAF) has no bank_account payout support on Kora — bank
+  // withdrawals must be blocked with a clear reason rather than accepted and
+  // failed later during disbursement (see payoutProviders.koraPayout guards).
+  if (payoutRouter(resolvedCountry) === 'kora' && (method === 'bank' || method === 'mobile')) {
+    if (method === 'bank' && !isKoraBankAccountSupported(currency)) {
+      return res.status(400).json({
+        error: `Bank withdrawals are not available for ${currency}. Please use Mobile Money for this currency.`,
+        errorCode: 'KORA_BANK_UNSUPPORTED',
+      });
+    }
+    if (method === 'mobile' && !isKoraMobileMoneySupported(currency)) {
+      return res.status(400).json({
+        error: `Mobile Money withdrawals are not available for ${currency}.`,
+        errorCode: 'KORA_MOBILE_MONEY_UNSUPPORTED',
+      });
+    }
   }
 
   // ── Client-supplied idempotency key (required) ────────────────────────────
@@ -4069,7 +4124,7 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
       currency,
       method,
       isInternational,
-      country:           country           || null,
+      country:           resolvedCountry   || null,
       bankName:          bankName          || null,
       accountNumber:     sanitizedAccountNumber,
       accountHolderName: accountHolderName || null,
@@ -4169,6 +4224,8 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
     netPayout:    feeCalc.netPayout,
     currency,
     method,
+    country:      resolvedCountry,
+    provider:     payoutRouter(resolvedCountry),
     isInternational: !!isInternational,
   });
 
@@ -4179,6 +4236,103 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
   // Dispatch payout immediately unless fraud/AML review is required.
   if (!_withdrawNeedsAdminReview && _capturedWithdrawalId) {
     setImmediate(() => executePayout(_capturedWithdrawalId, logger, withBalanceMutex));
+  }
+});
+
+// ─── Kora payout utilities — bank list / mobile-money operators / account resolution ───
+// Consumed by the mobile app's withdrawal screen so users pick a bank or mobile-money
+// operator from Kora's own official list instead of typing a bank code manually.
+
+// GET /payout/banks?country=NG — Kora's official List Banks API (bank_account currencies only).
+app.get('/payout/banks', authMiddleware, async (req, res) => {
+  const country = normalizeCountryToISO2(req.query.country);
+  if (!country) return res.status(400).json({ error: 'A valid country is required' });
+  if (!isKoraBankAccountCountry(country)) {
+    return res.status(400).json({ error: `Kora does not support bank-account payouts for ${country}.`, country, banks: [] });
+  }
+  try {
+    const banks = await listKoraBanks(country);
+    res.json({ country, banks: banks || [] });
+  } catch (err) {
+    logger.error('[/payout/banks] Kora List Banks failed', { country, error: err.message });
+    res.status(err.status || 502).json({ error: 'Unable to retrieve bank list right now. Please try again shortly.' });
+  }
+});
+
+// GET /payout/mobile-money-operators?country=CM — Kora's official List MMO API.
+// This is the equivalent of "select a bank" for mobile-money-only corridors like Cameroon.
+app.get('/payout/mobile-money-operators', authMiddleware, async (req, res) => {
+  const country = normalizeCountryToISO2(req.query.country);
+  if (!country) return res.status(400).json({ error: 'A valid country is required' });
+  if (payoutRouter(country) !== 'kora') {
+    return res.status(400).json({ error: `Kora does not support mobile-money payouts for ${country}.`, country, operators: [] });
+  }
+  try {
+    const operators = await listKoraMobileMoneyOperators(country);
+    res.json({ country, operators: operators || [] });
+  } catch (err) {
+    logger.error('[/payout/mobile-money-operators] Kora List MMO failed', { country, error: err.message });
+    res.status(err.status || 502).json({ error: 'Unable to retrieve mobile money operators right now. Please try again shortly.' });
+  }
+});
+
+// POST /payout/resolve-account — verifies a bank or mobile-money account before submission
+// and returns the resolved account holder name so the user can confirm it. Never fabricates
+// a name: if Kora's API does not support resolution for the given corridor, that error is
+// surfaced as-is rather than treated as a successful verification.
+app.post('/payout/resolve-account', authMiddleware, async (req, res) => {
+  const { type, bankCode, accountNumber, currency, country } = req.body || {};
+  if (!type || !accountNumber || !currency)
+    return res.status(400).json({ error: 'type, accountNumber and currency are required' });
+  if (!bankCode)
+    return res.status(400).json({ error: type === 'mobile' ? 'A mobile money operator is required' : 'A bank is required' });
+
+  // Fast-fail with a clear, non-error signal for corridors Kora does not
+  // document resolution support for (see isKoraBankResolutionSupported /
+  // isKoraMobileResolutionSupported) — avoids a network round-trip that would
+  // only ever come back as Kora's own validation error, and lets the app
+  // distinguish "not supported, please confirm manually" from a real failure.
+  const resolutionCountry = normalizeCountryToISO2(country) || KORA_CURRENCY_TO_COUNTRY[(currency || '').toUpperCase()];
+  const resolutionSupported = type === 'mobile'
+    ? isKoraMobileResolutionSupported(resolutionCountry)
+    : isKoraBankResolutionSupported(resolutionCountry);
+  if (!resolutionSupported) {
+    return res.status(200).json({
+      accountName: null,
+      resolutionSupported: false,
+      message: 'Automatic account verification is not available for this corridor. Please confirm the account holder name manually.',
+    });
+  }
+
+  try {
+    if (type === 'mobile') {
+      const resolved = await resolveKoraMobileMoneyAccount({
+        mobileMoneyCode: bankCode,
+        phoneNumber:     accountNumber,
+        currency,
+      });
+      return res.json({
+        accountName:   resolved?.account_name || null,
+        operatorName:  resolved?.mobile_money_operator || null,
+        phoneNumber:   resolved?.phone_number || accountNumber,
+      });
+    }
+    if (type === 'bank') {
+      const resolved = await resolveKoraBankAccount({ bank: bankCode, account: accountNumber, currency });
+      return res.json({
+        accountName:   resolved?.account_name || null,
+        bankName:      resolved?.bank_name || null,
+        accountNumber: resolved?.account_number || accountNumber,
+      });
+    }
+    return res.status(400).json({ error: 'type must be "bank" or "mobile"' });
+  } catch (err) {
+    logger.warn('[/payout/resolve-account] Kora resolution failed', {
+      type, currency, error: err.message,
+    });
+    // Kora's own "unable to resolve" / "not supported" errors are surfaced directly —
+    // never invent an account holder name on a failed/unsupported resolution.
+    res.status(err.status || 422).json({ error: err.message || 'Unable to resolve this account.' });
   }
 });
 

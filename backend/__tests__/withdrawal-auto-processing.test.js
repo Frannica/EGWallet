@@ -27,9 +27,11 @@ test('POST /withdrawals dispatches executePayout when no admin intervention requ
   assert.match(block, /executePayout\(_capturedWithdrawalId/);
 });
 
-test('POST /withdrawals uses isPayoutProviderReady for production provider check', () => {
+test('POST /withdrawals uses isPayoutProviderReady with the normalized routing country', () => {
   const block = extractWithdrawalsBlock();
-  assert.match(block, /isPayoutProviderReady\(country/);
+  // Country is normalized to ISO-2 (via resolveWithdrawalCountry) BEFORE the
+  // provider-ready check — never checked against the raw free-text `country` field.
+  assert.match(block, /isPayoutProviderReady\(resolvedCountry/);
   assert.doesNotMatch(block, /stripeReady\s*=\s*false/);
 });
 

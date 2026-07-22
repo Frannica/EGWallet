@@ -8,22 +8,34 @@
  *   — loads a fresh DB, calls the right provider, marks paid or failed.
  *
  * Provider routing:
- *   Africa (XAF/XOF zone + broader African countries) → Kora
- *   Everything else → Stripe
+ *   Kora-confirmed corridors (exactly 8 countries — see KORA_COUNTRIES below:
+ *     NG, KE, ZA, GH, CI, CM, EG, TZ) → Kora
+ *   Countries that share a currency with a Kora corridor but are NOT
+ *   themselves Kora-supported (e.g. Equatorial Guinea/XAF, Senegal/XOF) →
+ *   null — payoutRouter() returns null and callers MUST fail safely with a
+ *   clear message, never silently fall through to Stripe.
+ *   Everything else (US, GB, EU, rest of world) → Stripe
  *
  * PRODUCTION NOTES:
  *   Stripe:  Requires funds in your Stripe balance and an External Account
  *            (bank or debit card) registered on the connected account.
  *            For custom bank-to-bank disbursements, use Stripe Connect.
  *   Kora:    Live-mode credentials required for production:
- *              KORA_LIVE_PUBLIC_KEY      — pk_live_… (non-sensitive identifier)
- *              KORA_LIVE_SECRET_KEY      — sk_live_… (Bearer auth, server-side only)
+ *              KORA_LIVE_PUBLIC_KEY      — pk_live_… (used for /misc/* utility
+ *                                          endpoints: List Banks, List Mobile
+ *                                          Money Operators, account resolution —
+ *                                          confirmed live, the secret key gets
+ *                                          401 on these)
+ *              KORA_LIVE_SECRET_KEY      — sk_live_… (Bearer auth for the
+ *                                          transactional endpoints: disburse,
+ *                                          payout history, webhook signing)
  *              KORA_LIVE_ENCRYPTION_KEY  — optional AES-256-GCM key; when set, the
  *                                          disbursement payload is encrypted into
  *                                          `encrypted_data` per Kora's payload-encryption spec.
  *            Legacy KORA_API_KEY (single key) is still honoured as a fallback for
  *            KORA_LIVE_SECRET_KEY so existing deployments keep working unchanged.
- *            Kora covers NG, GH, KE, CM, SN, CI, etc.
+ *            Kora currently covers exactly NG, KE, ZA, GH, CI, CM, EG, TZ for
+ *            this account — see the KORA_COUNTRIES comment for full evidence.
  *
  *            Kora does NOT issue a separate webhook-signing secret. Per
  *            https://developers.korapay.com/docs/webhooks ("Verifying a Webhook
@@ -148,21 +160,271 @@ function toKoraAmount(amount, currency) {
 }
 
 // ─── Provider routing ─────────────────────────────────────────────────────────
-const KORA_COUNTRIES = new Set([
-  // XAF zone (Central Africa CFA franc)
-  'CM', 'CF', 'TD', 'CG', 'GQ', 'GA',
-  // XOF zone (West Africa CFA franc)
-  'BJ', 'BF', 'CI', 'GW', 'ML', 'NE', 'SN', 'TG',
-  // Other African countries supported by Kora
-  'NG', 'GH', 'KE', 'ZA', 'TZ', 'UG', 'RW', 'ET',
-  'ZM', 'ZW', 'MZ', 'AO', 'NA', 'BW', 'MW', 'LS',
-  'SZ', 'MG', 'MU', 'SC', 'DZ', 'MA', 'TN', 'LY', 'EG', 'SD',
+// IMPORTANT — Kora corridor support is per-COUNTRY, not per-currency-zone.
+// Sharing a currency (e.g. the XAF/XOF CFA-franc zones, each shared by 6-8
+// countries) does NOT imply Kora supports payouts to every country in that
+// zone. Per https://developers.korapay.com/docs/send-payments ("Currently,
+// Kora's Payout API supports Payouts to…") and confirmed live against our own
+// account (2026-07-22 — see backend/scripts/kora-cm-mobile-money-probe.js),
+// Kora's Payout API currently supports exactly these 8 countries/corridors:
+//
+//   NG (NGN) — bank_account only
+//   KE (KES) — bank_account AND mobile_money
+//   ZA (ZAR) — bank_account only
+//   GH (GHS) — mobile_money only
+//   CI (XOF) — mobile_money only  (the ONLY XOF-zone country Kora supports —
+//                                  NOT Senegal, Benin, Mali, Togo, etc.)
+//   CM (XAF) — mobile_money only  (the ONLY XAF-zone country Kora supports —
+//                                  NOT Equatorial Guinea, Gabon, Chad, Congo,
+//                                  Central African Republic, etc. Confirmed
+//                                  live: GET .../misc/mobile-money?countryCode=CM
+//                                  returns MTN/Orange operators; GET
+//                                  .../misc/payout-countries-by-currency-code/XAF
+//                                  returns an EMPTY bank-country list.)
+//   EG (EGP) — mobile_money only
+//   TZ (TZS) — mobile_money only
+//
+// US (USD) and GB (GBP) also have a documented Kora bank_account corridor, but
+// it requires a materially different payload (bank_country, beneficiary_type,
+// address_information, supporting_documents, routing/SWIFT, purpose_of_payment)
+// that this integration does not implement — those withdrawals continue to
+// route to Stripe unchanged (see "remaining dependencies" in the delivery
+// report). This is a deliberate, documented scope decision, not an oversight.
+//
+// Equatorial Guinea (GQ) is EGWallet's home market and remains fully usable
+// for in-app/internal wallet balances, but it is NOT a Kora payout corridor —
+// GQ must never be routed to Kora, and per requirement #2 below it must also
+// never silently fall through to Stripe (Stripe has no African bank/mobile
+// payout corridor either) — it fails safely with a clear message instead.
+const KORA_COUNTRIES = new Set(['NG', 'KE', 'ZA', 'GH', 'CI', 'CM', 'EG', 'TZ']);
+
+// Countries previously (incorrectly) treated as Kora corridors purely because
+// they share a currency with a real corridor (the CFA-franc zones) or sit in
+// the same broad African-market bucket. None of these are documented or
+// probe-confirmed Kora payout destinations. Routing them to Stripe would be
+// silently wrong (Stripe has no local bank/mobile-money corridor for them
+// either) — payoutRouter() returns null for these so callers can fail safely
+// with an explicit "not supported" message instead of mis-routing.
+const KORA_UNSUPPORTED_COUNTRIES = new Set([
+  // XAF zone (Central Africa CFA franc) — everyone except Cameroon
+  'CF', 'TD', 'CG', 'GQ', 'GA',
+  // XOF zone (West Africa CFA franc) — everyone except Ivory Coast
+  'BJ', 'BF', 'GW', 'ML', 'NE', 'SN', 'TG',
+  // Other African countries with no documented/confirmed Kora payout corridor
+  'UG', 'RW', 'ET', 'ZM', 'ZW', 'MZ', 'AO', 'NA', 'BW', 'MW', 'LS',
+  'SZ', 'MG', 'MU', 'SC', 'DZ', 'MA', 'TN', 'LY', 'SD',
   'SL', 'LR', 'GM', 'MR', 'DJ', 'ER', 'SO',
 ]);
 
+/**
+ * Resolves the payout provider for a country.
+ * @returns {'kora'|'stripe'|null} null means "no safe provider" — the caller
+ *   MUST fail the request with a clear message, never silently fall through.
+ */
 function payoutRouter(country) {
   if (!country) return 'stripe';
-  return KORA_COUNTRIES.has(country.trim().toUpperCase()) ? 'kora' : 'stripe';
+  const iso2 = country.trim().toUpperCase();
+  if (KORA_COUNTRIES.has(iso2)) return 'kora';
+  if (KORA_UNSUPPORTED_COUNTRIES.has(iso2)) return null;
+  return 'stripe';
+}
+
+// Canonical country for each Kora-supported currency — used for the
+// resolveWithdrawalCountry() fallback and for the mobile app's bank/operator
+// list & resolution endpoints. Each of these currencies now maps to EXACTLY
+// ONE Kora-confirmed country (unlike the old currency-zone assumption).
+const KORA_CURRENCY_TO_COUNTRY = {
+  NGN: 'NG', KES: 'KE', ZAR: 'ZA', GHS: 'GH', XOF: 'CI', XAF: 'CM', EGP: 'EG', TZS: 'TZ',
+};
+
+// ─── Kora Payout API corridor support ────────────────────────────────────────
+// Per https://developers.korapay.com/docs/send-payments ("Currently, Kora's
+// Payout API supports Payouts to…"), bank_account and mobile_money destinations
+// are each supported ONLY for a specific set of currencies. Cameroon (XAF) has
+// NO bank_account payout support on Kora — it is mobile-money-only (MTN/Orange).
+// These sets gate koraPayout() so an unsupported combination is rejected
+// up-front instead of being submitted to Kora and failing there.
+// NOTE: USD/GBP bank_account is a real Kora corridor but is intentionally NOT
+// included here — see the KORA_COUNTRIES comment above; USD/GBP withdrawals
+// route to Stripe, not Kora, in this integration.
+const KORA_BANK_ACCOUNT_CURRENCIES   = new Set(['NGN', 'KES', 'ZAR']);
+const KORA_MOBILE_MONEY_CURRENCIES   = new Set(['KES', 'GHS', 'XOF', 'XAF', 'EGP', 'TZS']);
+
+function isKoraBankAccountSupported(currency) {
+  return KORA_BANK_ACCOUNT_CURRENCIES.has((currency || '').toUpperCase());
+}
+function isKoraMobileMoneySupported(currency) {
+  return KORA_MOBILE_MONEY_CURRENCIES.has((currency || '').toUpperCase());
+}
+
+// Country-level equivalents of the currency checks above — used by the
+// /payout/banks and /payout/mobile-money-operators endpoints, which receive a
+// country (not a currency) from the mobile app.
+const KORA_BANK_ACCOUNT_COUNTRIES = new Set(['NG', 'KE', 'ZA']);
+function isKoraBankAccountCountry(country) {
+  return KORA_BANK_ACCOUNT_COUNTRIES.has((country || '').toUpperCase());
+}
+
+// Corridors where Kora officially documents pre-submission beneficiary
+// resolution (https://developers.korapay.com/docs/payout-via-api, "Verify the
+// destination bank account" / "Mobile Money account verification"):
+//   • Bank account resolve  → Nigeria, Kenya only
+//   • Mobile money resolve  → Ghana only (Ghanaian MMO codes are numeric,
+//     matching the endpoint's required `mobileMoneyCode` pattern; Cameroon's
+//     and Ivory Coast's operator codes — e.g. MTN_CM, ORANGE_CM — are NOT
+//     numeric and are rejected by Kora's own validation, confirmed live.)
+// Callers (mobile app + /payout/resolve-account) must only attempt resolution
+// for these corridors and require manual user confirmation everywhere else —
+// never fabricate a beneficiary name.
+const KORA_BANK_RESOLUTION_COUNTRIES   = new Set(['NG', 'KE']);
+const KORA_MOBILE_RESOLUTION_COUNTRIES = new Set(['GH']);
+
+function isKoraBankResolutionSupported(country) {
+  return KORA_BANK_RESOLUTION_COUNTRIES.has((country || '').toUpperCase());
+}
+function isKoraMobileResolutionSupported(country) {
+  return KORA_MOBILE_RESOLUTION_COUNTRIES.has((country || '').toUpperCase());
+}
+
+// ─── Country normalization ────────────────────────────────────────────────────
+// Maps free-text country names (as historically accepted from mobile-app free
+// text fields) to ISO-2 codes. Payout routing must NEVER match on free text —
+// this map is the only bridge, and anything not found here returns null so the
+// caller cannot silently mis-route a withdrawal.
+const COUNTRY_NAME_TO_ISO2 = {
+  cameroon: 'CM', nigeria: 'NG', ghana: 'GH', kenya: 'KE', 'south africa': 'ZA',
+  senegal: 'SN', 'ivory coast': 'CI', "cote d'ivoire": 'CI', "côte d'ivoire": 'CI',
+  benin: 'BJ', 'burkina faso': 'BF', 'guinea-bissau': 'GW', mali: 'ML', niger: 'NE',
+  togo: 'TG', 'central african republic': 'CF', chad: 'TD', congo: 'CG',
+  'equatorial guinea': 'GQ', gabon: 'GA', tanzania: 'TZ', uganda: 'UG', rwanda: 'RW',
+  ethiopia: 'ET', zambia: 'ZM', zimbabwe: 'ZW', mozambique: 'MZ', angola: 'AO',
+  namibia: 'NA', botswana: 'BW', malawi: 'MW', lesotho: 'LS', eswatini: 'SZ',
+  swaziland: 'SZ', madagascar: 'MG', mauritius: 'MU', seychelles: 'SC', algeria: 'DZ',
+  morocco: 'MA', tunisia: 'TN', libya: 'LY', egypt: 'EG', sudan: 'SD',
+  'sierra leone': 'SL', liberia: 'LR', gambia: 'GM', mauritania: 'MR', djibouti: 'DJ',
+  eritrea: 'ER', somalia: 'SO',
+  'united states': 'US', 'united kingdom': 'GB', 'great britain': 'GB',
+};
+
+/**
+ * Normalizes a country input (ISO-2 code OR a recognized free-text country
+ * name) to a canonical uppercase ISO-2 code. Returns null when the input
+ * cannot be confidently resolved — callers must treat null as "unknown",
+ * never guess a provider from it.
+ * @param {string|null|undefined} input
+ * @returns {string|null}
+ */
+function normalizeCountryToISO2(input) {
+  if (!input || typeof input !== 'string') return null;
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  if (/^[A-Za-z]{2}$/.test(trimmed)) return trimmed.toUpperCase();
+  return COUNTRY_NAME_TO_ISO2[trimmed.toLowerCase()] || null;
+}
+
+/**
+ * Resolves the ISO-2 country to use for payout routing on a withdrawal
+ * request. Never relies on free-text matching for routing decisions:
+ *   1. Explicit `country` input is normalized via normalizeCountryToISO2().
+ *   2. If not supplied/unrecognized, falls back to the user's own signup
+ *      `region` (already ISO-2, captured at account creation) — this is the
+ *      authoritative source for the mobile app's *local* withdrawal path,
+ *      which never asks the user for a country at all.
+ *   3. Last resort: XAF is, for this wallet's current user base, effectively
+ *      single-country (Cameroon) — default to CM rather than leaving the
+ *      withdrawal unroutable.
+ * @param {{country?: string|null, userRegion?: string|null, currency: string}} opts
+ * @returns {string|null}
+ */
+function resolveWithdrawalCountry({ country, userRegion, currency }) {
+  const explicit = normalizeCountryToISO2(country);
+  if (explicit) return explicit;
+  const region = normalizeCountryToISO2(userRegion);
+  if (region) return region;
+  // Each Kora-supported currency now maps to exactly one confirmed Kora
+  // country (see KORA_CURRENCY_TO_COUNTRY) — safe to default on currency
+  // alone only for these, never for a currency shared by unsupported
+  // neighbours without a real per-country signal.
+  const byCurrency = KORA_CURRENCY_TO_COUNTRY[(currency || '').toUpperCase()];
+  if (byCurrency) return byCurrency;
+  return null;
+}
+
+// ─── Kora payout utility APIs (List Banks / List MMO / Resolve) ─────────────
+// https://developers.korapay.com/docs/payout-utilities and
+// https://developers.korapay.com/docs/payout-via-api ("1 - Find bank codes…",
+// "2 - Verify the destination bank account").
+const KORA_BASE_URL = 'https://api.korapay.com';
+
+async function koraMiscRequest(method, path, { params, data } = {}) {
+  // IMPORTANT: Kora's /misc/* utility endpoints (List Banks, List Mobile Money
+  // Operators, Payout Countries by Currency, and both Resolve endpoints)
+  // authenticate with the PUBLIC key, NOT the secret key — confirmed live
+  // against our own account: the secret key gets a 401 "Invalid authentication
+  // token" on every /misc/* call, while the same call succeeds with the public
+  // key. This is different from the transactional endpoints (disburse, payout
+  // history, webhooks), which correctly use the secret key elsewhere in this
+  // file. Falls back to the secret key only if no public key is configured, so
+  // a misconfigured deployment still gets a clear Kora-side error rather than
+  // a silent no-op.
+  const koraKey = getKoraPublicKey() || getKoraSecretKey();
+  if (!koraKey) {
+    const err = new Error('Kora is not configured — KORA_LIVE_PUBLIC_KEY is missing');
+    err.status = 503;
+    throw err;
+  }
+  const headers = { Authorization: `Bearer ${koraKey}`, 'Content-Type': 'application/json' };
+  const url = `${KORA_BASE_URL}${path}`;
+  let response;
+  try {
+    // Uses axios.get/axios.post (rather than calling axios(config) directly) so
+    // these calls can be unit-tested by substituting the method on the shared
+    // axios module — see __tests__/kora-cameroon-xaf.test.js.
+    response = method === 'get'
+      ? await axios.get(url, { params, headers, timeout: 15_000 })
+      : await axios.post(url, data, { headers, timeout: 15_000 });
+  } catch (err) {
+    const koraMsg = err.response?.data?.message || err.message;
+    const wrapped = new Error(`Kora API error: ${koraMsg}`);
+    wrapped.status = err.response?.status || 502;
+    throw wrapped;
+  }
+  if (!response.data || response.data.status !== true) {
+    const err = new Error(response.data?.message || 'Kora request did not succeed');
+    err.status = 502;
+    throw err;
+  }
+  return response.data.data;
+}
+
+/** List Kora's official bank codes for a country (bank_account currencies only: NG, KE, ZA, …). */
+async function listKoraBanks(countryCode) {
+  return koraMiscRequest('get', '/merchant/api/v1/misc/banks', { params: { countryCode } });
+}
+
+/** List Kora's official mobile-money operator slugs for a country (e.g. CM → mtn-cm, orange-cm). */
+async function listKoraMobileMoneyOperators(countryCode) {
+  return koraMiscRequest('get', '/merchant/api/v1/misc/mobile-money', { params: { countryCode } });
+}
+
+/**
+ * Resolves/verifies a bank account before payout. Per Kora's docs this is
+ * currently only documented as supported for Nigerian and Kenyan banks —
+ * callers must surface Kora's own error rather than fabricate a name for
+ * unsupported corridors.
+ */
+async function resolveKoraBankAccount({ bank, account, currency }) {
+  return koraMiscRequest('post', '/merchant/api/v1/misc/banks/resolve', { data: { bank, account, currency } });
+}
+
+/**
+ * Resolves/verifies a mobile-money account before payout. Kora's docs
+ * explicitly document this for Ghanaian mobile-money networks; other
+ * corridors (including Cameroon) are called through the same endpoint but
+ * Kora's own response determines support — callers must not assume success.
+ */
+async function resolveKoraMobileMoneyAccount({ mobileMoneyCode, phoneNumber, currency }) {
+  return koraMiscRequest('post', '/merchant/api/v1/misc/mobile-money/resolve', { data: { mobileMoneyCode, phoneNumber, currency } });
 }
 
 /**
@@ -174,6 +436,11 @@ function isPayoutProviderReady(country) {
   const provider = payoutRouter(country);
   if (provider === 'kora') {
     return !!getKoraSecretKey();
+  }
+  if (provider === null) {
+    // No safe provider for this country (see KORA_UNSUPPORTED_COUNTRIES) —
+    // never treat this as "ready" just because Stripe happens to be configured.
+    return false;
   }
   return !!(
     stripeClient &&
@@ -309,8 +576,38 @@ async function koraPayout(w, logger) {
     throw new Error('Kora is not configured — KORA_LIVE_SECRET_KEY is missing');
   }
 
+  const currency = (w.currency || '').toUpperCase();
   const amount    = toKoraAmount(w.netPayout, w.currency);
   const reference = `egw-${w.id}`;
+  const destinationType = w.method === 'mobile' ? 'mobile_money' : 'bank_account';
+
+  // ── Corridor guards — fail fast (definitive rejection → immediate refund)
+  // instead of submitting a request Kora is guaranteed to reject. Cameroon
+  // (XAF) is mobile-money-only on Kora: bank_account is NOT supported there.
+  // https://developers.korapay.com/docs/send-payments
+  if (destinationType === 'bank_account' && !isKoraBankAccountSupported(currency)) {
+    const err = new Error(
+      `Kora does not support bank-account payouts in ${currency}. This corridor requires the mobile-money withdrawal method.`
+    );
+    err._definitiveRejection = true;
+    throw err;
+  }
+  if (destinationType === 'mobile_money' && !isKoraMobileMoneySupported(currency)) {
+    const err = new Error(`Kora does not support mobile-money payouts in ${currency}.`);
+    err._definitiveRejection = true;
+    throw err;
+  }
+
+  // Kora only accepts XAF/XOF payout amounts in multiples of 5 — reject
+  // up-front rather than hold funds against a disbursement Kora will refuse.
+  // https://developers.korapay.com/docs/payout-via-api
+  if ((currency === 'XAF' || currency === 'XOF') && amount % 5 !== 0) {
+    const err = new Error(
+      `Kora requires ${currency} payout amounts to be a multiple of 5 (net payout was ${amount} ${currency}).`
+    );
+    err._definitiveRejection = true;
+    throw err;
+  }
 
   // Decrypt PII fields — they are AES-256-GCM encrypted at rest.
   // decryptPII() is a no-op passthrough for any unencrypted legacy value.
@@ -318,20 +615,44 @@ async function koraPayout(w, logger) {
   const plainHolder  = decryptPII(w.accountHolderName) || '';
   const plainBank    = decryptPII(w.bankName)           || '';
 
-  const payload = {
-    reference,
-    destination: {
-      type:      'bank_account',
-      amount,
-      currency:  w.currency,
-      narration: `EGWallet withdrawal`,
-      bank_account: {
-        bank:         w.bankCode || plainBank,
-        account:      plainAccount,
-        account_name: plainHolder,
-      },
+  // Kora's disburse API documents a required destination.customer.email —
+  // https://developers.korapay.com/docs/payout-via-api
+  const db   = loadAppState();
+  const user = (db.users || []).find(u => u.id === w.userId);
+
+  const destination = {
+    type:      destinationType,
+    amount,
+    currency:  w.currency,
+    narration: `EGWallet withdrawal`,
+    customer: {
+      name:  plainHolder || undefined,
+      email: user?.email || undefined,
     },
   };
+
+  if (destinationType === 'mobile_money') {
+    // Mobile money has no "bank" concept — the app's bankCode field carries
+    // the Kora operator slug (e.g. "mtn-cm" / "orange-cm") selected from
+    // GET /payout/mobile-money-operators, and accountNumber carries the phone number.
+    if (!w.bankCode) {
+      const err = new Error('Mobile money payout is missing the mobile money operator (bankCode).');
+      err._definitiveRejection = true;
+      throw err;
+    }
+    destination.mobile_money = {
+      operator:      w.bankCode,
+      mobile_number: plainAccount,
+    };
+  } else {
+    destination.bank_account = {
+      bank:         w.bankCode || plainBank,
+      account:      plainAccount,
+      account_name: plainHolder,
+    };
+  }
+
+  const payload = { reference, destination };
 
   const koraEncryptionKey = getKoraEncryptionKey();
   const requestBody       = koraEncryptionKey
@@ -343,7 +664,9 @@ async function koraPayout(w, logger) {
     reference,
     amount,
     currency: w.currency,
-    bank:     payload.destination.bank_account.bank,
+    destinationType,
+    bank:      destinationType === 'bank_account' ? destination.bank_account.bank     : undefined,
+    operator:  destinationType === 'mobile_money' ? destination.mobile_money.operator : undefined,
     encrypted: !!koraEncryptionKey,
   });
 
@@ -704,6 +1027,28 @@ async function executePayout(withdrawalId, logger, withBalanceMutex) {
 
   const provider = payoutRouter(w.country);
   logger.info('[executePayout] Routing to provider', { withdrawalId, provider, country: w.country });
+
+  // ── No safe provider for this country ─────────────────────────────────────
+  // Defense in depth: POST /withdrawals already rejects unsupported countries
+  // up-front (see index.js), so this should be unreachable for new
+  // withdrawals. Guards against any legacy/edge-case record with an
+  // unsupported country string reaching dispatch and being silently treated
+  // as a Kora payout (see attemptPayout's stripe/else branch below).
+  if (!provider) {
+    logger.error('[executePayout] No payout provider available for country — marking failed for refund', {
+      withdrawalId, country: w.country,
+    });
+    try {
+      const dbNoProvider = loadAppState();
+      markWithdrawalFailed(dbNoProvider, withdrawalId, `No payout provider available for country ${w.country || 'unknown'}`);
+      await persistWithdrawalById(dbNoProvider, withdrawalId, 'processing');
+    } catch (noProviderErr) {
+      logger.error('[executePayout] Could not mark unsupported-country withdrawal failed', {
+        withdrawalId, error: noProviderErr.message,
+      });
+    }
+    return;
+  }
 
   // C5: All saves use version-checked PostgreSQL app state persistence.
 
@@ -1297,6 +1642,31 @@ module.exports = {
   // and adminWithdrawals.js (reconcile) so the key-resolution logic lives in one place.
   getKoraSecretKey,
   verifyKoraWebhookSignature,
+  // Country normalization + routing helpers — used by index.js POST /withdrawals
+  // so routing never depends on free-text country matching.
+  normalizeCountryToISO2,
+  resolveWithdrawalCountry,
+  // Corridor-support guards — used by index.js to block unsupported method/currency
+  // combinations (e.g. bank withdrawal for XAF) before funds enter holdBalance.
+  isKoraBankAccountSupported,
+  isKoraMobileMoneySupported,
+  isKoraBankAccountCountry,
+  isKoraBankResolutionSupported,
+  isKoraMobileResolutionSupported,
+  // The exact set of countries/currencies this integration routes to Kora —
+  // used by index.js /payout/* endpoints and by tests as the single source of
+  // truth (see the long comment above KORA_COUNTRIES for the evidence).
+  KORA_COUNTRIES,
+  KORA_CURRENCY_TO_COUNTRY,
+  // Kora payout utility APIs — used by index.js bank-list / mobile-money-operator /
+  // account-resolution endpoints consumed by the mobile app.
+  listKoraBanks,
+  listKoraMobileMoneyOperators,
+  resolveKoraBankAccount,
+  resolveKoraMobileMoneyAccount,
   // Exposed for unit testing only — not part of the runtime execution path used by index.js.
-  _test: { getKoraSecretKey, getKoraPublicKey, getKoraEncryptionKey, encryptKoraPayload, verifyKoraWebhookSignature, toKoraAmount },
+  _test: {
+    getKoraSecretKey, getKoraPublicKey, getKoraEncryptionKey, encryptKoraPayload,
+    verifyKoraWebhookSignature, toKoraAmount, koraPayout, KORA_UNSUPPORTED_COUNTRIES,
+  },
 };

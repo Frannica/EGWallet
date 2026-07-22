@@ -14,6 +14,7 @@ import { refreshWalletFromBackend } from '../utils/walletSync';
 import { WITHDRAW_LOCAL_RATE, WITHDRAW_INTL_RATE, FX_CONVERSION_RATE } from '../config/fees';
 import { useLanguage } from '../i18n/LanguageContext';
 import { getApiErrorMessage } from '../utils/apiErrorMessage';
+import { formatStatusLabel, formatWalletIdShort } from '../utils/safeDisplay';
 
 interface PaymentMethod {
   id: string;
@@ -99,6 +100,25 @@ export default function SendScreen() {
   const [withdrawalCardExpiry, setWithdrawalCardExpiry] = useState<string>('');
   const [withdrawalCardCvc, setWithdrawalCardCvc] = useState<string>('');
 
+  // Kora mobile-money corridors: for currencies where Kora only supports
+  // mobile-money payouts (no bank_account), bank code entry is replaced with a
+  // picker fed by Kora's own List MMO API, and the account name is
+  // resolved/confirmed via Kora's account-resolution API where supported.
+  const [mmOperators, setMmOperators] = useState<Array<{ name: string; slug: string; code?: string }>>([]);
+  const [mmOperatorSlug, setMmOperatorSlug] = useState<string>('');
+  const [loadingOperators, setLoadingOperators] = useState(false);
+  const [showOperatorPicker, setShowOperatorPicker] = useState(false);
+  const [resolvedAccountName, setResolvedAccountName] = useState<string | null>(null);
+  const [resolvingAccount, setResolvingAccount] = useState(false);
+
+  // Kora bank-account corridors (Nigeria/NGN, Kenya/KES, South Africa/ZAR):
+  // the same "pick from an official list" pattern as mobile-money operators,
+  // fed by Kora's List Banks API, replacing manual bank-code entry.
+  const [koraBanks, setKoraBanks] = useState<Array<{ name: string; code: string; slug?: string }>>([]);
+  const [selectedKoraBankCode, setSelectedKoraBankCode] = useState<string>('');
+  const [loadingKoraBanks, setLoadingKoraBanks] = useState(false);
+  const [showBankPicker, setShowBankPicker] = useState(false);
+
   // Payment method (for send-without-balance flow)
   const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
   const [savedPaymentMethods, setSavedPaymentMethods] = useState<PaymentMethod[]>([]);
@@ -178,6 +198,135 @@ export default function SendScreen() {
     return () => { cancelled = true; };
   }, [toWalletId, currency, amount, auth.token, activeTab]);
 
+  // ── Kora corridor map (mirrors backend/payoutProviders.js KORA_*_CURRENCIES) ──
+  // Each Kora-supported currency maps to EXACTLY ONE Kora-confirmed country —
+  // sharing a currency (e.g. the XAF/XOF CFA-franc zones) does NOT imply the
+  // same payout support for every country using it. See payoutProviders.js for
+  // the full evidence (docs + live account probe).
+  const KORA_MOBILE_COUNTRY_BY_CURRENCY: Record<string, string> = {
+    KES: 'KE', GHS: 'GH', XOF: 'CI', XAF: 'CM', EGP: 'EG', TZS: 'TZ',
+  };
+  const KORA_BANK_COUNTRY_BY_CURRENCY: Record<string, string> = {
+    NGN: 'NG', KES: 'KE', ZAR: 'ZA',
+  };
+  // Kora only documents pre-submission beneficiary resolution for these
+  // corridors — everywhere else requires manual user confirmation.
+  const KORA_MOBILE_RESOLUTION_COUNTRIES = ['GH'];
+  const KORA_BANK_RESOLUTION_COUNTRIES = ['NG', 'KE'];
+
+  const koraMobileCountryForCurrency = KORA_MOBILE_COUNTRY_BY_CURRENCY[currency];
+  const koraBankCountryForCurrency   = KORA_BANK_COUNTRY_BY_CURRENCY[currency];
+
+  // Local withdrawal via mobile money for any Kora mobile-money corridor
+  // (Cameroon/XAF, Ghana/GHS, Ivory Coast/XOF, Egypt/EGP, Tanzania/TZS,
+  // Kenya/KES) — Kora's official List MMO + account-resolution APIs drive
+  // this the same way for every one of these currencies.
+  const isKoraMobileMoneyWithdrawal = activeTab === 'withdraw' && withdrawalMethod === 'mobile' && !!koraMobileCountryForCurrency;
+  const isKoraBankWithdrawal        = activeTab === 'withdraw' && withdrawalMethod === 'bank'   && !!koraBankCountryForCurrency;
+  // Bank withdrawals have no Kora corridor at all for mobile-money-only
+  // currencies (XAF, GHS, XOF, EGP, TZS) — disabled regardless of which
+  // method is currently selected, so the option itself is never tappable.
+  const koraBankUnavailableForCurrency = activeTab === 'withdraw' && !!koraMobileCountryForCurrency && !koraBankCountryForCurrency;
+  // Backwards-compatible alias used by existing styles/JSX below.
+  const xafLocalBankUnavailable = koraBankUnavailableForCurrency;
+
+  // Bank withdrawals are not available for mobile-money-only Kora currencies —
+  // auto-switch away rather than leave the user stuck on a method that will
+  // always be rejected.
+  useEffect(() => {
+    if (koraBankUnavailableForCurrency) setWithdrawalMethod('mobile');
+  }, [koraBankUnavailableForCurrency]);
+
+  // Fetch Kora's official mobile-money operator list for the resolved country
+  // once per entry into this mode — replaces free-text operator entry.
+  useEffect(() => {
+    if (!isKoraMobileMoneyWithdrawal || !auth.token || loadingOperators) return;
+    let cancelled = false;
+    setMmOperators([]);
+    setLoadingOperators(true);
+    (async () => {
+      try {
+        const resp = await fetchWithTokenRefresh(`${API_BASE}/payout/mobile-money-operators?country=${koraMobileCountryForCurrency}`, { method: 'GET' });
+        if (cancelled) return;
+        if (resp.ok) {
+          const data = await resp.json();
+          setMmOperators(Array.isArray(data.operators) ? data.operators : []);
+        }
+      } catch { /* best-effort — user sees an empty list and can retry by reopening the picker */ }
+      finally { if (!cancelled) setLoadingOperators(false); }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isKoraMobileMoneyWithdrawal, koraMobileCountryForCurrency, auth.token]);
+
+  // Fetch Kora's official bank list for the resolved country once per entry
+  // into this mode — replaces manual bank-code entry.
+  useEffect(() => {
+    if (!isKoraBankWithdrawal || !auth.token || loadingKoraBanks) return;
+    let cancelled = false;
+    setKoraBanks([]);
+    setLoadingKoraBanks(true);
+    (async () => {
+      try {
+        const resp = await fetchWithTokenRefresh(`${API_BASE}/payout/banks?country=${koraBankCountryForCurrency}`, { method: 'GET' });
+        if (cancelled) return;
+        if (resp.ok) {
+          const data = await resp.json();
+          setKoraBanks(Array.isArray(data.banks) ? data.banks : []);
+        }
+      } catch { /* best-effort — user sees an empty list and can retry by reopening the picker */ }
+      finally { if (!cancelled) setLoadingKoraBanks(false); }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isKoraBankWithdrawal, koraBankCountryForCurrency, auth.token]);
+
+  // Debounced Kora account-name resolution — only attempted for corridors Kora
+  // documents resolution support for (Ghana mobile-money; Nigeria/Kenya bank).
+  // Falls back silently to manual account-holder-name entry everywhere else —
+  // never fabricates a name.
+  useEffect(() => {
+    const mobileResolvable = isKoraMobileMoneyWithdrawal && KORA_MOBILE_RESOLUTION_COUNTRIES.includes(koraMobileCountryForCurrency || '') && !!mmOperatorSlug;
+    const bankResolvable   = isKoraBankWithdrawal && KORA_BANK_RESOLUTION_COUNTRIES.includes(koraBankCountryForCurrency || '') && !!selectedKoraBankCode;
+    if ((!mobileResolvable && !bankResolvable) || accountNumber.trim().length < 5 || !auth.token) {
+      setResolvedAccountName(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setResolvingAccount(true);
+      try {
+        const resp = await fetchWithTokenRefresh(`${API_BASE}/payout/resolve-account`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(mobileResolvable
+            ? { type: 'mobile', bankCode: mmOperatorSlug, accountNumber: accountNumber.trim(), currency, country: koraMobileCountryForCurrency }
+            : { type: 'bank', bankCode: selectedKoraBankCode, accountNumber: accountNumber.trim(), currency, country: koraBankCountryForCurrency }
+          ),
+        });
+        if (cancelled) return;
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.accountName) {
+            setResolvedAccountName(data.accountName);
+            setAccountName(data.accountName);
+          } else {
+            setResolvedAccountName(null);
+          }
+        } else {
+          setResolvedAccountName(null);
+        }
+      } catch {
+        if (!cancelled) setResolvedAccountName(null);
+      } finally {
+        if (!cancelled) setResolvingAccount(false);
+      }
+    }, 600);
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isKoraMobileMoneyWithdrawal, isKoraBankWithdrawal, mmOperatorSlug, selectedKoraBankCode, accountNumber, currency, auth.token]);
+
+
   async function refreshAndSetWallets(): Promise<Array<any>> {
     if (!auth.token) return wallets;
     try {
@@ -239,6 +388,12 @@ export default function SendScreen() {
         if (!bankName.trim()) return Alert.alert(t('common.error'), t('send.enterBankName'));
         if (!accountNumber.trim()) return Alert.alert(t('common.error'), t('send.enterAccountNumber'));
         if (!accountName.trim()) return Alert.alert(t('common.error'), t('send.enterAccountHolderName'));
+        if (isKoraMobileMoneyWithdrawal && !mmOperatorSlug) {
+          return Alert.alert(t('common.error'), 'Please select a mobile money operator from the list.');
+        }
+        if (isKoraBankWithdrawal && !selectedKoraBankCode) {
+          return Alert.alert(t('common.error'), 'Please select a bank from the list.');
+        }
       }
       // Bank withdrawal: warn about processing time before proceeding
       if (withdrawalMethod === 'bank') {
@@ -452,11 +607,26 @@ export default function SendScreen() {
           accountHolderName: accountName,
           ...((withdrawalMethod === 'debit' || withdrawalMethod === 'credit') && { cardExpiry: withdrawalCardExpiry }),
           ...((withdrawalMethod === 'debit' || withdrawalMethod === 'credit') && { cardLast4 }),
-          ...(withdrawalMethod === 'bank' && !isIntlWithdrawal && bankCode.trim()   && { bankCode:    bankCode.trim() }),
-          ...(withdrawalMethod === 'bank' && !isIntlWithdrawal && branchCode.trim() && { branchCode:  branchCode.trim() }),
-          ...(withdrawalMethod === 'bank' && isIntlWithdrawal  && iban.trim()       && { iban:        iban.trim().toUpperCase() }),
-          ...(withdrawalMethod === 'bank' && isIntlWithdrawal  && swiftBic.trim()   && { swiftBic:    swiftBic.trim().toUpperCase() }),
-          ...(withdrawalMethod === 'bank' && isIntlWithdrawal  && withdrawalCountry.trim() && { country: withdrawalCountry.trim() }),
+          ...(withdrawalMethod === 'bank' && !isIntlWithdrawal && !isKoraBankWithdrawal && bankCode.trim()   && { bankCode:    bankCode.trim() }),
+          ...(withdrawalMethod === 'bank' && !isIntlWithdrawal && !isKoraBankWithdrawal && branchCode.trim() && { branchCode:  branchCode.trim() }),
+          ...(withdrawalMethod === 'bank' && isIntlWithdrawal  && !isKoraBankWithdrawal && iban.trim()       && { iban:        iban.trim().toUpperCase() }),
+          ...(withdrawalMethod === 'bank' && isIntlWithdrawal  && !isKoraBankWithdrawal && swiftBic.trim()   && { swiftBic:    swiftBic.trim().toUpperCase() }),
+          ...(withdrawalMethod === 'bank' && isIntlWithdrawal  && !isKoraBankWithdrawal && withdrawalCountry.trim() && { country: withdrawalCountry.trim() }),
+          // Kora corridors — send the ISO-2 country explicitly ONLY when the
+          // currency unambiguously identifies a single Kora-confirmed country
+          // (NGN→NG, KES→KE, ZAR→ZA, GHS→GH, EGP→EG, TZS→TZ). XAF and XOF are
+          // deliberately EXCLUDED here: those currencies are shared by several
+          // countries (e.g. Equatorial Guinea/XAF, Senegal/XOF) that Kora does
+          // NOT support, so forcing a country here would risk silently
+          // mis-routing a non-Cameroon/non-Ivory-Coast user. For those two
+          // currencies the backend resolves the country from the user's own
+          // signup region instead (see resolveWithdrawalCountry in
+          // backend/payoutProviders.js) — falling back to safety rather than
+          // guessing.
+          ...((isKoraMobileMoneyWithdrawal || isKoraBankWithdrawal) && currency !== 'XAF' && currency !== 'XOF' &&
+              { country: koraMobileCountryForCurrency || koraBankCountryForCurrency }),
+          ...(isKoraMobileMoneyWithdrawal && mmOperatorSlug && { bankCode: mmOperatorSlug }),
+          ...(isKoraBankWithdrawal && selectedKoraBankCode && { bankCode: selectedKoraBankCode }),
         }),
       });
       
@@ -493,6 +663,10 @@ export default function SendScreen() {
       setIban('');
       setSwiftBic('');
       setWithdrawalCountry('');
+      setMmOperatorSlug('');
+      setSelectedKoraBankCode('');
+      setResolvedAccountName(null);
+      setResolvedAccountName(null);
       setShowConfirmation(false);
       (navigation as any).navigate('Receipt', {
         amount: amountMinor,
@@ -830,6 +1004,96 @@ export default function SendScreen() {
     </Modal>
   );
 
+  // Cameroon mobile-money operator picker — Kora's official List MMO API, used
+  // instead of free-text operator entry so the correct operator slug is always sent.
+  const operatorPickerModal = (
+    <Modal
+      visible={showOperatorPicker}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setShowOperatorPicker(false)}
+    >
+      <TouchableOpacity
+        style={styles.operatorModalOverlay}
+        activeOpacity={1}
+        onPress={() => setShowOperatorPicker(false)}
+      >
+        <TouchableOpacity activeOpacity={1} style={styles.operatorModalSheet} onPress={() => {}}>
+          <View style={styles.operatorModalHandle} />
+          <Text style={styles.operatorModalTitle}>Select Mobile Money Operator</Text>
+          <ScrollView>
+            {mmOperators.length === 0 ? (
+              <Text style={styles.operatorEmptyText}>
+                {loadingOperators ? 'Loading operators…' : 'No operators available right now. Please try again shortly.'}
+              </Text>
+            ) : (
+              mmOperators.map(op => (
+                <TouchableOpacity
+                  key={op.slug}
+                  style={styles.operatorRow}
+                  onPress={() => {
+                    setBankName(op.name);
+                    setMmOperatorSlug(op.slug);
+                    setResolvedAccountName(null);
+                    setShowOperatorPicker(false);
+                  }}
+                >
+                  <Ionicons name="phone-portrait-outline" size={20} color="#1565C0" />
+                  <Text style={styles.operatorRowText}>{op.name}</Text>
+                </TouchableOpacity>
+              ))
+            )}
+          </ScrollView>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
+  );
+
+  // Kora bank picker — official List Banks API for Nigeria/NGN, Kenya/KES,
+  // South Africa/ZAR — used instead of free-text bank name + manual bank code.
+  const bankPickerModal = (
+    <Modal
+      visible={showBankPicker}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setShowBankPicker(false)}
+    >
+      <TouchableOpacity
+        style={styles.operatorModalOverlay}
+        activeOpacity={1}
+        onPress={() => setShowBankPicker(false)}
+      >
+        <TouchableOpacity activeOpacity={1} style={styles.operatorModalSheet} onPress={() => {}}>
+          <View style={styles.operatorModalHandle} />
+          <Text style={styles.operatorModalTitle}>Select Your Bank</Text>
+          <ScrollView>
+            {koraBanks.length === 0 ? (
+              <Text style={styles.operatorEmptyText}>
+                {loadingKoraBanks ? 'Loading banks…' : 'No banks available right now. Please try again shortly.'}
+              </Text>
+            ) : (
+              koraBanks.map(b => (
+                <TouchableOpacity
+                  key={b.code}
+                  style={styles.operatorRow}
+                  onPress={() => {
+                    setBankName(b.name);
+                    setSelectedKoraBankCode(b.code);
+                    setResolvedAccountName(null);
+                    setShowBankPicker(false);
+                  }}
+                >
+                  <Ionicons name="business-outline" size={20} color="#1565C0" />
+                  <Text style={styles.operatorRowText}>{b.name}</Text>
+                </TouchableOpacity>
+              ))
+            )}
+          </ScrollView>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
+  );
+
   // Scam Tips Modal
   const scamTipsModal = (
     <Modal
@@ -1123,6 +1387,8 @@ export default function SendScreen() {
       <OfflineErrorBanner visible={!isOnline} onRetry={() => loadWallets()} />
       {scamTipsModal}
       {paymentMethodModal}
+      {operatorPickerModal}
+      {bankPickerModal}
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
           <Text style={styles.title}>{t('send.title')}</Text>
@@ -1178,7 +1444,7 @@ export default function SendScreen() {
                         styles.walletOptionText,
                         fromWalletId === w.id && styles.walletOptionTextSelected
                       ]}>
-                        {w.id.substring(0, 12)}...
+                        {formatWalletIdShort(w.id)}
                       </Text>
                       {(() => {
                         const bal = (w.balances || []).find((b: any) => b.currency === currency);
@@ -1265,12 +1531,15 @@ export default function SendScreen() {
                       <Text style={[styles.methodText, withdrawalMethod === 'credit' && styles.methodTextActive]}>{t('send.creditCard')}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.methodOption, withdrawalMethod === 'bank' && styles.methodOptionActive]}
-                      onPress={() => setWithdrawalMethod('bank')}
+                      style={[styles.methodOption, withdrawalMethod === 'bank' && styles.methodOptionActive, xafLocalBankUnavailable && styles.methodOptionDisabled]}
+                      onPress={() => { if (!xafLocalBankUnavailable) setWithdrawalMethod('bank'); }}
+                      disabled={xafLocalBankUnavailable}
                     >
-                      <Ionicons name="business" size={20} color={withdrawalMethod === 'bank' ? '#1565C0' : '#657786'} />
-                      <Text style={[styles.methodText, withdrawalMethod === 'bank' && styles.methodTextActive]}>{t('send.bank')}</Text>
-                      <Text style={styles.methodBadgeSlow}>{t('send.bankDays')}</Text>
+                      <Ionicons name="business" size={20} color={xafLocalBankUnavailable ? '#C7D0DB' : withdrawalMethod === 'bank' ? '#1565C0' : '#657786'} />
+                      <Text style={[styles.methodText, withdrawalMethod === 'bank' && styles.methodTextActive, xafLocalBankUnavailable && styles.methodTextDisabled]}>{t('send.bank')}</Text>
+                      <Text style={xafLocalBankUnavailable ? styles.methodBadgeDisabled : styles.methodBadgeSlow}>
+                        {xafLocalBankUnavailable ? 'Not available' : t('send.bankDays')}
+                      </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.methodOption, withdrawalMethod === 'mobile' && styles.methodOptionActive]}
@@ -1351,15 +1620,39 @@ export default function SendScreen() {
                   <>
                     <View style={styles.section}>
                       <Text style={styles.label}>{withdrawalMethod === 'bank' ? t('send.bankWithdrawal') : t('send.mobileOperator')}</Text>
-                      <TextInput
-                        value={bankName}
-                        onChangeText={setBankName}
-                        placeholder={withdrawalMethod === 'bank' ? t('send.enterBankName') : t('send.mobileOperatorPlaceholder')}
-                        placeholderTextColor="#AAB8C2"
-                        maxLength={100}
-                        editable={!loading}
-                        style={styles.input}
-                      />
+                      {isKoraMobileMoneyWithdrawal ? (
+                        <TouchableOpacity
+                          style={[styles.input, styles.pickerField]}
+                          onPress={() => setShowOperatorPicker(true)}
+                          disabled={loading}
+                        >
+                          <Text style={bankName ? styles.pickerFieldValue : styles.pickerFieldPlaceholder}>
+                            {loadingOperators ? 'Loading operators…' : (bankName || 'Select mobile money operator')}
+                          </Text>
+                          <Ionicons name="chevron-down" size={16} color="#657786" />
+                        </TouchableOpacity>
+                      ) : isKoraBankWithdrawal ? (
+                        <TouchableOpacity
+                          style={[styles.input, styles.pickerField]}
+                          onPress={() => setShowBankPicker(true)}
+                          disabled={loading}
+                        >
+                          <Text style={bankName ? styles.pickerFieldValue : styles.pickerFieldPlaceholder}>
+                            {loadingKoraBanks ? 'Loading banks…' : (bankName || 'Select your bank')}
+                          </Text>
+                          <Ionicons name="chevron-down" size={16} color="#657786" />
+                        </TouchableOpacity>
+                      ) : (
+                        <TextInput
+                          value={bankName}
+                          onChangeText={setBankName}
+                          placeholder={withdrawalMethod === 'bank' ? t('send.enterBankName') : t('send.mobileOperatorPlaceholder')}
+                          placeholderTextColor="#AAB8C2"
+                          maxLength={100}
+                          editable={!loading}
+                          style={styles.input}
+                        />
+                      )}
                     </View>
 
                     <View style={styles.section}>
@@ -1374,6 +1667,9 @@ export default function SendScreen() {
                         editable={!loading}
                         style={styles.input}
                       />
+                      {(isKoraMobileMoneyWithdrawal || isKoraBankWithdrawal) && resolvingAccount && (
+                        <Text style={styles.infoText}>Verifying account with Kora…</Text>
+                      )}
                     </View>
 
                     <View style={styles.section}>
@@ -1384,11 +1680,17 @@ export default function SendScreen() {
                         placeholder={t('send.fullNameAsOnAccount')}
                         placeholderTextColor="#AAB8C2"
                         maxLength={100}
-                        editable={!loading}
-                        style={styles.input}
+                        editable={!loading && !((isKoraMobileMoneyWithdrawal || isKoraBankWithdrawal) && !!resolvedAccountName)}
+                        style={[styles.input, (isKoraMobileMoneyWithdrawal || isKoraBankWithdrawal) && !!resolvedAccountName && styles.inputConfirmed]}
                       />
+                      {(isKoraMobileMoneyWithdrawal || isKoraBankWithdrawal) && !!resolvedAccountName && (
+                        <Text style={styles.infoTextConfirmed}>✓ Verified with Kora — confirm this is the correct recipient</Text>
+                      )}
+                      {(isKoraMobileMoneyWithdrawal || isKoraBankWithdrawal) && !resolvedAccountName && !resolvingAccount && accountNumber.trim().length >= 5 && (mmOperatorSlug || selectedKoraBankCode) && (
+                        <Text style={styles.infoText}>Automatic verification is not available for this bank/operator — please enter the account holder name manually and confirm it is correct.</Text>
+                      )}
                     </View>
-                    {withdrawalMethod === 'bank' && !isIntlWithdrawal && (
+                    {withdrawalMethod === 'bank' && !isIntlWithdrawal && !isKoraBankWithdrawal && (
                       <>
                         <View style={styles.section}>
                           <Text style={styles.label}>{t('send.bankCode')} <Text style={{ color: '#9BAEC8', fontWeight: 'normal' }}>{t('send.optional')}</Text></Text>
@@ -1419,7 +1721,10 @@ export default function SendScreen() {
                         <Text style={styles.infoText}>{t('send.bankTransferArrival')}</Text>
                       </>
                     )}
-                    {withdrawalMethod === 'bank' && isIntlWithdrawal && (
+                    {isKoraBankWithdrawal && (
+                      <Text style={styles.infoText}>The bank code for your selected bank is applied automatically — no manual entry needed.</Text>
+                    )}
+                    {withdrawalMethod === 'bank' && isIntlWithdrawal && !isKoraBankWithdrawal && (
                       <>
                         <View style={styles.section}>
                           <Text style={styles.label}>IBAN <Text style={{ color: '#9BAEC8', fontWeight: 'normal' }}>{t('send.optional')}</Text></Text>
@@ -1750,6 +2055,22 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     overflow: 'hidden',
   },
+  methodOptionDisabled: {
+    opacity: 0.45,
+  },
+  methodTextDisabled: {
+    color: '#C7D0DB',
+  },
+  methodBadgeDisabled: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#8A97A8',
+    backgroundColor: '#EEF1F5',
+    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    overflow: 'hidden',
+  },
   balanceSummaryBanner: {
     backgroundColor: '#EEF4FF',
     borderRadius: 12,
@@ -2020,6 +2341,79 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#1E40AF',
     lineHeight: 18,
+  },
+  infoTextConfirmed: {
+    fontSize: 13,
+    color: '#2E7D32',
+    lineHeight: 18,
+    marginTop: 4,
+    fontWeight: '600',
+  },
+  pickerField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  pickerFieldValue: {
+    fontSize: 15,
+    color: '#14171A',
+  },
+  pickerFieldPlaceholder: {
+    fontSize: 15,
+    color: '#AAB8C2',
+  },
+  inputConfirmed: {
+    backgroundColor: '#F1F8F2',
+    borderWidth: 1.5,
+    borderColor: '#2E7D32',
+  },
+  operatorModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  operatorModalSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '70%',
+    paddingTop: 12,
+    paddingBottom: 24,
+  },
+  operatorModalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#E1E8ED',
+    alignSelf: 'center',
+    marginBottom: 12,
+  },
+  operatorModalTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#14171A',
+    paddingHorizontal: 20,
+    marginBottom: 8,
+  },
+  operatorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F3F7',
+  },
+  operatorRowText: {
+    fontSize: 15,
+    color: '#14171A',
+    marginLeft: 12,
+  },
+  operatorEmptyText: {
+    fontSize: 14,
+    color: '#657786',
+    textAlign: 'center',
+    paddingVertical: 24,
+    paddingHorizontal: 20,
   },
   sendButton: {
     backgroundColor: '#1565C0',

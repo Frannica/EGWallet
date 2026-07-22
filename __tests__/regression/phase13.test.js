@@ -47,10 +47,16 @@ module.exports = function phase13(check) {
   // C) Method order: debit first, bank has 3-5 days badge
   // ════════════════════════════════════════════════════════════════════════════
 
-  const debitIdx  = SEND.indexOf("setWithdrawalMethod('debit')");
-  const creditIdx = SEND.indexOf("setWithdrawalMethod('credit')");
-  const bankIdx   = SEND.indexOf("setWithdrawalMethod('bank')");
-  const mobileIdx = SEND.indexOf("setWithdrawalMethod('mobile')");
+  // Scope the ordering check to the actual method-selector JSX (onPress
+  // handlers), not just any occurrence of setWithdrawalMethod(...) in the
+  // file — e.g. an auto-switch-away-from-bank useEffect (for Kora corridors
+  // where bank isn't available) legitimately calls
+  // setWithdrawalMethod('mobile') earlier in the file, which is unrelated
+  // to the visual order of the selector buttons.
+  const debitIdx  = SEND.indexOf("onPress={() => setWithdrawalMethod('debit')}");
+  const creditIdx = SEND.indexOf("onPress={() => setWithdrawalMethod('credit')}");
+  const bankIdx   = SEND.indexOf("setWithdrawalMethod('bank')", creditIdx === -1 ? 0 : creditIdx);
+  const mobileIdx = SEND.indexOf("setWithdrawalMethod('mobile')", bankIdx === -1 ? 0 : bankIdx);
 
   // Find the first occurrence of each (in the method selector section)
   check(
