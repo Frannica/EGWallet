@@ -15,52 +15,55 @@ export const SEND_FEE_RATE       = 0;       // peer-to-peer sends are FREE
 
 // ── Display labels ───────────────────────────────────────────────────────────
 export const TRANSFER_FEE_RATE  = SEND_FEE_RATE;         // kept for import compat
-export const TRANSFER_FEE_LABEL = 'Transfer Fee';
-export const TRANSFER_FEE_PCT   = 'Free';
+export const TRANSFER_FEE_LABEL_KEY = 'fees.sendReceiveType';
+export const TRANSFER_FEE_PCT_KEY   = 'fees.free';
 
 /**
  * Full fee schedule — used in About screen, KYC disclosure, AI chat, etc.
+ * `type`/`fee`/`note` are i18n keys (see src/i18n/translations.ts, 'fees.*'),
+ * translated at render time via t() so the schedule displays in the user's
+ * selected language.
  */
 export const FEE_SCHEDULE = [
   {
-    type: 'Add Money (first 6 top-ups)',
-    fee: 'Free',
-    note: 'No charge on your first 6 deposits',
+    type: 'fees.addMoneyFreeType',
+    fee: 'fees.free',
+    note: 'fees.addMoneyFreeNote',
   },
   {
-    type: 'Add Money (after 6 top-ups)',
-    fee: '0.5%',
-    note: 'Small fee to sustain the service',
+    type: 'fees.addMoneyPaidType',
+    fee: 'fees.addMoneyPaidFee',
+    note: 'fees.addMoneyPaidNote',
   },
   {
-    type: 'Send / Receive',
-    fee: 'Free',
-    note: 'Wallet-to-wallet transfers are always free',
+    type: 'fees.sendReceiveType',
+    fee: 'fees.free',
+    note: 'fees.sendReceiveNote',
   },
   {
-    type: 'FX Conversion',
-    fee: '1.15%',
-    note: 'Applied when sending across currencies',
+    type: 'fees.fxConversionType',
+    fee: 'fees.fxConversionFee',
+    note: 'fees.fxConversionNote',
   },
   {
-    type: 'Local Withdrawal',
-    fee: '1.28%',
-    note: 'Withdraw to local bank or mobile money',
+    type: 'fees.localWithdrawalType',
+    fee: 'fees.localWithdrawalFee',
+    note: 'fees.localWithdrawalNote',
   },
   {
-    type: 'International Withdrawal',
-    fee: '1.75%',
-    note: 'Withdraw to overseas bank account',
+    type: 'fees.intlWithdrawalType',
+    fee: 'fees.intlWithdrawalFee',
+    note: 'fees.intlWithdrawalNote',
   },
   {
-    type: 'Virtual / Prepaid Card',
-    fee: 'Free',
-    note: 'Issuance and usage are free',
+    type: 'fees.virtualCardType',
+    fee: 'fees.free',
+    note: 'fees.virtualCardNote',
   },
   {
-    type: 'Monthly Subscription',
-    fee: 'Free',
-    note: 'No recurring or hidden charges',
+    type: 'fees.monthlySubType',
+    fee: 'fees.free',
+    note: 'fees.monthlySubNote',
   },
 ] as const;
 

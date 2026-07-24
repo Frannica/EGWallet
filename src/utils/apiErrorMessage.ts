@@ -4,6 +4,8 @@ export type ApiErrorLike = {
   errorCode?: string;
   limitType?: string;
   status?: number;
+  /** Set by protectedClient when the request never reached the server (device offline). */
+  isOffline?: boolean;
 };
 
 const ERROR_CODE_TO_I18N: Record<string, string> = {
@@ -18,6 +20,17 @@ const ERROR_CODE_TO_I18N: Record<string, string> = {
   error_request_not_found: 'apiError.requestNotFound',
   error_deposit_minimum: 'apiError.depositMinimum',
   error_internal: 'apiError.internalError',
+  // Withdrawal / payout-provider capability gating (see backend/index.js
+  // POST /withdrawals and backend/payoutProviders.js payoutRouter()).
+  // These MUST map to specific, honest messages — never the generic
+  // apiError.requestFailed fallback — because they represent a country or
+  // currency/method combination that genuinely isn't supported yet, not a
+  // transient failure.
+  COUNTRY_NOT_SUPPORTED: 'send.countryNotSupported',
+  PROVIDER_NOT_READY: 'send.backendUnavailable',
+  KORA_BANK_UNSUPPORTED: 'send.bankNotSupportedForCurrency',
+  KORA_MOBILE_MONEY_UNSUPPORTED: 'send.mobileMoneyNotSupportedForCurrency',
+  VIRTUAL_CARDS_UNAVAILABLE: 'card.notAvailable',
 };
 
 /** Normalize backend error text for legacy responses without errorCode. */
@@ -57,6 +70,10 @@ function isTransportError(message: string): boolean {
 /** Map backend/API errors to localized user-facing messages. */
 export function getApiErrorMessage(e: ApiErrorLike, t: (key: string) => string): string {
   const msg = e?.message || '';
+
+  if (e?.isOffline) {
+    return t('common.networkError');
+  }
 
   if (e?.errorCode && ERROR_CODE_TO_I18N[e.errorCode]) {
     return t(ERROR_CODE_TO_I18N[e.errorCode]);

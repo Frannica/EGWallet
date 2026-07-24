@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
 import { useLanguage } from '../i18n/LanguageContext';
 import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
+import { getApiErrorMessage } from '../utils/apiErrorMessage';
 
 type Device = {
   id: string;
@@ -15,38 +16,24 @@ type Device = {
   trusted: boolean;
 };
 
-const DEMO_DEVICES: Device[] = [
-  {
-    id: 'demo-device-1',
-    name: 'My Phone',
-    type: 'Mobile Phone',
-    firstSeen: Date.now() - 30 * 86400000,
-    lastSeen: Date.now() - 3600000,
-    trusted: true,
-  },
-  {
-    id: 'demo-device-2',
-    name: 'Work Laptop',
-    type: 'Desktop',
-    firstSeen: Date.now() - 7 * 86400000,
-    lastSeen: Date.now() - 2 * 86400000,
-    trusted: false,
-  },
-];
-
 export default function TrustedDevicesScreen() {
   const auth = useAuth();
   const { t } = useLanguage();
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Distinguishes "genuinely zero trusted devices" (real empty state) from
+  // "we couldn't load the real list" — this security screen must never show
+  // fabricated device data or claim success for an action the backend never
+  // performed.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     loadDevices();
   }, []);
 
   async function loadDevices() {
-    if (!auth.token) { setDevices(DEMO_DEVICES); setLoading(false); return; }
+    if (!auth.token) { setDevices([]); setLoading(false); return; }
     try {
       const res = await fetchWithTokenRefresh(`${API_BASE}/devices`, {
         headers: {
@@ -56,17 +43,15 @@ export default function TrustedDevicesScreen() {
 
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
-          setDevices(data);
-        } else {
-          setDevices(DEMO_DEVICES);
-        }
+        setDevices(Array.isArray(data) ? data : []);
+        setLoadError(null);
       } else {
-        setDevices(DEMO_DEVICES);
+        setDevices([]);
+        setLoadError(getApiErrorMessage({ status: res.status, message: 'Request failed' }, t));
       }
-    } catch (error) {
-      // Demo fallback — show demo devices so Trust/Remove buttons are exercisable
-      setDevices(DEMO_DEVICES);
+    } catch (error: any) {
+      setDevices([]);
+      setLoadError(getApiErrorMessage({ message: error?.message, isOffline: true }, t));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -100,12 +85,13 @@ export default function TrustedDevicesScreen() {
                 setDevices(prev => prev.filter(d => d.id !== device.id));
                 Alert.alert(t('trusted.removedTitle'), t('trusted.removedMsg'));
               } else {
-                throw new Error('api_error');
+                Alert.alert(t('common.error'), getApiErrorMessage({ status: res.status, message: 'Request failed' }, t));
               }
-            } catch (error) {
-              // Demo mode: succeed locally
-              setDevices(prev => prev.filter(d => d.id !== device.id));
-              Alert.alert(t('trusted.removedTitle'), t('trusted.removedMsg'));
+            } catch (error: any) {
+              // This is a security-sensitive action (removing a device the
+              // user may believe is compromising their account) — never
+              // report success locally when the backend call itself failed.
+              Alert.alert(t('common.error'), getApiErrorMessage({ message: error?.message, isOffline: true }, t));
             }
           },
         },
@@ -128,14 +114,12 @@ export default function TrustedDevicesScreen() {
         ));
         Alert.alert(t('trusted.trustedTitle'), t('trusted.trustedMsg'));
       } else {
-        throw new Error('api_error');
+        Alert.alert(t('common.error'), getApiErrorMessage({ status: res.status, message: 'Request failed' }, t));
       }
-    } catch (error) {
-      // Demo mode: succeed locally
-      setDevices(prev => prev.map(d =>
-        d.id === device.id ? { ...d, trusted: true } : d
-      ));
-      Alert.alert(t('trusted.trustedTitle'), t('trusted.trustedMsg'));
+    } catch (error: any) {
+      // Same rule as remove above: never claim a trust action succeeded
+      // when the backend call failed.
+      Alert.alert(t('common.error'), getApiErrorMessage({ message: error?.message, isOffline: true }, t));
     }
   }
 
@@ -227,9 +211,17 @@ export default function TrustedDevicesScreen() {
 
       {devices.length === 0 ? (
         <View style={styles.emptyState}>
-          <Ionicons name="phone-portrait-outline" size={64} color="#AAB8C2" />
-          <Text style={styles.emptyText}>{t('trusted.noDevices')}</Text>
-          <Text style={styles.emptySubtext}>{t('trusted.noDevicesSubtitle')}</Text>
+          <Ionicons
+            name={loadError ? 'cloud-offline-outline' : 'phone-portrait-outline'}
+            size={64}
+            color="#AAB8C2"
+          />
+          <Text style={styles.emptyText}>
+            {loadError ? t('common.error') : t('trusted.noDevices')}
+          </Text>
+          <Text style={styles.emptySubtext}>
+            {loadError || t('trusted.noDevicesSubtitle')}
+          </Text>
         </View>
       ) : (
         <FlatList

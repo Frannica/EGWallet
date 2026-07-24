@@ -1,8 +1,10 @@
 'use strict';
 
 const { pool } = require('./pool');
-const { alignWalletBalanceBeforeMutation } = require('./walletBalanceAlign');
+const { v4: uuidv4 } = require('uuid');
+const { lockWalletBalanceRow } = require('./walletBalanceAlign');
 const { msToDate, upsertRuntimeWalletMetadata } = require('./runtimeWalletSync');
+const { reservePayrollPayment, linkPayrollPaymentTransaction } = require('./payrollPostgres');
 
 function mapTxRow(tx) {
   return {
@@ -213,6 +215,11 @@ async function commitPaymentRequestPayPostgres({
   employerId,
   stateDb,
   skipRuntimeStateSync = false,
+  /** Present only for request.type === 'payroll_request'. Enforces the same
+   *  durable UNIQUE(employer_id, worker_id, pay_period) guard used by
+   *  /employer/bulk-payment, so a worker cannot be paid twice for the same
+   *  pay period no matter which of the two endpoints is used. */
+  payrollGuard,
 }) {
   const client = await pool.connect();
   try {
@@ -277,25 +284,45 @@ async function commitPaymentRequestPayPostgres({
       [fromWalletId, toWalletId]
     );
 
-    const payerAligned = await alignWalletBalanceBeforeMutation(
-      client,
-      fromWalletId,
-      debitCurrency,
-      stateDb,
-      { pendingDebit: debitAmount }
-    );
-    if (payerAligned.amount < Number(debitAmount)) {
+    // Durable payroll dedupe — shared with /employer/bulk-payment. Reserving
+    // the (employer, worker, pay_period) slot BEFORE any balance mutation
+    // guarantees a worker cannot be paid twice for the same period via any
+    // combination of the two payroll payment endpoints, under any level of
+    // concurrency or process restart.
+    let payrollPaymentId = null;
+    if (payrollGuard) {
+      // employer_id is stored as plain TEXT (app-level `EMP-<uuid>` strings,
+      // not Postgres UUIDs) — see payrollPostgres.js for details.
+      payrollPaymentId = uuidv4();
+      const reserved = await reservePayrollPayment(client, {
+        paymentId: payrollPaymentId,
+        employerId: payrollGuard.employerId,
+        workerId: payrollGuard.workerId,
+        payPeriod: payrollGuard.payPeriod,
+        currency: requestCurrency,
+        amount: requestAmount,
+        source: 'request',
+        paymentRequestId: requestId,
+      });
+      if (!reserved) {
+        await client.query('ROLLBACK');
+        return { payrollAlreadyPaid: true };
+      }
+    }
+
+    // Postgres is the sole source of truth for the pre-operation balance
+    // (JSON only ever seeds a brand-new, never-before-seen row).
+    const payerBefore = await lockWalletBalanceRow(client, fromWalletId, debitCurrency, {
+      stateDb, pendingDebit: debitAmount,
+    });
+    if (payerBefore < Number(debitAmount)) {
       await client.query('ROLLBACK');
       return { insufficientFunds: true };
     }
 
-    await alignWalletBalanceBeforeMutation(
-      client,
-      toWalletId,
-      requestCurrency,
-      stateDb,
-      { pendingCredit: requestAmount }
-    );
+    const payeeBefore = await lockWalletBalanceRow(client, toWalletId, requestCurrency, {
+      stateDb, pendingCredit: requestAmount,
+    });
 
     await client.query(
       'UPDATE wallet_balances SET amount = amount - $1 WHERE wallet_id = $2 AND currency = $3',
@@ -352,6 +379,10 @@ async function commitPaymentRequestPayPostgres({
       [userId, tx.id, requestId]
     );
 
+    if (payrollPaymentId) {
+      await linkPayrollPaymentTransaction(client, payrollPaymentId, tx.id);
+    }
+
     if (payerLimitTracking) {
       await client.query(
         'UPDATE users SET limit_tracking = $1::jsonb WHERE id = $2',
@@ -374,7 +405,11 @@ async function commitPaymentRequestPayPostgres({
     }
 
     await client.query('COMMIT');
-    return { replay: false };
+    return {
+      replay: false,
+      payerWalletBalanceAfter: payerBefore - Number(debitAmount),
+      payeeWalletBalanceAfter: payeeBefore + Number(requestAmount),
+    };
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     if (error.code === '23505' && clientKey) {

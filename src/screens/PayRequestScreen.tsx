@@ -180,7 +180,7 @@ export default function PayRequestScreen({ route, navigation }: any) {
         code: e?.code,
         limitType: e?.limitType,
       }, t);
-      Alert.alert(t('payRequest.paymentFailed'), friendly || t('payRequest.couldNotProcess'));
+      Alert.alert(t('payRequest.paymentFailed'), friendly);
     } finally {
       if (auth.token) {
         try { await refreshWalletFromBackend(auth.token); } catch { /* best-effort */ }

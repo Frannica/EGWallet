@@ -37,8 +37,8 @@ async function cleanup(client, ids) {
   await client.query('DELETE FROM idempotency_records WHERE user_id = ANY($1::uuid[])', [ids.users]);
   await client.query("DELETE FROM ledger WHERE note LIKE 'exchange:%'");
   await client.query('DELETE FROM transactions WHERE id = ANY($1::uuid[])', [ids.transactions]);
-  await client.query('DELETE FROM wallet_balances WHERE wallet_id = ANY($1::uuid[])', [ids.wallets]);
-  await client.query('DELETE FROM wallets WHERE id = ANY($1::uuid[])', [ids.wallets]);
+  await client.query('DELETE FROM wallet_balances WHERE wallet_id = ANY($1::text[])', [ids.wallets]);
+  await client.query('DELETE FROM wallets WHERE id = ANY($1::text[])', [ids.wallets]);
   await client.query('DELETE FROM users WHERE id = ANY($1::uuid[])', [ids.users]);
 }
 

@@ -8,12 +8,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "egwallet-backend": "file:..",
+    "egwalletsimple": "file:../..",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
+    "playwright": "^1.61.1",
     "vite": "^5.0.0"
   }
 }

@@ -136,8 +136,8 @@ async function seedUserWallet(client, { userId, walletId, balances }) {
 async function cleanup(client, ids) {
   await client.query("DELETE FROM ledger WHERE note LIKE 'deposit:%'");
   await client.query('DELETE FROM transactions WHERE stripe_intent_id = ANY($1::text[])', [ids.intents]);
-  await client.query('DELETE FROM wallet_balances WHERE wallet_id = ANY($1::uuid[])', [ids.wallets]);
-  await client.query('DELETE FROM wallets WHERE id = ANY($1::uuid[])', [ids.wallets]);
+  await client.query('DELETE FROM wallet_balances WHERE wallet_id = ANY($1::text[])', [ids.wallets]);
+  await client.query('DELETE FROM wallets WHERE id = ANY($1::text[])', [ids.wallets]);
   await client.query('DELETE FROM users WHERE id = ANY($1::uuid[])', [ids.users]);
 }
 

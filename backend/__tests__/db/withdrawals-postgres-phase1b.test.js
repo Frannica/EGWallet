@@ -89,9 +89,9 @@ async function cleanup(client, ids) {
   await client.query('DELETE FROM idempotency_records WHERE user_id = ANY($1::uuid[])', [ids.users]);
   await client.query('DELETE FROM ledger WHERE withdrawal_id = ANY($1::uuid[])', [ids.withdrawals]);
   await client.query('DELETE FROM withdrawals WHERE id = ANY($1::uuid[])', [ids.withdrawals]);
-  await client.query('DELETE FROM wallet_holds WHERE wallet_id = ANY($1::uuid[])', [ids.wallets]);
-  await client.query('DELETE FROM wallet_balances WHERE wallet_id = ANY($1::uuid[])', [ids.wallets]);
-  await client.query('DELETE FROM wallets WHERE id = ANY($1::uuid[])', [ids.wallets]);
+  await client.query('DELETE FROM wallet_holds WHERE wallet_id = ANY($1::text[])', [ids.wallets]);
+  await client.query('DELETE FROM wallet_balances WHERE wallet_id = ANY($1::text[])', [ids.wallets]);
+  await client.query('DELETE FROM wallets WHERE id = ANY($1::text[])', [ids.wallets]);
   await client.query('DELETE FROM users WHERE id = ANY($1::uuid[])', [ids.users]);
   try {
     await client.query('DELETE FROM runtime_db_state WHERE id = 1');

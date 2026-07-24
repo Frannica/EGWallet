@@ -9,7 +9,7 @@
     "web": "expo start --web",
     "type-check": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "test": "node __tests__/run-all.js",
+    "test": "node __tests__/run-all.js && node --test __tests__/api-error-message.node.test.js",
     "check-i18n": "node check-i18n.mjs",
     "prebuild": "node check-i18n.mjs",
     "sync-version": "node scripts/sync-android-version.js",

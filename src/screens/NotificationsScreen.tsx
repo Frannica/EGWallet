@@ -163,10 +163,10 @@ export default function NotificationsScreen() {
         setNotifs(data.notifications || []);
       } else {
         const err = await res.json().catch(() => ({}));
-        setFetchError(err.error || `Server error (${res.status})`);
+        setFetchError(err.error || t('notif.serverError').replace('{status}', String(res.status)));
       }
     } catch {
-      setFetchError('Unable to load notifications. Check your connection.');
+      setFetchError(t('notif.loadError'));
     } finally {
       setLoading(false);
     }

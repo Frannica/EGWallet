@@ -25,25 +25,12 @@ type Params = {
   status?: TxStatus;
 };
 
-const TYPE_META: Record<TxType, { headline: string; subtitle: string; icon: string; iconColors: [string, string] }> = {
-  send:       { headline: 'Payment Sent',          subtitle: 'Your transfer was successful ✅', icon: 'arrow-up-circle',    iconColors: ['#1565C0', '#0A3D7C'] },
-  receive:    { headline: 'Money Received',         subtitle: 'Funds added to your wallet ✅',  icon: 'arrow-down-circle',  iconColors: ['#15803D', '#166534'] },
-  deposit:    { headline: 'Deposit Successful',     subtitle: 'Funds added to your wallet ✅',  icon: 'add-circle',         iconColors: ['#A16207', '#854D0E'] },
-  withdrawal: { headline: 'Withdrawal Submitted',   subtitle: 'Being processed by your bank ⏳', icon: 'log-out',            iconColors: ['#F57C00', '#E65100'] },
-};
-
-const STATUS_COLORS: Record<TxStatus, { bg: string; text: string; icon: string }> = {
-  completed: { bg: '#DCFCE7', text: '#15803D', icon: 'checkmark-circle' },
-  pending:   { bg: '#FEF9C3', text: '#A16207', icon: 'time' },
-  failed:    { bg: '#FEE2E2', text: '#DC2626', icon: 'close-circle' },
-};
-
 export default function ReceiptScreen() {
   const navigation = useNavigation();
   const route = useRoute();
   const { t } = useLanguage();
   const p = (route.params as Params) ?? {
-    amount: 0, currency: 'XAF', recipientName: 'Recipient', timestamp: Date.now(),
+    amount: 0, currency: 'XAF', recipientName: t('common.recipient'), timestamp: Date.now(),
   };
 
   const txType = p.type ?? 'send';
@@ -72,22 +59,25 @@ export default function ReceiptScreen() {
   const shortRef = p.transactionId?.substring(0, 16) ?? 'TX' + Date.now().toString().slice(-8);
 
   // Build the share text
+  const shareAmountLine =
+    txType === 'deposit' ? t('receipt.shareDeposited').replace('{amount}', formatCurrency(p.amount, p.currency)) :
+    txType === 'withdrawal' ? t('receipt.shareWithdrawn').replace('{amount}', formatCurrency(p.amount, p.currency)) :
+    txType === 'receive' ? t('receipt.shareReceived').replace('{amount}', formatCurrency(p.amount, p.currency)) :
+    t('receipt.shareSent').replace('{amount}', formatCurrency(p.amount, p.currency));
+  const shareStatusLabel = STATUS_COLORS_T[txStatus].label;
   const shareLines = [
-    'EGWallet Receipt',
+    t('receipt.shareHeader'),
     '─────────────────',
-    txType === 'deposit' ? `Deposited: ${formatCurrency(p.amount, p.currency)}` :
-    txType === 'withdrawal' ? `Withdrawn: ${formatCurrency(p.amount, p.currency)}` :
-    txType === 'receive' ? `Received: ${formatCurrency(p.amount, p.currency)}` :
-    `Sent: ${formatCurrency(p.amount, p.currency)}`,
-    ...(p.recipientName ? [`${txType === 'receive' ? 'From' : 'To'}: ${p.recipientName}`] : []),
-    ...(isCrossCurrency && p.receiverCurrency ? [`Received currency: ${p.receiverCurrency}`] : []),
-    ...(hasFee && p.fee && p.currency ? [`Fee: ${formatCurrency(p.fee, p.currency)}${p.feeLabel ? ` (${p.feeLabel})` : ''}`] : []),
-    ...(p.fxRate ? [`FX Rate: ${p.fxRate}`] : []),
-    `Date: ${dateStr}`,
-    `Status: ${txStatus.charAt(0).toUpperCase() + txStatus.slice(1)}`,
-    `Ref: ${shortRef}`,
+    shareAmountLine,
+    ...(p.recipientName ? [(txType === 'receive' ? t('receipt.shareFrom') : t('receipt.shareTo')).replace('{name}', p.recipientName)] : []),
+    ...(isCrossCurrency && p.receiverCurrency ? [t('receipt.shareReceivedCurrency').replace('{currency}', p.receiverCurrency)] : []),
+    ...(hasFee && p.fee && p.currency ? [t('receipt.shareFee').replace('{amount}', `${formatCurrency(p.fee, p.currency)}${p.feeLabel ? ` (${p.feeLabel})` : ''}`)] : []),
+    ...(p.fxRate ? [t('receipt.shareFxRate').replace('{rate}', p.fxRate)] : []),
+    t('receipt.shareDate').replace('{date}', dateStr),
+    t('receipt.shareStatus').replace('{status}', shareStatusLabel),
+    t('receipt.shareRef').replace('{ref}', shortRef),
     '',
-    'Sent via EGWallet',
+    t('receipt.shareFooter'),
   ];
 
   const handleShare = async () => {
@@ -101,7 +91,7 @@ export default function ReceiptScreen() {
   if (txType === 'receive') {
     rows.push({ label: t('common.from'), value: p.recipientName });
   } else if (txType === 'deposit') {
-    rows.push({ label: t('receipt.addedTo'), value: p.recipientName || 'Your Wallet' });
+    rows.push({ label: t('receipt.addedTo'), value: p.recipientName || t('receipt.yourWallet') });
   } else {
     rows.push({ label: t('common.to'), value: p.recipientName });
     if (p.recipientId && p.recipientId !== p.recipientName) {

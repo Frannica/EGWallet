@@ -403,6 +403,27 @@ test('index.js: POST /withdrawals returns a distinct 400 COUNTRY_NOT_SUPPORTED f
   assert.match(block, /status\(400\)/);
 });
 
+test('index.js: POST /withdrawals returns a clear 400 COUNTRY_NOT_SUPPORTED (not a generic 503) for US/UK/Europe when Stripe Connect is not configured', () => {
+  // Requirement: never claim US/UK/Europe withdrawals "work" and never return
+  // a misleading generic provider error implying a fixable/transient outage.
+  // payoutRouter() defaults any country outside the 8 Kora corridors and the
+  // explicit KORA_UNSUPPORTED_COUNTRIES list to 'stripe' — but Stripe Connect
+  // payouts are not wired up for ANY corridor in this deployment
+  // (STRIPE_CONNECT_READY / STRIPE_CONNECT_ACCOUNT). That combination must
+  // surface as an honest "not supported yet" message, not "temporarily
+  // unavailable, contact support" (which implies a config bug, not a missing
+  // feature).
+  const withdrawalsHandlerStart = indexSource.indexOf("app.post('/withdrawals'");
+  assert.ok(withdrawalsHandlerStart > -1, 'POST /withdrawals handler not found');
+  const readyCheckIdx = indexSource.indexOf('isPayoutProviderReady(resolvedCountry', withdrawalsHandlerStart);
+  assert.ok(readyCheckIdx > -1, 'provider-ready guard not found');
+  const block = indexSource.slice(readyCheckIdx, readyCheckIdx + 1600);
+  assert.match(block, /unreadyProvider === 'stripe'/, 'must branch on the unready provider being the stripe fallback');
+  assert.match(block, /status\(400\)/, 'stripe-fallback unready countries must be a 400, not a 503');
+  assert.match(block, /COUNTRY_NOT_SUPPORTED/, 'must use the same distinct errorCode as the explicit unsupported-country guard');
+  assert.match(block, /not available yet/i, 'message must say the corridor is not supported yet, not that it is a temporary outage');
+});
+
 test('index.js: GET /payout/banks rejects countries with no Kora bank_account corridor', () => {
   assert.match(indexSource, /app\.get\('\/payout\/banks'[\s\S]{0,400}isKoraBankAccountCountry\(country\)/);
 });

@@ -24,7 +24,13 @@ export const DEMO_RATES: Rates = {
 
 export async function fetchRates(): Promise<Rates> {
   const res = await fetch(`${API_BASE}/rates`);
-  if (!res.ok) throw new Error('Failed to fetch rates');
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const err: any = new Error(errBody.error || errBody.message || 'Failed to fetch rates');
+    err.status = res.status;
+    err.errorCode = errBody.errorCode;
+    throw err;
+  }
   return res.json();
 }
 

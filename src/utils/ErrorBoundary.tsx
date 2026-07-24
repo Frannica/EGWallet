@@ -1,6 +1,26 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Localization from 'expo-localization';
+import { translations, deviceLocaleToLanguage } from '../i18n/translations';
+
+/**
+ * ErrorBoundary sits above LanguageProvider (it must catch crashes even if
+ * LanguageProvider itself fails), so it cannot use the useLanguage() hook.
+ * It resolves the device locale directly instead.
+ */
+function boundaryT(key: string): string {
+  let lang: keyof typeof translations = 'en';
+  try {
+    const locales = Localization.getLocales();
+    if (locales && locales.length > 0) {
+      lang = deviceLocaleToLanguage(locales[0].languageCode);
+    }
+  } catch {
+    lang = 'en';
+  }
+  return translations[lang]?.[key] ?? translations.en[key] ?? key;
+}
 
 type Props = {
   children: React.ReactNode;
@@ -27,8 +47,20 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    if (__DEV__) {
-      console.error('ErrorBoundary caught:', error, errorInfo);
+    // Always log so adb logcat ReactNativeJS captures production crashes.
+    console.error(
+      'ErrorBoundary caught:',
+      error?.message,
+      error?.stack,
+      errorInfo?.componentStack,
+    );
+    try {
+      const Sentry = require('@sentry/react-native');
+      Sentry.captureException(error, {
+        contexts: { react: { componentStack: errorInfo?.componentStack } },
+      });
+    } catch {
+      // Sentry optional if init failed
     }
   }
 
@@ -41,9 +73,9 @@ export class ErrorBoundary extends React.Component<Props, State> {
       return (
         <View style={styles.container}>
           <Ionicons name="refresh-circle-outline" size={72} color="#1565C0" />
-          <Text style={styles.title}>Something went wrong</Text>
+          <Text style={styles.title}>{boundaryT('errorBoundary.title')}</Text>
           <Text style={styles.subtitle}>
-            The app hit an unexpected issue. Tap below to continue — your wallet is safe.
+            {boundaryT('errorBoundary.subtitle')}
           </Text>
           {__DEV__ && this.state.error?.message ? (
             <View style={styles.devBox}>
@@ -52,7 +84,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
           ) : null}
           <TouchableOpacity style={styles.button} onPress={this.handleReset} activeOpacity={0.85}>
             <Ionicons name="refresh" size={18} color="#fff" />
-            <Text style={styles.buttonText}>Try Again</Text>
+            <Text style={styles.buttonText}>{boundaryT('errorBoundary.tryAgain')}</Text>
           </TouchableOpacity>
         </View>
       );

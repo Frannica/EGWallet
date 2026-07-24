@@ -149,9 +149,9 @@ export default function AboutScreen() {
                   idx === FEE_SCHEDULE.length - 1 && { borderBottomWidth: 0 },
                 ]}
               >
-                <Text style={styles.feeType}>{item.type}</Text>
-                <Text style={[styles.feeAmount, item.fee === 'Free' ? styles.feeFree : styles.feePaid]}>
-                  {item.fee}
+                <Text style={styles.feeType}>{t(item.type)}</Text>
+                <Text style={[styles.feeAmount, item.fee === 'fees.free' ? styles.feeFree : styles.feePaid]}>
+                  {t(item.fee)}
                 </Text>
               </View>
             ))}

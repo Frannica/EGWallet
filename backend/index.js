@@ -62,6 +62,7 @@ const adminSupportRouter = require('./adminSupport');
 const adminDisputesRouter = require('./adminDisputes');
 const adminNotificationsRouter = require('./adminNotifications');
 const adminFraudRouter = require('./adminFraud');
+const adminLedgerAuditRouter = require('./adminLedgerAudit');
 const adminStatsRouter = require('./adminStats');
 const adminDashboardRouter = require('./adminDashboard');
 const { router: adminSearchRouter } = require('./adminSearch');
@@ -102,6 +103,12 @@ const {
   isDatabaseConnected,
 } = require('./db/appStateStore');
 const { getDurableP2PIdempotency, commitP2PSendPostgres } = require('./db/p2pSendPostgres');
+const { commitQrPayPostgres } = require('./db/qrPayPostgres');
+const {
+  commitPayrollBatchPostgres,
+  getDurablePayrollBatchIdempotency,
+  saveDurablePayrollBatchIdempotency,
+} = require('./db/payrollPostgres');
 const { getDurablePaymentRequestIdempotency, commitPaymentRequestPayPostgres } = require('./db/paymentRequestPayPostgres');
 const { getDurableExchangeIdempotency, commitExchangePostgres } = require('./db/exchangePostgres');
 const { commitDepositConfirmPostgres } = require('./db/depositConfirmPostgres');
@@ -506,8 +513,25 @@ function normalizeWalletBalances(wallet) {
 // What this protects:
 //   ✓ Single-process async races (e.g. deposits/confirm awaiting Stripe)
 //   ✓ Single-process sync races (two rapid requests)
-//   ⚠ Multi-instance (two Railway pods) — detected and logged via _dbVersion;
-//     full prevention requires a distributed lock (Redis) when scaling to >1 pod.
+//
+// Multi-instance / multi-pod safety (e.g. Railway running >1 replica, or a
+// mid-transaction restart) is NOT provided by this in-process mutex — it is
+// provided one layer down, inside PostgreSQL itself. Every balance-mutating
+// commit function (commitP2PSendPostgres, commitExchangePostgres,
+// commitDepositConfirmPostgres, commitPaymentRequestPayPostgres,
+// commitCreateWithdrawalPostgres / commitWithdrawalTransitionPostgres,
+// commitQrPayPostgres, commitPayrollBatchPostgres) opens a real `BEGIN`
+// transaction and takes a `SELECT ... FOR UPDATE` row lock on the wallet_balances
+// / wallet_holds row (see db/walletBalanceAlign.js: lockWalletBalanceRow /
+// lockWalletHoldRow) before computing or applying any delta. That row lock is
+// enforced by Postgres itself, so it correctly serializes concurrent writers
+// regardless of which app instance/pod issued the query — two pods racing to
+// spend the same wallet balance will have one transaction block until the
+// other commits or rolls back, and the loser recomputes against the
+// now-current balance rather than a stale in-memory read. This in-process
+// mutex therefore only needs to (and does) prevent same-process interleaving
+// and reduce redundant lock contention; it is not the source of correctness
+// for cross-instance money safety.
 let _dbMutex = Promise.resolve();
 function withBalanceMutex(fn) {
   const result = _dbMutex.then(() => fn());
@@ -1128,6 +1152,7 @@ const translations = {
     error_request_not_found: "Request not found.",
     error_request_processed: "Request has already been processed.",
     error_card_not_found: "Card not found.",
+    error_virtual_cards_unavailable: "Virtual cards are not available yet. This feature is coming soon.",
     error_card_deleted: "This card has been deleted.",
     error_max_cards: "Maximum 5 cards allowed.",
     error_budget_not_found: "Budget not found.",
@@ -1270,6 +1295,7 @@ const translations = {
     error_request_not_found: "Solicitud no encontrada.",
     error_request_processed: "La solicitud ya fue procesada.",
     error_card_not_found: "Tarjeta no encontrada.",
+    error_virtual_cards_unavailable: "Las tarjetas virtuales aun no estan disponibles. Esta funcion llegara pronto.",
     error_card_deleted: "Esta tarjeta ha sido eliminada.",
     error_max_cards: "Se permiten un máximo de 5 tarjetas.",
     error_budget_not_found: "Presupuesto no encontrado.",
@@ -1412,6 +1438,7 @@ const translations = {
     error_request_not_found: "Demande introuvable.",
     error_request_processed: "La demande a déjà été traitée.",
     error_card_not_found: "Carte introuvable.",
+    error_virtual_cards_unavailable: "Les cartes virtuelles ne sont pas encore disponibles. Cette fonctionnalite arrive bientot.",
     error_card_deleted: "Cette carte a été supprimée.",
     error_max_cards: "Maximum 5 cartes autorisées.",
     error_budget_not_found: "Budget introuvable.",
@@ -1554,6 +1581,7 @@ const translations = {
     error_request_not_found: "Pedido não encontrado.",
     error_request_processed: "O pedido já foi processado.",
     error_card_not_found: "Cartão não encontrado.",
+    error_virtual_cards_unavailable: "Os cartoes virtuais ainda nao estao disponiveis. Este recurso esta chegando em breve.",
     error_card_deleted: "Este cartão foi eliminado.",
     error_max_cards: "Máximo de 5 cartões permitidos.",
     error_budget_not_found: "Orçamento não encontrado.",
@@ -1696,6 +1724,7 @@ const translations = {
     error_request_not_found: "请求不存在。",
     error_request_processed: "请求已被处理。",
     error_card_not_found: "卡片不存在。",
+    error_virtual_cards_unavailable: "虚拟卡功能尚未开放，敬请期待。",
     error_card_deleted: "该卡片已被删除。",
     error_max_cards: "最多允许5张卡片。",
     error_budget_not_found: "预算不存在。",
@@ -1838,6 +1867,7 @@ const translations = {
     error_request_not_found: "リクエストが見つかりません。",
     error_request_processed: "リクエストは既に処理済みです。",
     error_card_not_found: "カードが見つかりません。",
+    error_virtual_cards_unavailable: "バーチャルカードはまだご利用いただけません。近日公開予定です。",
     error_card_deleted: "このカードは削除されています。",
     error_max_cards: "最大5枚のカードまで使用できます。",
     error_budget_not_found: "予算が見つかりません。",
@@ -1980,6 +2010,7 @@ const translations = {
     error_request_not_found: "Запрос не найден.",
     error_request_processed: "Запрос уже был обработан.",
     error_card_not_found: "Карта не найдена.",
+    error_virtual_cards_unavailable: "Виртуальные карты пока недоступны. Эта функция скоро появится.",
     error_card_deleted: "Эта карта была удалена.",
     error_max_cards: "Допускается не более 5 карт.",
     error_budget_not_found: "Бюджет не найден.",
@@ -2122,6 +2153,7 @@ const translations = {
     error_request_not_found: "Zahlungsanforderung nicht gefunden.",
     error_request_processed: "Diese Anforderung wurde bereits verarbeitet.",
     error_card_not_found: "Karte nicht gefunden.",
+    error_virtual_cards_unavailable: "Virtuelle Karten sind noch nicht verfuegbar. Diese Funktion kommt bald.",
     error_card_deleted: "Diese Karte wurde gelöscht.",
     error_max_cards: "Sie können maximal 5 virtuelle Karten haben.",
     error_budget_not_found: "Budget nicht gefunden.",
@@ -2722,7 +2754,6 @@ app.use(generalLimiter);
 // ==================== HEALTH CHECK ENDPOINTS ====================
 
 app.get('/health', (req, res) => {
-  const db = loadAppState();
   const healthStatus = {
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -2735,17 +2766,14 @@ app.get('/health', (req, res) => {
     stripeWebhookConfigured: !!process.env.STRIPE_WEBHOOK_SECRET,
     stripeIssuingEnabled: isStripeIssuingEnabled(),
     database: isDatabaseConnected() ? 'connected' : 'missing',
-    users: db.users?.length || 0,
-    tickets: db.supportTickets?.length || 0,
     freshdeskConfigured: !!(FRESHDESK_DOMAIN && FRESHDESK_API_KEY),
     passwordResetEmailConfigured: isPasswordResetEmailConfigured(),
     passwordResetEmailMode: getPasswordResetEmailMode(),
-    // TEMPORARY diagnostic (booleans only — never key values) to trace why
-    // the [Kora] boot log isn't firing despite Railway showing the vars set.
-    // Remove once the Kora runtime-visibility issue is resolved.
-    koraLivePublicKeyConfigured: !!process.env.KORA_LIVE_PUBLIC_KEY,
-    koraLiveSecretKeyConfigured: !!process.env.KORA_LIVE_SECRET_KEY,
-    koraLiveEncryptionKeyConfigured: !!process.env.KORA_LIVE_ENCRYPTION_KEY,
+    // Kora Live boot-time visibility was verified in production; the
+    // temporary per-key diagnostic booleans that were added to trace a
+    // one-time Railway env-var propagation bug have been removed now that
+    // Kora is confirmed initializing correctly. Provider readiness is still
+    // surfaced (booleans only, never key values) via koraProviderReady below.
     koraProviderReady: isPayoutProviderReady('NG'),
   };
   res.status(200).json(healthStatus);
@@ -3972,6 +4000,7 @@ app.use('/admin/support/tickets', adminSupportRouter);
 app.use('/admin/disputes', adminDisputesRouter);
 app.use('/admin/notifications', adminNotificationsRouter);
 app.use('/admin/fraud', adminFraudRouter);
+app.use('/admin/ledger', adminLedgerAuditRouter);
 app.get('/admin/audit/actions', adminAuth, requirePermission('audit:read'), (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 100;
   res.json({ actions: getAdminAuditLogs({ limit }) });
@@ -4046,11 +4075,27 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
   // ── Block in production when no payout provider is configured ────────────
   // Prevents funds entering holdBalance with no path to release them.
   if (process.env.NODE_ENV === 'production' && !isPayoutProviderReady(resolvedCountry || '')) {
+    const unreadyProvider = payoutRouter(resolvedCountry);
     logger.error('POST /withdrawals blocked — no payout provider configured for region', {
-      userId: req.user.userId, country: resolvedCountry,
+      userId: req.user.userId, country: resolvedCountry, provider: unreadyProvider,
     });
+    // Distinguish "this corridor genuinely isn't supported yet" (Stripe Connect
+    // payouts are not wired up for ANY country in this deployment — see
+    // STRIPE_CONNECT_READY / STRIPE_CONNECT_ACCOUNT) from "a configured
+    // provider is temporarily down". Every country that falls through
+    // payoutRouter()'s default to 'stripe' — which today means every country
+    // outside Kora's 8 confirmed corridors, including the US, UK, and all of
+    // Europe — must get an honest, specific, non-transient message instead of
+    // a generic 503 that implies a fixable outage.
+    if (unreadyProvider === 'stripe') {
+      return res.status(400).json({
+        error: 'Withdrawals for your country are not available yet. EGWallet currently supports withdrawals to Nigeria, Kenya, South Africa, Ghana, Ivory Coast, Cameroon, Egypt, and Tanzania. Support for more countries is coming soon.',
+        errorCode: 'COUNTRY_NOT_SUPPORTED',
+      });
+    }
     return res.status(503).json({
       error: 'Withdrawals are temporarily unavailable. Please contact support.',
+      errorCode: 'PROVIDER_NOT_READY',
     });
   }
 
@@ -4889,6 +4934,9 @@ app.post('/deposits/create-intent', authMiddleware,
     const { amount, currency, walletId } = req.body;
     const user = db.users.find(u => u.id === req.user.userId);
     if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
+    // Frozen / AML-restricted / legally-blocked accounts must not be able to
+    // fund their wallet either, not just spend from it.
+    if (!enforceMoneyOperationPolicy(user, db, req.lang || 'en', res)) return;
     // Fall back to the user's first wallet if the provided walletId is 'demo' or not found
     const wallet = db.wallets.find(w => w.id === walletId && w.userId === req.user.userId)
       || db.wallets.find(w => w.userId === req.user.userId);
@@ -5603,7 +5651,7 @@ app.get('/payment-requests/:id', (req, res) => {
   const requester = db.users.find(u => u.id === request.requesterId);
   // Mask email on this public endpoint — only expose enough to identify the requester
   res.json({ 
-    request: { id: request.id, amount: request.amount, currency: request.currency, note: request.note, status: request.status, expiresAt: request.expiresAt, requesterId: request.requesterId },
+    request: { id: request.id, amount: request.amount, currency: request.currency, memo: request.memo || '', status: request.status || 'pending', expiresAt: request.expiresAt, requesterId: request.requesterId },
     requesterEmail: maskEmail(requester?.email || 'unknown')
   });
 });
@@ -5942,38 +5990,44 @@ app.post('/payment-requests/:id/pay', authMiddleware, async (req, res) => {
       });
     }
 
-    // 24-hour per-worker settlement guard — mirrors the same check in bulk-payment.
-    // Prevents double payment when:
-    //   (a) employer already bulk-paid worker W and W creates a new request (bulk→request)
-    //   (b) employer already paid one request for W and W opens a second one (request→request)
+    // Durable payroll dedupe — Postgres runtime relies on a real database
+    // UNIQUE(employer_id, worker_id, pay_period) constraint (see
+    // backend/db/payrollPostgres.js), enforced atomically inside the same
+    // transaction as the balance mutation below (payrollGuard). That
+    // guarantees correctness under concurrency and process restarts, which a
+    // rolling time-window scan can never do. The legacy 24-hour in-memory
+    // scan is kept ONLY as a best-effort fallback for the no-database
+    // (dev/test) runtime, where there is no durable constraint to rely on.
     const prWorkerToCheck = request.userId || request.requesterId;
-    const prSettleWindow = 24 * 60 * 60 * 1000;
-    const prNowSettle = Date.now();
-    const prAlreadyPaidViaRequest = (db.paymentRequests || []).some(pr =>
-      pr.id !== request.id &&
-      pr.type === 'payroll_request' &&
-      pr.status === 'paid' &&
-      (pr.userId === prWorkerToCheck || pr.requesterId === prWorkerToCheck) &&
-      (pr.employerId === prPayrollEmployer.id || pr.targetEmployerId === prPayrollEmployer.id) &&
-      pr.paidAt && (prNowSettle - pr.paidAt) < prSettleWindow
-    );
-    const prAlreadyPaidViaBulk = (db.transactions || []).some(tx =>
-      tx.type === 'payroll' &&
-      tx.status === 'completed' &&
-      tx.payrollMetadata?.employerId === prPayrollEmployer.id &&
-      tx.payrollMetadata?.workerId === prWorkerToCheck &&
-      tx.timestamp && (prNowSettle - tx.timestamp) < prSettleWindow
-    );
-    if (prAlreadyPaidViaRequest || prAlreadyPaidViaBulk) {
-      logger.warn('[/payment-requests/pay] Payroll worker already settled within 24h', {
-        requestId: request.id,
-        employerId: prPayrollEmployer.id,
-        workerUserId: prWorkerToCheck,
-        via: prAlreadyPaidViaBulk ? 'bulk' : 'request',
-      });
-      return res.status(409).json({
-        error: 'This worker was already paid by this employer within the last 24 hours. Wait 24 hours or verify the payment.',
-      });
+    if (!USE_POSTGRES_RUNTIME) {
+      const prSettleWindow = 24 * 60 * 60 * 1000;
+      const prNowSettle = Date.now();
+      const prAlreadyPaidViaRequest = (db.paymentRequests || []).some(pr =>
+        pr.id !== request.id &&
+        pr.type === 'payroll_request' &&
+        pr.status === 'paid' &&
+        (pr.userId === prWorkerToCheck || pr.requesterId === prWorkerToCheck) &&
+        (pr.employerId === prPayrollEmployer.id || pr.targetEmployerId === prPayrollEmployer.id) &&
+        pr.paidAt && (prNowSettle - pr.paidAt) < prSettleWindow
+      );
+      const prAlreadyPaidViaBulk = (db.transactions || []).some(tx =>
+        tx.type === 'payroll' &&
+        tx.status === 'completed' &&
+        tx.payrollMetadata?.employerId === prPayrollEmployer.id &&
+        tx.payrollMetadata?.workerId === prWorkerToCheck &&
+        tx.timestamp && (prNowSettle - tx.timestamp) < prSettleWindow
+      );
+      if (prAlreadyPaidViaRequest || prAlreadyPaidViaBulk) {
+        logger.warn('[/payment-requests/pay] Payroll worker already settled within 24h', {
+          requestId: request.id,
+          employerId: prPayrollEmployer.id,
+          workerUserId: prWorkerToCheck,
+          via: prAlreadyPaidViaBulk ? 'bulk' : 'request',
+        });
+        return res.status(409).json({
+          error: 'This worker was already paid by this employer within the last 24 hours. Wait 24 hours or verify the payment.',
+        });
+      }
     }
   }
 
@@ -6081,8 +6135,20 @@ app.post('/payment-requests/:id/pay', authMiddleware, async (req, res) => {
         employerPayrollLimitTracking: prPayrollEmployer?.payrollLimitTracking || null,
         employerId: prPayrollEmployer?.id || null,
         stateDb: db,
+        payrollGuard: (request.type === 'payroll_request' && prPayrollEmployer)
+          ? {
+              employerId: prPayrollEmployer.id,
+              workerId: request.userId || request.requesterId,
+              payPeriod: request.payrollMetadata?.payPeriod || new Date(request.createdAt || Date.now()).toISOString().substring(0, 7),
+            }
+          : undefined,
       });
 
+      if (pgResult.payrollAlreadyPaid) {
+        return res.status(409).json({
+          error: 'This worker was already paid by this employer for this pay period. Duplicate payment blocked.',
+        });
+      }
       if (pgResult.replay && pgResult.response) {
         idempotencyStore.set(prClientKey, { userId: req.user.userId, response: pgResult.response, timestamp: Date.now() });
         return res.status(200).json(pgResult.response);
@@ -6142,8 +6208,27 @@ app.post('/payment-requests/:id/cancel', authMiddleware, (req, res) => {
 });
 
 // ==================== VIRTUAL CARDS ====================
+// Card ISSUANCE requires a real, funded card-network integration (e.g. Stripe
+// Issuing with a live cardholder + Issuing balance + real-time authorization
+// webhook). EGWallet does not currently have that integration wired up —
+// `generateCardSecrets()` in virtualCards.js produces a random 16-digit
+// number that is NOT registered with Visa/Mastercard/any processor and can
+// NEVER be used to make a real purchase anywhere. Presenting that as a
+// working, spendable card would be consumer-facing fraud. Card issuance is
+// therefore hard-disabled until a real issuing provider is wired in and this
+// flag is explicitly turned on for a fully tested corridor.
+function isVirtualCardIssuingEnabled() {
+  return process.env.VIRTUAL_CARD_ISSUING_ENABLED === 'true';
+}
+
 // Create virtual card
 app.post('/virtual-cards', authMiddleware, (req, res) => {
+  if (!isVirtualCardIssuingEnabled()) {
+    return res.status(503).json({
+      error: t('error_virtual_cards_unavailable', req.lang || 'en'),
+      errorCode: 'VIRTUAL_CARDS_UNAVAILABLE',
+    });
+  }
   const db = loadAppState();
   const { walletId, currency, label, idempotencyKey } = req.body;
   if (!walletId || !currency) return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
@@ -6700,9 +6785,67 @@ app.post('/qr/pay', authMiddleware, async (req, res) => {
     transaction: tx,
     message: 'Payment successful',
   };
-  if (clientKey) saveDurableIdempotency(db, clientKey, responseBody, req.user.userId);
 
-  saveAppState(db); // commits balances + tx + QR state + limit tracking + idempotency atomically
+  if (USE_POSTGRES_RUNTIME) {
+    try {
+      const pgResult = await commitQrPayPostgres({
+        fromWalletId,
+        toWalletId: targetWalletId,
+        currency: paymentCurrency,
+        amount: paymentAmount,
+        tx,
+        clientKey,
+        userId: req.user.userId,
+        responseBody,
+        senderLimitTracking: qrPayingUser.limitTracking,
+        stateDb: db,
+        requestId: requestId || null,
+        recipientUserId: targetUserId,
+      });
+      if (pgResult.replay && pgResult.response) {
+        idempotencyStore.set(clientKey, { userId: req.user.userId, response: pgResult.response, timestamp: Date.now() });
+        return res.status(200).json(pgResult.response);
+      }
+      if (pgResult.insufficientFunds) {
+        // Concurrent debit won the race after the optimistic in-memory check above.
+        debitEntry.amount = originalQrFromAmount;
+        if (qrDestBalance && originalQrDestAmount !== null) qrDestBalance.amount = originalQrDestAmount;
+        else if (qrDestBalance) toWallet.balances = toWallet.balances.filter(b => b !== qrDestBalance);
+        db.transactions.pop();
+        return res.status(400).json({ error: t('error_insufficient_funds', req.lang || 'en') });
+      }
+      if (pgResult.requestNotFound) {
+        db.transactions.pop();
+        return res.status(404).json({ error: t('error_qr_not_found', req.lang || 'en') });
+      }
+      if (pgResult.alreadyProcessed) {
+        // Duplicate-scan protection: this single-use dynamic QR / payment
+        // request was already paid (or cancelled) by a concurrent request.
+        db.transactions.pop();
+        return res.status(400).json({ error: t('error_qr_used', req.lang || 'en') });
+      }
+    } catch (saveErr) {
+      debitEntry.amount = originalQrFromAmount;
+      if (qrDestBalance && originalQrDestAmount !== null) qrDestBalance.amount = originalQrDestAmount;
+      else if (qrDestBalance) toWallet.balances = toWallet.balances.filter(b => b !== qrDestBalance);
+      db.transactions.pop();
+      logger.error('[/qr/pay] PostgreSQL commit failed — rolled back in-memory state:', { error: saveErr?.message });
+      return res.status(500).json({ error: t('error_transaction_persist', req.lang || 'en') });
+    }
+  } else {
+    if (clientKey) saveDurableIdempotency(db, clientKey, responseBody, req.user.userId);
+    try {
+      saveAppState(db); // commits balances + tx + QR state + limit tracking + idempotency atomically
+    } catch (saveErr) {
+      debitEntry.amount = originalQrFromAmount;
+      if (qrDestBalance && originalQrDestAmount !== null) qrDestBalance.amount = originalQrDestAmount;
+      else if (qrDestBalance) toWallet.balances = toWallet.balances.filter(b => b !== qrDestBalance);
+      db.transactions.pop();
+      if (clientKey && db.idempotencyRecords?.length) db.idempotencyRecords.pop();
+      logger.error('[/qr/pay] saveAppState failed — rolled back in-memory state:', { error: saveErr?.message });
+      return res.status(500).json({ error: t('error_transaction_persist', req.lang || 'en') });
+    }
+  }
 
   if (clientKey) idempotencyStore.set(clientKey, { userId: req.user.userId, response: responseBody, timestamp: Date.now() });
 
@@ -8017,9 +8160,10 @@ app.post('/support/ticket', authMiddleware, (req, res) => {
   });
 });
 
-// Get AI audit logs (admin only - in production add admin auth)
+// Get the authenticated user's own AI audit logs (self-service only — the
+// query below is hard-scoped to req.user.userId, so this never exposes
+// another user's data; it is not an admin-wide log viewer).
 app.get('/support/audit-logs', authMiddleware, (req, res) => {
-  // In production: check if user is admin
   const userLogs = aiAuditLogs
     .filter(log => log.userId === req.user.userId)
     .slice(-100); // Last 100 logs
@@ -9275,7 +9419,13 @@ app.post('/employer/bulk-payment',
     const db = loadAppState();
 
     // Durable idempotency — survives restart
-    if (clientKey) {
+    if (USE_POSTGRES_RUNTIME) {
+      const durableHit = clientKey ? await getDurablePayrollBatchIdempotency(clientKey, req.user.userId) : null;
+      if (durableHit) {
+        idempotencyStore.set(clientKey, { userId: req.user.userId, response: durableHit, timestamp: Date.now() });
+        return res.status(200).json(durableHit);
+      }
+    } else if (clientKey) {
       const durableHit = checkDurableIdempotency(db, clientKey, req.user.userId);
       if (durableHit) {
         idempotencyStore.set(clientKey, { userId: req.user.userId, response: durableHit, timestamp: Date.now() });
@@ -9489,122 +9639,265 @@ app.post('/employer/bulk-payment',
       batchId, employerId: employer.id, itemCount: resolvedItems.length,
     });
 
-    for (const item of resolvedItems) {
-      // Debit employer funding wallet (same as fromBalance.amount -= amount in /transactions)
-      const fundingBalance = fundingWallet.balances.find(b => b.currency === item.currency);
-      fundingBalance.amount -= item.amount;
-
-      // Credit worker wallet — same currency (FX conversion not applied in payroll; employer
-      // chooses the currency explicitly). Matches the receivedAmount logic in /transactions.
-      const { workerWallet } = item;
-      const worker = db.users.find(u => u.id === item.workerId);
-      const workerCountry = worker?.region || 'GQ';
-      const isCrossBorder = employerCountry !== workerCountry;
-
-      let workerBalance = workerWallet.balances.find(b => b.currency === item.currency);
-      if (!workerBalance) {
-        workerBalance = { currency: item.currency, amount: 0 };
-        workerWallet.balances.push(workerBalance);
-      }
-      workerBalance.amount += item.amount;
-
-      // Build transaction record — same shape as POST /transactions output
-      const txn = {
-        id: uuidv4(),
-        type: 'payroll',
-        fromWalletId: fundingWallet.id,
-        toWalletId: item.walletId,
-        amount: item.amount,
-        currency: item.currency,
-        receivedAmount: item.amount,
-        receivedCurrency: item.currency,
-        wasConverted: false,
-        fxFeeAmount: 0,
-        sendFeeAmount: 0,
-        memo: item.memo || notes || '',
-        status: 'completed',
-        timestamp: Date.now(),
-        payrollMetadata: {
+    if (USE_POSTGRES_RUNTIME) {
+      // ── Postgres-authoritative path ─────────────────────────────────────
+      // Every item is guarded by the durable UNIQUE(employer_id, worker_id,
+      // pay_period) constraint on payroll_payments — a worker can be paid at
+      // most once for a given pay period, no matter which endpoint is used,
+      // no matter how many instances or retries race each other. This
+      // replaces the old in-memory 24-hour scan entirely.
+      let pgBatch;
+      try {
+        pgBatch = await commitPayrollBatchPostgres({
           employerId: employer.id,
-          employerName: employer.companyName,
-          employerCountry,
-          workerCountry,
-          isCrossBorder,
-          taxTreaty: isCrossBorder ? 'CEMAC' : null,
+          fundingWalletId: fundingWallet.id,
+          items: resolvedItems.map(item => ({
+            workerId: item.workerId,
+            workerEmail: item.workerEmail,
+            walletId: item.walletId,
+            currency: item.currency,
+            amount: item.amount,
+            memo: item.memo || notes || '',
+          })),
+          batchId,
           payPeriod: batch.payPeriod,
-          payrollBatchId: batchId,
+          stateDb: db,
+        });
+      } catch (batchErr) {
+        logger.error('[/employer/bulk-payment] PostgreSQL commit failed', { error: batchErr.message, batchId });
+        return res.status(500).json({ error: t('error_transaction_persist', req.lang || 'en') });
+      }
+
+      const settlementTs = Date.now();
+      for (const r of pgBatch.results) {
+        const item = resolvedItems.find(i => i.workerId === r.workerId);
+        if (r.status !== 'success') {
+          batch.failureCount++;
+          results.push({
+            workerId: r.workerId,
+            workerEmail: r.workerEmail,
+            status: r.status === 'already_paid' ? 'skipped' : 'failed',
+            error: r.status === 'already_paid'
+              ? 'This worker was already paid for this pay period. Duplicate payment blocked.'
+              : (r.error === 'insufficient_funds' ? t('error_insufficient_funds_payroll', req.lang || 'en') : (r.error || 'Payment failed')),
+            amount: r.amount,
+            currency: r.currency,
+          });
+          logger.warn('[/employer/bulk-payment] Item not applied', { batchId, workerId: r.workerId, status: r.status, error: r.error });
+          continue;
+        }
+
+        // Keep the JSON display cache in sync with the now-authoritative Postgres balances.
+        const fundingBalance = fundingWallet.balances.find(b => b.currency === item.currency);
+        if (fundingBalance) fundingBalance.amount -= item.amount;
+        const { workerWallet } = item;
+        let workerBalance = workerWallet.balances.find(b => b.currency === item.currency);
+        if (!workerBalance) {
+          workerBalance = { currency: item.currency, amount: 0 };
+          workerWallet.balances.push(workerBalance);
+        }
+        workerBalance.amount += item.amount;
+
+        const worker = db.users.find(u => u.id === item.workerId);
+        const workerCountry = worker?.region || 'GQ';
+        const isCrossBorder = employerCountry !== workerCountry;
+
+        const txn = {
+          id: r.transactionId,
+          type: 'payroll',
+          fromWalletId: fundingWallet.id,
+          toWalletId: item.walletId,
+          amount: item.amount,
+          currency: item.currency,
+          receivedAmount: item.amount,
+          receivedCurrency: item.currency,
+          wasConverted: false,
+          fxFeeAmount: 0,
+          sendFeeAmount: 0,
+          memo: item.memo || notes || '',
+          status: 'completed',
+          timestamp: settlementTs,
+          payrollMetadata: {
+            employerId: employer.id,
+            employerName: employer.companyName,
+            employerCountry,
+            workerCountry,
+            isCrossBorder,
+            taxTreaty: isCrossBorder ? 'CEMAC' : null,
+            payPeriod: batch.payPeriod,
+            payrollBatchId: batchId,
+            workerId: item.workerId,
+            workerEmail: item.workerEmail,
+            isRecurring: false,
+          },
+          complianceFlags: {
+            taxable: true,
+            reportable: true,
+            category: 'wages',
+            crossBorder: isCrossBorder,
+            currencyConverted: false,
+          },
+        };
+        db.transactions.push(txn);
+
+        (db.paymentRequests || []).forEach(pr => {
+          if (
+            pr.status === 'pending' &&
+            pr.type === 'payroll_request' &&
+            (pr.userId === item.workerId || pr.requesterId === item.workerId) &&
+            (pr.employerId === employer.id || pr.targetEmployerId === employer.id)
+          ) {
+            pr.status = 'cancelled';
+            pr.cancelledAt = settlementTs;
+            pr.cancelReason = 'settled_via_bulk';
+            pr.settledByTransactionId = txn.id;
+          }
+        });
+
+        batch.transactions.push(txn.id);
+        batch.successCount++;
+        results.push({
           workerId: item.workerId,
           workerEmail: item.workerEmail,
-          isRecurring: false,
-        },
-        complianceFlags: {
-          taxable: true,
-          reportable: true,
-          category: 'wages',
-          crossBorder: isCrossBorder,
-          currencyConverted: false,
-        },
-      };
+          status: 'success',
+          transactionId: txn.id,
+          amount: item.amount,
+          currency: item.currency,
+        });
 
-      db.transactions.push(txn);
+        const displayAmount = minorToMajor(item.amount, item.currency).toFixed(decimalsFor(item.currency));
+        createNotification(
+          db, item.workerId, 'money_received', 'Payroll Received',
+          `You received ${displayAmount} ${item.currency} from ${employer.companyName}${item.memo ? ` — ${item.memo}` : ''}`,
+          { transactionId: txn.id, batchId, employerId: employer.id, amount: item.amount, currency: item.currency }
+        );
+        logger.info('Payroll payment applied', {
+          batchId, employerId: employer.id, workerId: item.workerId, transactionId: txn.id, amount: item.amount, currency: item.currency,
+        });
+      }
+    } else {
+      // ── Legacy JSON-only path (no DATABASE_URL — dev/test only) ────────
+      for (const item of resolvedItems) {
+        // Debit employer funding wallet (same as fromBalance.amount -= amount in /transactions)
+        const fundingBalance = fundingWallet.balances.find(b => b.currency === item.currency);
+        fundingBalance.amount -= item.amount;
 
-      // Cross-flow settlement (bulk→request direction): cancel ALL pending
-      // payroll_request rows for this worker+employer regardless of currency.
-      // Matching only the paid currency left cross-currency requests payable,
-      // allowing a second payout in a different currency for the same obligation.
-      const settlementTs = Date.now();
-      (db.paymentRequests || []).forEach(pr => {
-        if (
-          pr.status === 'pending' &&
-          pr.type === 'payroll_request' &&
-          (pr.userId === item.workerId || pr.requesterId === item.workerId) &&
-          (pr.employerId === employer.id || pr.targetEmployerId === employer.id)
-        ) {
-          pr.status = 'cancelled';
-          pr.cancelledAt = settlementTs;
-          pr.cancelReason = 'settled_via_bulk';
-          pr.settledByTransactionId = txn.id;
+        // Credit worker wallet — same currency (FX conversion not applied in payroll; employer
+        // chooses the currency explicitly). Matches the receivedAmount logic in /transactions.
+        const { workerWallet } = item;
+        const worker = db.users.find(u => u.id === item.workerId);
+        const workerCountry = worker?.region || 'GQ';
+        const isCrossBorder = employerCountry !== workerCountry;
+
+        let workerBalance = workerWallet.balances.find(b => b.currency === item.currency);
+        if (!workerBalance) {
+          workerBalance = { currency: item.currency, amount: 0 };
+          workerWallet.balances.push(workerBalance);
         }
-      });
+        workerBalance.amount += item.amount;
 
-      batch.transactions.push(txn.id);
-      batch.successCount++;
+        // Build transaction record — same shape as POST /transactions output
+        const txn = {
+          id: uuidv4(),
+          type: 'payroll',
+          fromWalletId: fundingWallet.id,
+          toWalletId: item.walletId,
+          amount: item.amount,
+          currency: item.currency,
+          receivedAmount: item.amount,
+          receivedCurrency: item.currency,
+          wasConverted: false,
+          fxFeeAmount: 0,
+          sendFeeAmount: 0,
+          memo: item.memo || notes || '',
+          status: 'completed',
+          timestamp: Date.now(),
+          payrollMetadata: {
+            employerId: employer.id,
+            employerName: employer.companyName,
+            employerCountry,
+            workerCountry,
+            isCrossBorder,
+            taxTreaty: isCrossBorder ? 'CEMAC' : null,
+            payPeriod: batch.payPeriod,
+            payrollBatchId: batchId,
+            workerId: item.workerId,
+            workerEmail: item.workerEmail,
+            isRecurring: false,
+          },
+          complianceFlags: {
+            taxable: true,
+            reportable: true,
+            category: 'wages',
+            crossBorder: isCrossBorder,
+            currencyConverted: false,
+          },
+        };
 
-      results.push({
-        workerId: item.workerId,
-        workerEmail: item.workerEmail,
-        status: 'success',
-        transactionId: txn.id,
-        amount: item.amount,
-        currency: item.currency,
-      });
+        db.transactions.push(txn);
 
-      // Notify worker immediately via bell icon
-      const displayAmount = minorToMajor(item.amount, item.currency).toFixed(decimalsFor(item.currency));
-      createNotification(
-        db,
-        item.workerId,
-        'money_received',
-        'Payroll Received',
-        `You received ${displayAmount} ${item.currency} from ${employer.companyName}${item.memo ? ` — ${item.memo}` : ''}`,
-        { transactionId: txn.id, batchId, employerId: employer.id, amount: item.amount, currency: item.currency }
-      );
+        // Cross-flow settlement (bulk→request direction): cancel ALL pending
+        // payroll_request rows for this worker+employer regardless of currency.
+        // Matching only the paid currency left cross-currency requests payable,
+        // allowing a second payout in a different currency for the same obligation.
+        const settlementTs = Date.now();
+        (db.paymentRequests || []).forEach(pr => {
+          if (
+            pr.status === 'pending' &&
+            pr.type === 'payroll_request' &&
+            (pr.userId === item.workerId || pr.requesterId === item.workerId) &&
+            (pr.employerId === employer.id || pr.targetEmployerId === employer.id)
+          ) {
+            pr.status = 'cancelled';
+            pr.cancelledAt = settlementTs;
+            pr.cancelReason = 'settled_via_bulk';
+            pr.settledByTransactionId = txn.id;
+          }
+        });
 
-      logger.info('Payroll payment applied', {
-        batchId,
-        employerId: employer.id,
-        workerId: item.workerId,
-        transactionId: txn.id,
-        amount: item.amount,
-        currency: item.currency,
-      });
+        batch.transactions.push(txn.id);
+        batch.successCount++;
+
+        results.push({
+          workerId: item.workerId,
+          workerEmail: item.workerEmail,
+          status: 'success',
+          transactionId: txn.id,
+          amount: item.amount,
+          currency: item.currency,
+        });
+
+        // Notify worker immediately via bell icon
+        const displayAmount = minorToMajor(item.amount, item.currency).toFixed(decimalsFor(item.currency));
+        createNotification(
+          db,
+          item.workerId,
+          'money_received',
+          'Payroll Received',
+          `You received ${displayAmount} ${item.currency} from ${employer.companyName}${item.memo ? ` — ${item.memo}` : ''}`,
+          { transactionId: txn.id, batchId, employerId: employer.id, amount: item.amount, currency: item.currency }
+        );
+
+        logger.info('Payroll payment applied', {
+          batchId,
+          employerId: employer.id,
+          workerId: item.workerId,
+          transactionId: txn.id,
+          amount: item.amount,
+          currency: item.currency,
+        });
+      }
     }
 
     batch.completedAt = Date.now();
 
-    // Update employer stats
+    // Update employer stats — only for items actually paid (success), never
+    // for skipped/failed items, so stats and limit tracking always match real money movement.
+    const successfulItems = resolvedItems.filter(item =>
+      results.some(r => r.workerId === item.workerId && r.status === 'success')
+    );
     employer.totalBatches = (employer.totalBatches || 0) + 1;
-    const totalUSD = resolvedItems.reduce((sum, item) => {
+    const totalUSD = successfulItems.reduce((sum, item) => {
       // item.amount is in minor units; convert to major before USD calculation
       return sum + convertToUSD(minorToMajor(item.amount, item.currency), item.currency, db.rates);
     }, 0);
@@ -9612,6 +9905,8 @@ app.post('/employer/bulk-payment',
 
     // Update payroll limit tracking (separate from personal limits)
     updatePayrollLimitTracking(employer, totalUSD);
+
+    batch.status = batch.failureCount > 0 ? (batch.successCount > 0 ? 'partial' : 'failed') : 'completed';
 
     if (!db.payrollBatches) db.payrollBatches = [];
     db.payrollBatches.push(batch);
@@ -9622,13 +9917,19 @@ app.post('/employer/bulk-payment',
       batchId: batch.id,
       totalItems: batch.totalItems,
       successCount: batch.successCount,
-      failureCount: 0,
-      status: 'completed',
+      failureCount: batch.failureCount,
+      status: batch.status,
       results,
     };
-    if (clientKey) saveDurableIdempotency(db, clientKey, responseBody, req.user.userId);
+    if (USE_POSTGRES_RUNTIME) {
+      if (clientKey) await saveDurablePayrollBatchIdempotency(clientKey, req.user.userId, responseBody);
+    } else if (clientKey) {
+      saveDurableIdempotency(db, clientKey, responseBody, req.user.userId);
+    }
 
-    // Single atomic write — all debits, credits, batch record, and idempotency committed together
+    // Single atomic write — all debits, credits, batch record, and idempotency committed together.
+    // In Postgres-runtime mode this is a display-cache write only; Postgres already committed
+    // the authoritative balances/ledger/transactions above.
     saveAppState(db);
 
     if (clientKey) idempotencyStore.set(clientKey, { userId: req.user.userId, response: responseBody, timestamp: Date.now() });
@@ -9637,6 +9938,7 @@ app.post('/employer/bulk-payment',
       batchId,
       employerId: employer.id,
       successCount: batch.successCount,
+      failureCount: batch.failureCount,
       totalAmountUSD: totalUSD.toFixed(2),
     });
 
@@ -10076,98 +10378,20 @@ app.post('/employer/remove-employee/:relationshipId',
   }
 );
 
-// Update KYC tier (admin endpoint - simplified for demo)
-app.post('/admin/update-kyc-tier',
-  authMiddleware,
-  validateInput([
-    body('userId').isString(),
-    body('kycTier').isInt({ min: 0, max: 3 }),
-    body('kycStatus').isIn(['approved', 'pending', 'rejected'])
-  ]),
-  (req, res) => {
-    const db = loadAppState();
-    const requestingUser = db.users.find(u => u.id === req.user.userId);
-    if (!requestingUser || requestingUser.role !== 'admin') {
-      return res.status(403).json({ error: t('error_access_denied', req.lang || 'en') });
-    }
-    const { userId, kycTier, kycStatus } = req.body;
-    
-    const user = db.users.find(u => u.id === userId);
-    if (!user) {
-      return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
-    }
-    
-    user.kycTier = kycTier;
-    user.kycStatus = kycStatus;
-
-    saveAppState(db);
-    logAIInteraction(req.user.userId, 'KYC_TIER_UPDATED', [userId, kycTier], null, req);
-    
-    logger.info('KYC tier updated', { 
-      userId, 
-      kycTier, 
-      kycStatus, 
-      updatedBy: req.user.userId 
-    });
-    
-    res.json({ 
-      success: true, 
-      user: {
-        id: user.id,
-        email: user.email,
-        kycTier: user.kycTier,
-        kycStatus: user.kycStatus,
-        kycLimits: user.kycLimits
-      }
-    });
-  }
-);
-
-// Verify employer (admin endpoint)
-app.post('/admin/verify-employer',
-  authMiddleware,
-  validateInput([
-    body('employerId').isString(),
-    body('verificationStatus').isIn(['verified', 'rejected'])
-  ]),
-  (req, res) => {
-    const db = loadAppState();
-    const requestingUser = db.users.find(u => u.id === req.user.userId);
-    if (!requestingUser || requestingUser.role !== 'admin') {
-      return res.status(403).json({ error: t('error_access_denied', req.lang || 'en') });
-    }
-    const { employerId, verificationStatus, notes } = req.body;
-    
-    const employer = db.employers.find(e => e.id === employerId);
-    if (!employer) {
-      return res.status(404).json({ error: t('error_employer_not_found', req.lang || 'en') });
-    }
-    
-    employer.verificationStatus = verificationStatus;
-    employer.verifiedAt = Date.now();
-    employer.verifiedBy = req.user.userId;
-    employer.verificationNotes = notes || null;
-    
-    saveAppState(db);
-    logAIInteraction(req.user.userId, 'EMPLOYER_VERIFIED', [employerId, verificationStatus], null, req);
-    
-    logger.info('Employer verification updated', {
-      employerId,
-      verificationStatus,
-      verifiedBy: req.user.userId
-    });
-    
-    res.json({ 
-      success: true, 
-      employer: {
-        id: employer.id,
-        companyName: employer.companyName,
-        verificationStatus: employer.verificationStatus,
-        verifiedAt: employer.verifiedAt
-      }
-    });
-  }
-);
+// NOTE: The legacy '/admin/update-kyc-tier' and '/admin/verify-employer'
+// endpoints (regular-user-JWT + `role === 'admin'` check) were removed as
+// unused/unreachable dead code — confirmed unused by the mobile app and the
+// admin dashboard, and superseded by the real admin-platform stack:
+//   - KYC tier changes: POST /admin/kyc/documents/:id/approve|reject
+//     (backend/adminKyc.js — gated by adminAuth + requirePermission, with
+//     full audit logging via the admin_users / admin_audit_log tables).
+//   - Employer verification: no gate currently exists in production policy
+//     (adminInterventionPolicy.js is the single source of admin-hold rules;
+//     see the "no verificationStatus !== verified employer admin gate
+//     remains" regression test), so a standalone verify-employer endpoint
+//     using the weaker legacy admin pattern was pure attack surface with no
+//     product behavior depending on it.
+// Removing these reduces production attack surface without any feature loss.
 
 // Get worker payroll history (for workers to see their received payroll)
 app.get('/payroll/received', authMiddleware, (req, res) => {

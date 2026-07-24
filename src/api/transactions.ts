@@ -40,24 +40,33 @@ export interface FxQuote {
 }
 
 function throwApiError(
-  err: { error?: string; message?: string; code?: string; limitType?: string },
+  err: { error?: string; message?: string; code?: string; errorCode?: string; limitType?: string },
   fallback: string,
   status: number,
   meta?: { endpoint?: string; idempotencyKey?: string },
 ): never {
   const error = new Error(err.error || err.message || fallback) as Error & {
     code?: string;
+    errorCode?: string;
     limitType?: string;
     status?: number;
     endpoint?: string;
     idempotencyKey?: string;
   };
   error.code = err.code;
+  error.errorCode = err.errorCode;
   error.limitType = err.limitType;
   error.status = status;
   if (meta?.endpoint) error.endpoint = meta.endpoint;
   if (meta?.idempotencyKey) error.idempotencyKey = meta.idempotencyKey;
   throw error;
+}
+
+function throwTimeoutError(): never {
+  const err: any = new Error('Request timeout');
+  err.status = 408;
+  err.code = 'REQUEST_TIMEOUT';
+  throw err;
 }
 
 /** Get a real-time FX quote for a cross-currency transfer preview. */
@@ -85,7 +94,7 @@ export async function fetchFxQuote(
   } catch (err: any) {
     if (signal?.aborted) throw err;
     if (controller.signal.aborted || err?.name === 'AbortError') {
-      throw new Error('Request timed out. Please try again.');
+      throwTimeoutError();
     }
     throw err;
   } finally {
@@ -137,7 +146,7 @@ async function postWithIdempotencyRetry(
     const reconciled = await reconcile();
     if (reconciled) return reconciled;
     if (err?.name === 'AbortError') {
-      throw new Error('Request timed out. Please try again.');
+      throwTimeoutError();
     }
     throw err;
   } finally {
@@ -206,7 +215,7 @@ export async function fetchTransactions(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Fetch transactions failed');
+    throwApiError(err, 'Fetch transactions failed', res.status);
   }
 
   return res.json();
@@ -234,7 +243,7 @@ export async function createPaymentRequest(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Create request failed');
+    throwApiError(err, 'Create request failed', res.status);
   }
 
   return res.json();
@@ -247,7 +256,7 @@ export async function getPaymentRequests(token: string) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Fetch requests failed');
+    throwApiError(err, 'Fetch requests failed', res.status);
   }
 
   return res.json();
@@ -265,7 +274,7 @@ export async function cancelPaymentRequest(token: string, requestId: string) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Cancel failed');
+    throwApiError(err, 'Cancel failed', res.status);
   }
 
   return res.json();
@@ -305,7 +314,7 @@ export async function getVirtualCards(token: string) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Fetch cards failed');
+    throwApiError(err, 'Fetch cards failed', res.status);
   }
 
   return res.json();
@@ -370,7 +379,7 @@ export async function createBudget(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Create budget failed');
+    throwApiError(err, 'Create budget failed', res.status);
   }
 
   return res.json();
@@ -383,7 +392,7 @@ export async function getBudgets(token: string) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Fetch budgets failed');
+    throwApiError(err, 'Fetch budgets failed', res.status);
   }
 
   return res.json();
@@ -396,7 +405,7 @@ export async function getBudgetAnalytics(token: string, budgetId: string) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Fetch analytics failed');
+    throwApiError(err, 'Fetch analytics failed', res.status);
   }
 
   return res.json();
@@ -413,7 +422,7 @@ export async function deleteBudget(token: string, budgetId: string) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Delete budget failed');
+    throwApiError(err, 'Delete budget failed', res.status);
   }
 
   return res.json();
@@ -489,7 +498,7 @@ export async function payViaQr(
       signal: controller.signal,
     });
   } catch (err: any) {
-    if (err?.name === 'AbortError') throw new Error('Request timed out. Please try again.');
+    if (err?.name === 'AbortError') throwTimeoutError();
     throw err;
   } finally {
     clearTimeout(timeoutId);
@@ -532,13 +541,17 @@ export async function exchangeCurrency(
     });
   } catch (err: any) {
     const isAbort = controller.signal.aborted || err?.name === 'AbortError';
-    const error = isAbort
-      ? new Error('Request timed out. Please try again.')
+    const error: any = isAbort
+      ? (() => {
+          const timeoutErr: any = new Error('Request timeout');
+          timeoutErr.status = 408;
+          timeoutErr.code = 'REQUEST_TIMEOUT';
+          return timeoutErr;
+        })()
       : err;
     if (error && typeof error === 'object') {
       (error as any).endpoint = endpoint;
       (error as any).idempotencyKey = idempotencyKey;
-      if (isAbort) (error as any).status = 408;
     }
     if (__DEV__) console.warn('[Exchange] transport error', {
       message: error?.message,

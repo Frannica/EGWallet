@@ -143,7 +143,7 @@ export default function TransactionHistory() {
       .reduce((s: number, t: any) => s + convert(t.amount, t.currency || preferredCurrency, preferredCurrency, rates), 0);
     const cats: Record<string, number> = {};
     txs.forEach(t => {
-      const cat = (t.type === 'payroll' || t.type === 'payroll_request') ? 'Payroll' : resolveDir(t) === 'in' ? 'Received' : 'Transfers';
+      const cat = (t.type === 'payroll' || t.type === 'payroll_request') ? 'payroll' : resolveDir(t) === 'in' ? 'received' : 'transfers';
       cats[cat] = (cats[cat] || 0) + 1;
     });
     const topCat = Object.entries(cats).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
@@ -152,6 +152,22 @@ export default function TransactionHistory() {
 
   // Show filter bar whenever there are transactions
   const showFilterBar = txs.length > 0;
+
+  const getStatusLabel = (status?: string | null): string => {
+    const key = (status ?? 'unknown').toLowerCase();
+    const known: Record<string, string> = {
+      completed: t('status.completed'),
+      success: t('status.success'),
+      pending: t('status.pending'),
+      processing: t('status.processing'),
+      failed: t('status.failed'),
+      cancelled: t('status.cancelled'),
+      canceled: t('status.cancelled'),
+      refunded: t('status.refunded'),
+      unknown: t('status.unknown'),
+    };
+    return known[key] ?? (status ?? t('status.unknown')).charAt(0).toUpperCase() + (status ?? '').slice(1);
+  };
 
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
@@ -281,7 +297,11 @@ export default function TransactionHistory() {
             {insights.topCategory && (insights.spent > 0 || insights.received > 0) && (
               <View style={styles.insightHighlight}>
                 <Text style={styles.insightHighlightText}>
-                  {t('txHistory.topCategory')} <Text style={{ fontWeight: '700', color: '#1565C0' }}>{insights.topCategory}</Text>
+                  {t('txHistory.topCategory')} <Text style={{ fontWeight: '700', color: '#1565C0' }}>{
+                    insights.topCategory === 'payroll' ? t('txHistory.categoryPayroll')
+                      : insights.topCategory === 'received' ? t('txHistory.received')
+                      : t('txHistory.categoryTransfers')
+                  }</Text>
                 </Text>
               </View>
             )}
@@ -337,7 +357,7 @@ export default function TransactionHistory() {
           const isPaymentRequest = item.type === 'payment_request';
           const isExchange = item.type === 'exchange';
           const isIn = item.direction === 'in';
-          const employerName = item.payrollMetadata?.employerName || 'Employer';
+          const employerName = item.payrollMetadata?.employerName || t('txHistory.employerFallback');
 
           const txTitle = isPayroll
             ? `${t('txHistory.salaryFrom')} ${employerName}`
@@ -426,7 +446,7 @@ export default function TransactionHistory() {
                     <View style={[styles.statusBadge, { backgroundColor: statusColor + '20' }]}>
                       <Ionicons name={statusIcon as any} size={11} color={statusColor} />
                       <Text style={[styles.statusText, { color: statusColor }]}>
-                        {(item.status ?? 'unknown').charAt(0).toUpperCase() + (item.status ?? 'unknown').slice(1)}
+                        {getStatusLabel(item.status)}
                       </Text>
                     </View>
                     <Text style={styles.transactionTime}>{formatDate(item.timestamp)}</Text>
@@ -459,7 +479,7 @@ export default function TransactionHistory() {
                     <View style={styles.actionButtons}>
                       <TouchableOpacity
                         style={styles.receiptButton}
-                        onPress={() => generateAndShareReceipt(item, auth.user?.email || '')}
+                        onPress={() => generateAndShareReceipt(item, auth.user?.email || '', t)}
                       >
                         <Ionicons name="document-text" size={16} color="#007AFF" />
                         <Text style={styles.receiptButtonText}>{t('txHistory.receipt')}</Text>

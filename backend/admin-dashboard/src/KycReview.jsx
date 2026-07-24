@@ -127,7 +127,7 @@ export default function KycReview({ focusDocumentId, onClearFocus, onViewUser })
                 <tr key={doc.id} className={selectedId === doc.id ? 'row-selected' : ''}>
                   <td>{doc.type}</td>
                   <td>
-                    <button className="link-btn" onClick={() => onViewUser?.(doc.userId)}>{doc.userId.slice(0, 8)}…</button>
+                    <button className="link-btn" onClick={() => onViewUser?.(doc.userId)}>{doc.userId ? `${doc.userId.slice(0, 8)}…` : '—'}</button>
                   </td>
                   <td>{formatDate(doc.uploadedAt)}</td>
                   <td>{doc.status}</td>

@@ -72,9 +72,18 @@ module.exports = function phase12(check) {
   // C) TransactionHistory — safe null access
   // ════════════════════════════════════════════════════════════════════════════
 
+  // Superseded by the localized getStatusLabel() helper (i18n pass), which
+  // preserves the same null-safety guarantee via `(status ?? 'unknown')`
+  // before any charAt/case-formatting fallback — see getStatusLabel() and
+  // its unknown-status fallback branch in TransactionHistory.tsx.
   check(
-    '[TransactionHistory] item.status null-coalesced before charAt access',
-    TXHIST.includes("(item.status ?? 'unknown').charAt(0)"),
+    '[TransactionHistory] getStatusLabel null-coalesces status before charAt fallback',
+    TXHIST.includes("const key = (status ?? 'unknown').toLowerCase()") &&
+      TXHIST.includes("(status ?? t('status.unknown')).charAt(0)"),
+  );
+  check(
+    '[TransactionHistory] item.status rendering routed through getStatusLabel (localized, null-safe)',
+    TXHIST.includes('{getStatusLabel(item.status)}'),
   );
   check(
     '[TransactionHistory] item.id guarded before rendering ref ID',

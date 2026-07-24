@@ -121,7 +121,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Keep the user signed in on transient network failures. If refresh token
     // still exists locally, the token is not conclusively invalid yet.
     const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY).catch(() => null);
-    if (refreshToken) return false;
+    if (refreshToken) return true;
     await signOut();
     return false;
   }
@@ -152,7 +152,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (res.newDevice) {
         Alert.alert(
           tl('auth.newDeviceTitle'),
-          tl('auth.newDeviceMsg').replace('{{device}}', res.deviceName || 'this device'),
+          tl('auth.newDeviceMsg').replace('{{device}}', res.deviceName || tl('auth.thisDeviceFallback')),
           [
             { text: tl('auth.trustDevice'), style: 'default' },
             { text: tl('auth.reviewSecurity'), style: 'cancel', onPress: () => {
@@ -216,11 +216,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Clear any partial state
       setToken(null);
       setUser(null);
-      
-      // Re-throw with better error message
-      if (error.message?.includes('connection') || error.message?.includes('network')) {
-        throw new Error('Network error. Please check your internet connection.');
-      }
       throw error;
     }
   }
@@ -272,11 +267,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Clear any partial state
       setToken(null);
       setUser(null);
-
-      // Re-throw with better error message
-      if (error.message?.includes('connection') || error.message?.includes('network')) {
-        throw new Error('Network error. Please check your internet connection.');
-      }
       throw error;
     }
   }

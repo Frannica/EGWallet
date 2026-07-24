@@ -22,7 +22,6 @@ import TrustedDevicesScreen from '../screens/TrustedDevicesScreen';
 import KYCVerificationScreen from '../screens/KYCVerificationScreen';
 import AIChatScreen from '../screens/AIChatScreen';
 import DisputeTransactionScreen from '../screens/DisputeTransactionScreen';
-import QRPaymentScreen from '../screens/QRPaymentScreen';
 import EmployerDashboardScreen from '../screens/EmployerDashboardScreen';
 import DepositScreen from '../screens/DepositScreen';
 import ReceiptScreen from '../screens/ReceiptScreen';
@@ -135,7 +134,7 @@ export default function AppNavigator() {
         linking={linking}
         fallback={
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-            <Text>Loading...</Text>
+            <Text>{t('common.loading')}</Text>
           </View>
         }
       >
@@ -159,7 +158,6 @@ export default function AppNavigator() {
               <Stack.Screen name="KYCVerification" component={KYCVerificationScreen} options={{ title: t('screen.kyc') }} />
               <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: t('screen.aiAssistant') }} />
               <Stack.Screen name="DisputeTransaction" component={DisputeTransactionScreen} options={{ title: t('dispute.title') }} />
-              <Stack.Screen name="QRPayment" component={QRPaymentScreen} options={{ title: t('qrScan.title') }} />
               <Stack.Screen name="EmployerDashboard" component={EmployerDashboardScreen} options={{ title: t('screen.employerDashboard') }} />
               <Stack.Screen name="Send" component={SendScreen} options={{ title: t('screen.sendMoney') }} />
               <Stack.Screen name="Request" component={RequestScreen} options={{ title: t('screen.requestMoney') }} />

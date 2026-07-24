@@ -60,8 +60,8 @@ async function cleanup(client, ids) {
   await client.query('DELETE FROM idempotency_records WHERE user_id = ANY($1::uuid[])', [ids.users]);
   await client.query('DELETE FROM payment_requests WHERE id = ANY($1::uuid[])', [ids.requests]);
   await client.query('DELETE FROM transactions WHERE id = ANY($1::uuid[])', [ids.transactions]);
-  await client.query('DELETE FROM wallet_balances WHERE wallet_id = ANY($1::uuid[])', [ids.wallets]);
-  await client.query('DELETE FROM wallets WHERE id = ANY($1::uuid[])', [ids.wallets]);
+  await client.query('DELETE FROM wallet_balances WHERE wallet_id = ANY($1::text[])', [ids.wallets]);
+  await client.query('DELETE FROM wallets WHERE id = ANY($1::text[])', [ids.wallets]);
   await client.query('DELETE FROM users WHERE id = ANY($1::uuid[])', [ids.users]);
 }
 
@@ -351,9 +351,17 @@ test('phase1b-b payment request runtime-state sync upserts missing relational gr
       { id: ids.users[0], email: `${ids.users[0]}@runtime.test`, passwordHash: 'x', region: 'US', role: 'individual', createdAt: Date.now() },
       { id: ids.users[1], email: `${ids.users[1]}@runtime.test`, passwordHash: 'x', region: 'US', role: 'individual', createdAt: Date.now() },
     ],
+    // Payer's true (JSON-only, pre-migration) balance is 8000. The `stateDb`
+    // contract is POST-mutation (the caller always mutates JSON balances
+    // in-memory before calling commitPaymentRequestPayPostgres), so this
+    // reflects payer at 8000 - 2200 = 5800 and payee at 0 + 2200 = 2200
+    // *after* the payment — exactly like every real caller. The Postgres
+    // backfill-on-first-touch path reconstructs the correct pre-operation
+    // amount (8000 / 0) from this post-mutation snapshot plus the pending
+    // debit/credit.
     wallets: [
-      { id: ids.wallets[0], userId: ids.users[0], balances: [{ currency: 'USD', amount: 8000 }], createdAt: Date.now(), maxLimitUSD: 250000 },
-      { id: ids.wallets[1], userId: ids.users[1], balances: [{ currency: 'USD', amount: 0 }], createdAt: Date.now(), maxLimitUSD: 250000 },
+      { id: ids.wallets[0], userId: ids.users[0], balances: [{ currency: 'USD', amount: 5800 }], createdAt: Date.now(), maxLimitUSD: 250000 },
+      { id: ids.wallets[1], userId: ids.users[1], balances: [{ currency: 'USD', amount: 2200 }], createdAt: Date.now(), maxLimitUSD: 250000 },
     ],
     paymentRequests: [
       {

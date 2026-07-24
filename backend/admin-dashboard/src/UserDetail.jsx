@@ -127,8 +127,10 @@ export default function UserDetail({ userId, onBack, onReviewKyc, onViewTimeline
   if (error && !data) return <p className="error-text">{error}</p>;
   if (!data) return null;
 
-  const { profile, wallets, virtualCards, kycDocuments, riskFlags, limits, activityCounts, syncHint } = data;
-  const status = profile.accountStatus || 'active';
+  const { profile: rawProfile, wallets: rawWallets, virtualCards, kycDocuments, riskFlags, limits, activityCounts, syncHint } = data;
+  const profile = rawProfile || {};
+  const wallets = rawWallets || [];
+  const status = profile?.accountStatus || 'active';
 
   return (
     <div>
@@ -136,7 +138,7 @@ export default function UserDetail({ userId, onBack, onReviewKyc, onViewTimeline
       <div className="detail-header-row">
         <h2 className="page-title">User Detail</h2>
         <div className="btn-row">
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => copyText(profile.id, 'User ID')}>Copy User ID</button>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => copyText(profile?.id, 'User ID')}>Copy User ID</button>
           {wallets?.[0] && (
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => copyText(wallets[0].id, 'Wallet ID')}>Copy Wallet ID</button>
           )}

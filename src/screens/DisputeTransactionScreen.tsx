@@ -53,28 +53,25 @@ export default function DisputeTransactionScreen() {
   }, [selectedTransaction, disputeReason]);
 
   async function loadRecentTransactions() {
-    const demoTxs: Transaction[] = [
-      { id: 'TXN-001', type: 'send', amount: 25000, currency: 'XAF', status: 'completed', timestamp: Date.now() - 2 * 86400000 },
-      { id: 'TXN-002', type: 'receive', amount: 50000, currency: 'XAF', status: 'completed', timestamp: Date.now() - 5 * 86400000 },
-      { id: 'TXN-003', type: 'send', amount: 10000, currency: 'XAF', status: 'completed', timestamp: Date.now() - 8 * 86400000 },
-      { id: 'TXN-004', type: 'withdrawal', amount: 15000, currency: 'XAF', status: 'completed', timestamp: Date.now() - 12 * 86400000 },
-      { id: 'TXN-005', type: 'receive', amount: 75000, currency: 'XAF', status: 'completed', timestamp: Date.now() - 20 * 86400000 },
-    ];
+    // Never show fabricated "demo" transactions here — a user could dispute a
+    // fake transaction ID that doesn't exist in the backend, which would
+    // produce a meaningless support ticket. On any failure, show a real
+    // empty list instead.
+    if (!auth.token) { setTransactions([]); setLoading(false); return; }
     try {
-      if (!auth.token) { setTransactions(demoTxs); setLoading(false); return; }
       const res = await fetchWithTokenRefresh(`${API_BASE}/transactions`, {
         headers: { 'Authorization': `Bearer ${auth.token}` },
       });
       if (res.ok) {
         const data = await res.json();
         const ninetyDaysAgo = Date.now() - (90 * 24 * 60 * 60 * 1000);
-        const recent = data.filter((t: any) => (t.timestamp || t.createdAt || 0) > ninetyDaysAgo);
-        setTransactions(recent.length > 0 ? recent : demoTxs);
+        const recent = Array.isArray(data) ? data.filter((t: any) => (t.timestamp || t.createdAt || 0) > ninetyDaysAgo) : [];
+        setTransactions(recent);
       } else {
-        setTransactions(demoTxs);
+        setTransactions([]);
       }
     } catch (error) {
-      setTransactions(demoTxs);
+      setTransactions([]);
     } finally {
       setLoading(false);
     }
@@ -148,22 +145,25 @@ export default function DisputeTransactionScreen() {
 
     // Always open the device mail client so the dispute lands in the support inbox
     // regardless of backend availability.
-    const emailSubject = encodeURIComponent(`[${finalTicket}] Dispute: ${reasonLabel} - Tx ${selectedTransaction.id}`);
+    const emailSubject = encodeURIComponent(`[${finalTicket}] ${t('dispute.emailSubjectWord')}: ${reasonLabel} - Tx ${selectedTransaction.id}`);
     const emailBody = encodeURIComponent(
-      `Ticket: ${finalTicket}\n` +
-      `User: ${auth.user?.email ?? 'unknown'}\n` +
-      `Transaction ID: ${selectedTransaction.id}\n` +
-      `Transaction Date: ${txDate}\n` +
-      `Amount: ${formatCurrency(selectedTransaction.amount, selectedTransaction.currency)}\n` +
-      `Reason: ${reasonLabel}\n\n` +
-      `Description:\n${description.trim()}\n\n` +
-      `— Sent from EGWallet App`
+      `${t('dispute.emailLabelTicket')}: ${finalTicket}\n` +
+      `${t('common.user')}: ${auth.user?.email ?? 'unknown'}\n` +
+      `${t('dispute.emailLabelTransactionId')}: ${selectedTransaction.id}\n` +
+      `${t('dispute.emailLabelTransactionDate')}: ${txDate}\n` +
+      `${t('common.amount')}: ${formatCurrency(selectedTransaction.amount, selectedTransaction.currency)}\n` +
+      `${t('common.reason')}: ${reasonLabel}\n\n` +
+      `${t('dispute.emailLabelDescription')}:\n${description.trim()}\n\n` +
+      `${t('dispute.emailSignature')}`
     );
     const mailtoUrl = `mailto:${SUPPORT_EMAIL}?subject=${emailSubject}&body=${emailBody}`;
 
     Alert.alert(
       t('dispute.submittedTitle'),
-      `Ticket ${finalTicket} created.\n\nYour mail app will open so you can send this dispute directly to ${SUPPORT_EMAIL}. Alternative: ${ALT_SUPPORT_EMAIL}. Our team responds within 2-3 business days.`,
+      t('dispute.submittedBody')
+        .replace('{ticket}', finalTicket)
+        .replace('{email}', SUPPORT_EMAIL)
+        .replace('{altEmail}', ALT_SUPPORT_EMAIL),
       [
         {
           text: t('dispute.sendEmailButton'),

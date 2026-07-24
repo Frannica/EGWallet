@@ -18,9 +18,42 @@ export interface Transaction {
   toWalletId?: string;
 }
 
-export async function generateAndShareReceipt(transaction: Transaction, userEmail: string) {
+type Translator = (key: string) => string;
+
+const fallbackEn: Record<string, string> = {
+  'common.error': 'Error',
+  'receiptPdf.shareSuccessTitle': 'Success',
+  'receiptPdf.shareUnavailable': 'Receipt generated but sharing is not available on this device',
+  'receiptPdf.generateFailed': 'Failed to generate receipt. Please try again.',
+  'receiptPdf.title': 'Transaction Receipt',
+  'receiptPdf.conversion': 'Conversion',
+  'receiptPdf.received': 'Received',
+  'receiptPdf.transactionDetails': 'Transaction Details',
+  'receiptPdf.transactionId': 'Transaction ID',
+  'receiptPdf.type': 'Type',
+  'txHistory.moneyReceived': 'Money Received',
+  'txHistory.moneySent': 'Money Sent',
+  'receiptPdf.date': 'Date',
+  'receiptPdf.time': 'Time',
+  'receiptPdf.memo': 'Memo',
+  'receiptPdf.account': 'Account',
+  'receiptPdf.email': 'Email',
+  'receiptPdf.footerTagline': 'Your trusted digital wallet',
+  'receiptPdf.generatedOn': 'This receipt was generated on {{date}}',
+  'status.completed': 'COMPLETED',
+  'status.pending': 'PENDING',
+  'status.failed': 'FAILED',
+  'status.unknown': 'UNKNOWN',
+};
+
+function tOrFallback(t: Translator | undefined, key: string): string {
+  if (t) return t(key);
+  return fallbackEn[key] ?? key;
+}
+
+export async function generateAndShareReceipt(transaction: Transaction, userEmail: string, t?: Translator) {
   try {
-    const html = generateReceiptHTML(transaction, userEmail);
+    const html = generateReceiptHTML(transaction, userEmail, t);
     
     const { uri } = await Print.printToFileAsync({
       html,
@@ -36,15 +69,16 @@ export async function generateAndShareReceipt(transaction: Transaction, userEmai
         mimeType: 'application/pdf',
       });
     } else {
-      Alert.alert('Success', 'Receipt generated but sharing is not available on this device');
+      Alert.alert(tOrFallback(t, 'receiptPdf.shareSuccessTitle'), tOrFallback(t, 'receiptPdf.shareUnavailable'));
     }
   } catch (error: any) {
     console.error('Receipt generation failed:', error);
-    Alert.alert('Error', 'Failed to generate receipt. Please try again.');
+    Alert.alert(tOrFallback(t, 'common.error'), tOrFallback(t, 'receiptPdf.generateFailed'));
   }
 }
 
-function generateReceiptHTML(transaction: Transaction, userEmail: string): string {
+function generateReceiptHTML(transaction: Transaction, userEmail: string, t?: Translator): string {
+  const tr = (key: string) => tOrFallback(t, key);
   const date = new Date(transaction.timestamp);
   const formattedDate = date.toLocaleDateString('en-US', {
     year: 'numeric',
@@ -163,7 +197,7 @@ function generateReceiptHTML(transaction: Transaction, userEmail: string): strin
         <div class="receipt">
           <div class="header">
             <h1>EGWallet</h1>
-            <p>Transaction Receipt</p>
+            <p>${tr('receiptPdf.title')}</p>
           </div>
           
           <div class="content">
@@ -171,53 +205,53 @@ function generateReceiptHTML(transaction: Transaction, userEmail: string): strin
               <div class="amount-display">
                 ${transaction.type === 'received' ? '+' : '-'}${amountDisplay} ${transaction.currency}
               </div>
-              <span class="status-badge">${transaction.status}</span>
+              <span class="status-badge">${tr(`status.${transaction.status?.toLowerCase() || 'unknown'}`)}</span>
             </div>
 
             ${transaction.wasConverted && transaction.receivedCurrency ? `
               <div class="section">
-                <div class="section-title">Conversion</div>
+                <div class="section-title">${tr('receiptPdf.conversion')}</div>
                 <div class="detail-value">
-                  Received ${formatMinorAmount(transaction.receivedAmount!, transaction.receivedCurrency!)} ${transaction.receivedCurrency}
+                  ${tr('receiptPdf.received')} ${formatMinorAmount(transaction.receivedAmount!, transaction.receivedCurrency!)} ${transaction.receivedCurrency}
                 </div>
               </div>
             ` : ''}
 
             <div class="section">
-              <div class="section-title">Transaction Details</div>
+              <div class="section-title">${tr('receiptPdf.transactionDetails')}</div>
               
               <div class="detail-row">
-                <span class="detail-label">Transaction ID</span>
+                <span class="detail-label">${tr('receiptPdf.transactionId')}</span>
                 <span class="detail-value">${transaction.id.substring(0, 16)}...</span>
               </div>
               
               <div class="detail-row">
-                <span class="detail-label">Type</span>
-                <span class="detail-value">${transaction.type === 'received' ? 'Money Received' : 'Money Sent'}</span>
+                <span class="detail-label">${tr('receiptPdf.type')}</span>
+                <span class="detail-value">${transaction.type === 'received' ? tr('txHistory.moneyReceived') : tr('txHistory.moneySent')}</span>
               </div>
               
               <div class="detail-row">
-                <span class="detail-label">Date</span>
+                <span class="detail-label">${tr('receiptPdf.date')}</span>
                 <span class="detail-value">${formattedDate}</span>
               </div>
               
               <div class="detail-row">
-                <span class="detail-label">Time</span>
+                <span class="detail-label">${tr('receiptPdf.time')}</span>
                 <span class="detail-value">${formattedTime}</span>
               </div>
 
               ${transaction.memo ? `
                 <div class="detail-row">
-                  <span class="detail-label">Memo</span>
+                  <span class="detail-label">${tr('receiptPdf.memo')}</span>
                   <span class="detail-value">${transaction.memo}</span>
                 </div>
               ` : ''}
             </div>
 
             <div class="section">
-              <div class="section-title">Account</div>
+              <div class="section-title">${tr('receiptPdf.account')}</div>
               <div class="detail-row">
-                <span class="detail-label">Email</span>
+                <span class="detail-label">${tr('receiptPdf.email')}</span>
                 <span class="detail-value">${userEmail}</span>
               </div>
             </div>
@@ -225,8 +259,8 @@ function generateReceiptHTML(transaction: Transaction, userEmail: string): strin
 
           <div class="footer">
             <p>
-              <strong>EGWallet</strong> - Your trusted digital wallet<br>
-              This receipt was generated on ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+              <strong>EGWallet</strong> - ${tr('receiptPdf.footerTagline')}<br>
+              ${tr('receiptPdf.generatedOn').replace('{{date}}', new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }))}
             </p>
           </div>
         </div>

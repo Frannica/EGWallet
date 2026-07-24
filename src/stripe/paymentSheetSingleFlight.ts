@@ -3,9 +3,15 @@ export type PaymentSheetFlowResult =
   | { status: 'cancelled' }
   | { status: 'failed'; message: string };
 
+// Method-shorthand syntax (not arrow-function property syntax) is deliberate:
+// it gives this duck-typed interface TypeScript's bivariant parameter checking,
+// so the real @stripe/stripe-react-native `useStripe()` return value (whose
+// initPaymentSheet takes a specific SetupParams, not unknown) remains
+// assignable here. This is a pure type-level shape for testability — it
+// does not change what gets called or passed at runtime.
 type StripeLike = {
-  initPaymentSheet: (params: unknown) => Promise<{ error?: { message: string } }>;
-  presentPaymentSheet: () => Promise<{ error?: { code?: string; message: string } }>;
+  initPaymentSheet(params: unknown): Promise<{ error?: { message: string } }>;
+  presentPaymentSheet(): Promise<{ error?: { code?: string; message: string } }>;
 };
 
 const paymentSheetInFlight = new Map<string, Promise<PaymentSheetFlowResult>>();

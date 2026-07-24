@@ -3,6 +3,8 @@ import { View, Text, ScrollView, Alert, TouchableOpacity, Modal, FlatList, Switc
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
+import * as Application from 'expo-application';
 import { useAuth } from '../auth/AuthContext';
 import { useBiometric } from '../auth/BiometricContext';
 import { useNavigation } from '@react-navigation/native';
@@ -183,16 +185,18 @@ export default function SettingsScreen() {
   const handleBugReport = () => {
     const desc = bugDescription.trim();
     if (!desc) { Alert.alert(t('common.error'), t('settings.describeBugIssue')); return; }
-    const subject = encodeURIComponent('Bug Report - EGWallet');
+    const appVersion = Application.nativeApplicationVersion ?? Constants.expoConfig?.version ?? '?';
+    const notSet = t('settings.bugReportNotSet');
+    const subject = encodeURIComponent(t('settings.bugReportSubject'));
     const body = encodeURIComponent(
       `${desc}\n\n` +
-      `--- Device Info ---\n` +
-      `User ID: ${auth.user?.id || 'N/A'}\n` +
-      `Email: ${auth.user?.email || 'N/A'}\n` +
-      `Username: ${username ? '@' + username : 'Not set'}\n` +
-      `Platform: ${Platform.OS} ${Platform.Version}\n` +
-      `App Version: 1.1.0\n` +
-      `Timestamp: ${new Date().toISOString()}\n`
+      `--- ${t('settings.bugReportDeviceInfo')} ---\n` +
+      `${t('settings.bugReportUserId')}: ${auth.user?.id || notSet}\n` +
+      `${t('settings.bugReportEmail')}: ${auth.user?.email || notSet}\n` +
+      `${t('settings.bugReportUsername')}: ${username ? '@' + username : notSet}\n` +
+      `${t('settings.bugReportPlatform')}: ${Platform.OS} ${Platform.Version}\n` +
+      `${t('settings.bugReportAppVersion')}: ${appVersion}\n` +
+      `${t('settings.bugReportTimestamp')}: ${new Date().toISOString()}\n`
     );
     Linking.openURL(`mailto:support@egwalletfinance.com?subject=${subject}&body=${body}`);
     setBugDescription('');

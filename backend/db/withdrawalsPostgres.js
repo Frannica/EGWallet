@@ -2,19 +2,10 @@
 
 const { pool } = require('./pool');
 const { saveAppState } = require('./appStateStore');
+const { lockWalletBalanceRow, lockWalletHoldRow } = require('./walletBalanceAlign');
 
 function msToDate(ms) {
   return ms ? new Date(Number(ms)) : null;
-}
-
-function getWalletCurrencyAmounts(stateDb, walletId, currency) {
-  const wallet = (stateDb.wallets || []).find((w) => w.id === walletId);
-  if (!wallet) return { balance: 0, hold: 0 };
-  const balance = (wallet.balances || []).find((b) => b.currency === currency);
-  return {
-    balance: Number(balance ? balance.amount : 0),
-    hold: Number((wallet.holdBalance && wallet.holdBalance[currency]) || 0),
-  };
 }
 
 function mapWithdrawalRow(w) {
@@ -130,29 +121,67 @@ async function upsertWithdrawal(client, w) {
   );
 }
 
-async function upsertWalletRows(client, walletId, currency, balanceAmount, holdAmount) {
+/**
+ * Applies a RELATIVE delta to the wallet's available balance and/or hold
+ * escrow, using Postgres as the sole source of truth (locked via
+ * lockWalletBalanceRow / lockWalletHoldRow). This replaces the old
+ * `upsertWalletRows`, which absolute-overwrote both columns with values
+ * computed from the JSON app_metadata blob — meaning a stale JSON snapshot
+ * could silently roll back an already-correct Postgres balance/hold. A
+ * relative delta can never do that: it only ever applies the exact
+ * documented change for this withdrawal lifecycle step.
+ */
+async function applyWalletBalanceHoldDelta(client, walletId, currency, { balanceDelta = 0, holdDelta = 0 } = {}) {
   await client.query('SELECT id FROM wallets WHERE id = $1 FOR UPDATE', [walletId]);
-  await client.query(
-    'SELECT amount FROM wallet_balances WHERE wallet_id = $1 AND currency = $2 FOR UPDATE',
-    [walletId, currency]
-  );
-  await client.query(
-    'SELECT amount FROM wallet_holds WHERE wallet_id = $1 AND currency = $2 FOR UPDATE',
-    [walletId, currency]
-  );
+  const balanceBefore = await lockWalletBalanceRow(client, walletId, currency);
+  const holdBefore = await lockWalletHoldRow(client, walletId, currency);
 
-  await client.query(
-    `INSERT INTO wallet_balances(wallet_id, currency, amount)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (wallet_id, currency) DO UPDATE SET amount = EXCLUDED.amount`,
-    [walletId, currency, Number(balanceAmount)]
-  );
-  await client.query(
-    `INSERT INTO wallet_holds(wallet_id, currency, amount)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (wallet_id, currency) DO UPDATE SET amount = EXCLUDED.amount`,
-    [walletId, currency, Number(holdAmount)]
-  );
+  if (balanceDelta !== 0) {
+    await client.query(
+      'UPDATE wallet_balances SET amount = amount + $1 WHERE wallet_id = $2 AND currency = $3',
+      [balanceDelta, walletId, currency]
+    );
+  }
+  if (holdDelta !== 0) {
+    await client.query(
+      'UPDATE wallet_holds SET amount = amount + $1 WHERE wallet_id = $2 AND currency = $3',
+      [holdDelta, walletId, currency]
+    );
+  }
+
+  return {
+    balanceBefore,
+    balanceAfter: balanceBefore + Number(balanceDelta),
+    holdBefore,
+    holdAfter: Math.max(0, holdBefore + Number(holdDelta)),
+  };
+}
+
+/**
+ * Maps a withdrawal-lifecycle ledger entry (appended by withdrawalEngine.js
+ * in the same in-memory mutation that produced `withdrawal`) to the exact
+ * relative balance/hold delta it represents. This is how
+ * commitWithdrawalTransitionPostgres knows what actually changed without
+ * ever trusting an absolute JSON-derived balance snapshot.
+ */
+function deltaForLedgerType(type, amount) {
+  const amt = Number(amount || 0);
+  switch (type) {
+    case 'withdrawal_hold':
+      // Funds move from available balance into hold escrow.
+      return { balanceDelta: -amt, holdDelta: amt };
+    case 'withdrawal_paid':
+      // Provider confirmed payout — hold is released, balance was already debited at hold time.
+      return { balanceDelta: 0, holdDelta: -amt };
+    case 'withdrawal_failed_refund':
+    case 'withdrawal_reversed':
+      // Hold released back to available balance.
+      return { balanceDelta: amt, holdDelta: -amt };
+    default:
+      // Unknown/no-op ledger type (e.g. a pure status-only transition with no
+      // money movement) — do not touch balance or hold.
+      return { balanceDelta: 0, holdDelta: 0 };
+  }
 }
 
 async function getDurableWithdrawalIdempotency(clientKey, userId) {
@@ -188,23 +217,22 @@ async function commitCreateWithdrawalPostgres({
       }
     }
 
-    const fundsCheck = await client.query(
-      'SELECT amount FROM wallet_balances WHERE wallet_id = $1 AND currency = $2 FOR UPDATE',
-      [withdrawal.walletId, withdrawal.currency]
-    );
-    if (fundsCheck.rowCount === 0 || Number(fundsCheck.rows[0].amount) < Number(withdrawal.amount)) {
+    // Postgres is the sole source of truth for the pre-operation balance
+    // (JSON only ever seeds a brand-new, never-before-seen row).
+    const balanceBefore = await lockWalletBalanceRow(client, withdrawal.walletId, withdrawal.currency, {
+      stateDb, pendingDebit: withdrawal.amount,
+    });
+    if (balanceBefore < Number(withdrawal.amount)) {
       await client.query('ROLLBACK');
       return { insufficientFunds: true };
     }
 
-    const nextAmounts = getWalletCurrencyAmounts(stateDb, withdrawal.walletId, withdrawal.currency);
-    await upsertWalletRows(
-      client,
-      withdrawal.walletId,
-      withdrawal.currency,
-      nextAmounts.balance,
-      nextAmounts.hold
-    );
+    // Hold creation: debit available balance, credit hold escrow — a pure
+    // relative delta, never an absolute overwrite derived from JSON.
+    await applyWalletBalanceHoldDelta(client, withdrawal.walletId, withdrawal.currency, {
+      balanceDelta: -Number(withdrawal.amount),
+      holdDelta: Number(withdrawal.amount),
+    });
 
     await upsertWithdrawal(client, withdrawal);
 
@@ -283,20 +311,31 @@ async function commitWithdrawalTransitionPostgres({
       return { notFound: false, conflict: true };
     }
 
-    const nextAmounts = getWalletCurrencyAmounts(stateDb, withdrawal.walletId, withdrawal.currency);
-    await upsertWalletRows(
-      client,
-      withdrawal.walletId,
-      withdrawal.currency,
-      nextAmounts.balance,
-      nextAmounts.hold
-    );
-
-    await upsertWithdrawal(client, withdrawal);
-
+    // Determine the exact relative delta from the ledger entry this
+    // transition just appended (withdrawalEngine.js), rather than trusting
+    // an absolute "next balance" computed from the JSON blob. This is the
+    // fix for the dual-write desync risk: Postgres can never be rolled
+    // backwards by a stale JSON snapshot, because it is never overwritten —
+    // only ever adjusted by the documented delta for this exact transition.
+    //
+    // IMPORTANT: not every transition appends a new ledger entry (e.g.
+    // approved/processing are pure status changes with no money movement).
+    // In that case `latest` is the same entry a *previous* call already
+    // applied and persisted — re-applying its delta would double-count the
+    // hold. Guard by checking whether this exact ledger row id has already
+    // been committed to Postgres; only apply the delta and insert the row
+    // the first time we see it.
     const ledgers = (stateDb.ledger || []).filter((l) => l.withdrawalId === withdrawal.id);
     const latest = ledgers[ledgers.length - 1];
+    let alreadyApplied = true;
     if (latest) {
+      const existing = await client.query('SELECT 1 FROM ledger WHERE id = $1', [latest.id]);
+      alreadyApplied = existing.rowCount > 0;
+    }
+
+    if (latest && !alreadyApplied) {
+      const delta = deltaForLedgerType(latest.type, latest.amount);
+      await applyWalletBalanceHoldDelta(client, withdrawal.walletId, withdrawal.currency, delta);
       await client.query(
         `INSERT INTO ledger(
           id, withdrawal_id, user_id, wallet_id, currency, type, amount, balance_before, balance_after, at, by_actor, note
@@ -318,7 +357,14 @@ async function commitWithdrawalTransitionPostgres({
           latest.note || null,
         ]
       );
+    } else {
+      // No new money-moving ledger entry for this transition (e.g. a pure
+      // status change) — still touch the row so concurrent transitions on
+      // the same wallet/currency serialize correctly.
+      await client.query('SELECT id FROM wallets WHERE id = $1 FOR UPDATE', [withdrawal.walletId]);
     }
+
+    await upsertWithdrawal(client, withdrawal);
 
     await client.query('COMMIT');
     return { notFound: false, conflict: false };

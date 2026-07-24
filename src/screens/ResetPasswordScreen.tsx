@@ -14,6 +14,7 @@ import {
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { API_BASE, getApiLanguage } from '../api/client';
 import { useLanguage } from '../i18n/LanguageContext';
+import { getApiErrorMessage } from '../utils/apiErrorMessage';
 
 export default function ResetPasswordScreen() {
   const navigation = useNavigation<any>();
@@ -58,16 +59,22 @@ export default function ResetPasswordScreen() {
           ? t('auth.resetTokenInvalid')
           : data.error === 'password_too_short'
           ? t('auth.passwordTooShort')
-          : t('common.error');
-        Alert.alert(t('common.error'), msg);
-        return;
+          : null;
+        if (msg) {
+          Alert.alert(t('common.error'), msg);
+          return;
+        }
+        const apiErr: any = new Error(data.error || data.message || 'Reset password failed');
+        apiErr.status = res.status;
+        apiErr.errorCode = data.errorCode;
+        throw apiErr;
       }
 
       Alert.alert(t('auth.resetSuccess'), t('auth.resetSuccessMsg'), [
         { text: t('common.confirm'), onPress: () => navigation.navigate('Auth') },
       ]);
-    } catch (_err) {
-      Alert.alert(t('common.error'), t('auth.checkCredentials'));
+    } catch (err: any) {
+      Alert.alert(t('common.error'), getApiErrorMessage(err, t));
     } finally {
       setLoading(false);
     }

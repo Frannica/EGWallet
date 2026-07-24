@@ -2,7 +2,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { pool } = require('./pool');
-const { alignWalletBalanceBeforeMutation } = require('./walletBalanceAlign');
+const { lockWalletBalanceRow } = require('./walletBalanceAlign');
 const { msToDate, upsertRuntimeWalletMetadata } = require('./runtimeWalletSync');
 
 function mapTxRow(tx) {
@@ -152,14 +152,11 @@ async function commitDepositConfirmPostgres({
       };
     }
 
-    const aligned = await alignWalletBalanceBeforeMutation(
-      client,
-      walletId,
-      currency,
-      stateDb,
-      { pendingCredit: netCredited }
-    );
-    const beforeAmount = aligned.amount;
+    // Postgres is the sole source of truth for the pre-operation balance
+    // (JSON only ever seeds a brand-new, never-before-seen row).
+    const beforeAmount = await lockWalletBalanceRow(client, walletId, currency, {
+      stateDb, pendingCredit: netCredited,
+    });
     const afterAmount = beforeAmount + Number(netCredited);
 
     await client.query(

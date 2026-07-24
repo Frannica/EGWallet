@@ -60,9 +60,12 @@ module.exports = function phase11(check) {
     '[Send] Card form renders for both debit and credit',
     SEND.includes("(withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? ("),
   );
+  // Superseded by the localized send.creditCardLabel i18n key (i18n pass) —
+  // the literal 'Credit Card' string sent as bankName was replaced with
+  // t('send.creditCardLabel'), preserving the same behavior in the user's language.
   check(
-    "[Send] onWithdrawConfirmed sends 'Credit Card' as bankName for credit method",
-    SEND.includes("withdrawalMethod === 'credit' ? 'Credit Card'"),
+    "[Send] onWithdrawConfirmed sends localized credit-card label as bankName for credit method",
+    SEND.includes("withdrawalMethod === 'credit' ? t('send.creditCardLabel')"),
   );
   check(
     '[Send] onWithdrawConfirmed sends last4 only for credit/debit (never full PAN)',

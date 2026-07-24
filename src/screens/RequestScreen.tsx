@@ -17,6 +17,7 @@ import { getApiErrorMessage } from '../utils/apiErrorMessage';
 import { OfflineErrorBanner, useNetworkStatus } from '../utils/OfflineError';
 import QRCode from 'react-native-qrcode-svg';
 import { useToast } from '../utils/toast';
+import { formatStatusLabel } from '../utils/safeDisplay';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -250,7 +251,7 @@ export default function RequestScreen() {
             walletId: realWalletId,
             amount: majorToMinor(amountNum, contactCurrency),
             currency: contactCurrency,
-            memo: req.note || `Request from ${req.firstName} ${req.lastName}`,
+            memo: req.note || t('request.requestFromMemo').replace('{{name}}', `${req.firstName} ${req.lastName}`),
             recipientHandle: contactInfo.trim() || undefined,
           }),
         });
@@ -269,7 +270,7 @@ export default function RequestScreen() {
       direction: 'out',
       amount: majorToMinor(amountNum, contactCurrency),
       currency: contactCurrency,
-      memo: `Money request to ${req.firstName} ${req.lastName}`,
+      memo: t('request.moneyRequestToMemo').replace('{{name}}', `${req.firstName} ${req.lastName}`),
     });
     setContactFirstName('');
     setContactLastName('');
@@ -324,7 +325,9 @@ export default function RequestScreen() {
 
     Alert.alert(
       t('request.confirmPayrollTitle'),
-      `Pay ${getCurrencySymbol(payrollCurrency)}${formatMajorAmount(amountNum, payrollCurrency)} ${payrollCurrency} to ${selectedEmployee.firstName} ${selectedEmployee.lastName}?`,
+      t('request.confirmPayrollBody')
+        .replace('{{amount}}', `${getCurrencySymbol(payrollCurrency)}${formatMajorAmount(amountNum, payrollCurrency)} ${payrollCurrency}`)
+        .replace('{{name}}', `${selectedEmployee.firstName} ${selectedEmployee.lastName}`),
       [
         { text: t('common.cancel'), style: 'cancel' },
         {
@@ -342,7 +345,7 @@ export default function RequestScreen() {
                 selectedEmployee.walletHandle,
                 majorToMinor(amountNum, payrollCurrency),
                 payrollCurrency,
-                payrollNote.trim() || `Payroll payment to ${selectedEmployee.firstName} ${selectedEmployee.lastName}`,
+                payrollNote.trim() || t('request.payrollPaymentToMemo').replace('{{name}}', `${selectedEmployee.firstName} ${selectedEmployee.lastName}`),
                 payrollIdempotencyKeyRef.current,
               );
               // Reset only after confirmed success — retries reuse the same key
@@ -356,7 +359,7 @@ export default function RequestScreen() {
                 contactInfo: selectedEmployee.walletHandle,
                 amount: amountNum,
                 currency: payrollCurrency,
-                note: payrollNote.trim() || 'Payroll payment',
+                note: payrollNote.trim() || t('request.payrollPaymentFallback'),
                 status: 'paid',
                 createdAt: Date.now(),
               };
@@ -366,7 +369,7 @@ export default function RequestScreen() {
                 direction: 'out',
                 amount: majorToMinor(amountNum, payrollCurrency),
                 currency: payrollCurrency,
-                memo: `Payroll to ${req.firstName} ${req.lastName}`,
+                memo: t('request.payrollToMemo').replace('{{name}}', `${req.firstName} ${req.lastName}`),
               });
               setPayrollAmount('');
               setPayrollNote('');
@@ -433,7 +436,7 @@ export default function RequestScreen() {
         body: JSON.stringify({
           amount: majorToMinor(amountNum, qrCurrency),
           currency: qrCurrency,
-          memo: qrMemo || qrPurpose || 'Payment',
+          memo: qrMemo || qrPurpose || t('common.payment'),
           expiryMinutes: 30,
         }),
       });
@@ -502,7 +505,7 @@ export default function RequestScreen() {
               <View style={styles.requestHeader}>
                 <View style={[styles.statusBadge, req.status === 'paid' && styles.statusPaid]}>
                   <Text style={[styles.statusText, req.status === 'paid' && { color: '#2E7D32' }]}>
-                    {req.status.toUpperCase()}
+                    {formatStatusLabel(req.status, 'pending')}
                   </Text>
                 </View>
                 <Text style={styles.dateText}>{formatDate(req.createdAt)}</Text>
@@ -541,7 +544,7 @@ export default function RequestScreen() {
                   style={styles.input}
                   value={contactFirstName}
                   onChangeText={setContactFirstName}
-                  placeholder="Jane"
+                  placeholder={t('request.contactFirstNamePlaceholder')}
                   placeholderTextColor="#999"
                   autoCapitalize="words"
                 />
@@ -552,7 +555,7 @@ export default function RequestScreen() {
                   style={styles.input}
                   value={contactLastName}
                   onChangeText={setContactLastName}
-                  placeholder="Doe"
+                  placeholder={t('request.contactLastNamePlaceholder')}
                   placeholderTextColor="#999"
                   autoCapitalize="words"
                 />
@@ -640,7 +643,7 @@ export default function RequestScreen() {
                         req.status === 'paid' && { color: '#2E7D32' },
                         req.status === 'cancelled' && { color: '#d32f2f' },
                       ]}>
-                        {req.status.toUpperCase()}
+                        {formatStatusLabel(req.status, 'pending')}
                       </Text>
                     </View>
                     <Text style={styles.dateText}>{formatDate(req.createdAt)}</Text>
@@ -696,7 +699,7 @@ export default function RequestScreen() {
                 style={styles.input}
                 value={empFirstName}
                 onChangeText={setEmpFirstName}
-                placeholder="John"
+                placeholder={t('request.employeeFirstNamePlaceholder')}
                 placeholderTextColor="#999"
                 autoCapitalize="words"
               />
@@ -705,7 +708,7 @@ export default function RequestScreen() {
                 style={styles.input}
                 value={empLastName}
                 onChangeText={setEmpLastName}
-                placeholder="Smith"
+                placeholder={t('request.employeeLastNamePlaceholder')}
                 placeholderTextColor="#999"
                 autoCapitalize="words"
               />
@@ -841,7 +844,7 @@ export default function RequestScreen() {
                         req.status === 'paid' && { color: '#2E7D32' },
                         req.status === 'cancelled' && { color: '#d32f2f' },
                       ]}>
-                        {req.status.toUpperCase()}
+                        {formatStatusLabel(req.status, 'pending')}
                       </Text>
                     </View>
                     <Text style={styles.dateText}>{formatDate(req.createdAt)}</Text>

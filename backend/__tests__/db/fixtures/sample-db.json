@@ -45,6 +45,7 @@
   ],
   "paymentRequests": [],
   "virtualCards": [],
+  "virtualCardCharges": [],
   "budgets": [],
   "devices": [],
   "supportTickets": [],

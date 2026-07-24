@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import { API_BASE } from '../api/client';
 import { useLanguage } from '../i18n/LanguageContext';
 import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
+import { getApiErrorMessage } from '../utils/apiErrorMessage';
 
 type ProblemCategory = 'bug' | 'payment' | 'account' | 'feature' | 'other';
 
@@ -39,7 +40,7 @@ export default function ReportProblemScreen() {
 
     try {
       const subject = `[${category.toUpperCase()}] ${title}`;
-      const body = `Category: ${categories.find(c => c.value === category)?.label}\nUser: ${auth.user?.email}\n\n${description}`;
+      const body = `${t('common.category')}: ${categories.find(c => c.value === category)?.label}\n${t('common.user')}: ${auth.user?.email}\n\n${description}`;
 
       let ticketId: string | null = null;
       if (auth.token) {
@@ -70,7 +71,12 @@ export default function ReportProblemScreen() {
       );
 
     } catch (error: any) {
-      Alert.alert(t('common.error'), t('report.submitFailed'));
+      const friendly = getApiErrorMessage({
+        message: error?.message,
+        status: typeof error?.status === 'number' ? error.status : undefined,
+        errorCode: error?.errorCode,
+      }, t);
+      Alert.alert(t('common.error'), friendly);
     } finally {
       setIsSubmitting(false);
     }

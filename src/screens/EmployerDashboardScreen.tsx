@@ -81,18 +81,22 @@ export default function EmployerDashboardScreen() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [lastBatchResult, setLastBatchResult] = useState<BatchResult | null>(null);
 
-  // Registration form — pre-filled with test data
-  const [companyName, setCompanyName] = useState('EGWallet Demo Corp');
-  const [taxId, setTaxId] = useState('GQ-2026-001');
-  const [employeeCount, setEmployeeCount] = useState('5');
+  // Registration form — starts empty; placeholders below show the expected
+  // format only. Pre-filling these with fake "demo" values in a production
+  // build risked a real employer submitting a fake company name/tax ID by
+  // accident if they didn't notice and clear the field.
+  const [companyName, setCompanyName] = useState('');
+  const [taxId, setTaxId] = useState('');
+  const [employeeCount, setEmployeeCount] = useState('');
 
-  // Add employee form — pre-filled with current user
+  // Add employee form — pre-filled with current user's email only (a real,
+  // meaningful default); name/position start empty for the same reason.
   const [employeeEmail, setEmployeeEmail] = useState(auth.user?.email || '');
-  const [employeeName, setEmployeeName] = useState('Demo Employee');
-  const [employeePosition, setEmployeePosition] = useState('Software Engineer');
+  const [employeeName, setEmployeeName] = useState('');
+  const [employeePosition, setEmployeePosition] = useState('');
 
-  // Payroll form — pre-filled with test values
-  const [payrollAmount, setPayrollAmount] = useState('1,000');
+  // Payroll form — starts empty; the employer must enter a real amount.
+  const [payrollAmount, setPayrollAmount] = useState('');
 
   function formatAmountInput(text: string): string {
     const cleaned = text.replace(/[^0-9.]/g, '');
@@ -101,7 +105,7 @@ export default function EmployerDashboardScreen() {
     return parts.length > 1 ? intPart + '.' + parts[1] : intPart;
   }
   const [payrollCurrency, setPayrollCurrency] = useState('XAF');
-  const [payrollMemo, setPayrollMemo] = useState('Monthly Salary - March 2026');
+  const [payrollMemo, setPayrollMemo] = useState(t('employer.defaultPayrollMemo'));
 
   const buildHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
@@ -269,7 +273,7 @@ export default function EmployerDashboardScreen() {
         workerId: `worker-demo-${Date.now()}`,
         workerEmail: employeeEmail.trim().toLowerCase(),
         workerName: employeeName.trim() || employeeEmail.trim(),
-        position: employeePosition.trim() || 'Employee',
+        position: employeePosition.trim() || t('employer.positionFallback'),
         walletId: `wallet-demo-${Date.now()}`,
         status: 'active',
       };
@@ -292,7 +296,7 @@ export default function EmployerDashboardScreen() {
       .join('\n');
     Alert.alert(
       t('employer.payrollLoaded'),
-      `${readyCount} employee(s) ready for payment:\n\n${preview}\n\nPress "Run Payroll" to execute.`,
+      t('employer.payrollLoadedBody').replace('{count}', String(readyCount)).replace('{preview}', preview),
       [{ text: t('common.confirm') }]
     );
   }
@@ -319,7 +323,10 @@ export default function EmployerDashboardScreen() {
     if (fundingBalance < totalMinor) {
       Alert.alert(
         t('employer.insufficientFunds'),
-        `Funding wallet has ${fundingBalance.toLocaleString()} ${payrollCurrency} (minor units), but need ${totalMinor.toLocaleString()}.\n\nTap "Fund Wallet (Demo)" to add test funds.`
+        t('employer.insufficientFundsBody')
+          .replace('{balance}', fundingBalance.toLocaleString())
+          .replace('{currency}', payrollCurrency)
+          .replace('{needed}', totalMinor.toLocaleString())
       );
       return;
     }
@@ -327,7 +334,12 @@ export default function EmployerDashboardScreen() {
     const total = amount * readyEmployees.length; // major units, for display only
     Alert.alert(
       t('employer.confirmPayroll'),
-      `Pay ${readyEmployees.length} employee(s)?\n\nAmount: ${amount.toLocaleString()} ${payrollCurrency} each\nTotal: ${total.toLocaleString()} ${payrollCurrency}`,
+      t('employer.confirmPayrollBody')
+        .replace('{count}', String(readyEmployees.length))
+        .replace('{amount}', amount.toLocaleString())
+        .replace('{currency}', payrollCurrency)
+        .replace('{total}', total.toLocaleString())
+        .replace('{currency2}', payrollCurrency),
       [
         { text: t('common.cancel'), style: 'cancel' },
         {
@@ -376,7 +388,10 @@ export default function EmployerDashboardScreen() {
 
               Alert.alert(
                 data.failureCount === 0 ? t('employer.payrollComplete') : t('employer.payrollPartial'),
-                `✅ ${data.successCount} paid successfully\n❌ ${data.failureCount} failed\n\nBatch ID: ${data.batchId}`
+                t('employer.payrollResultBody')
+                  .replace('{success}', String(data.successCount))
+                  .replace('{failed}', String(data.failureCount))
+                  .replace('{batchId}', data.batchId)
               );
             } catch (e: any) {
               const friendly = getApiErrorMessage({
@@ -386,7 +401,7 @@ export default function EmployerDashboardScreen() {
                 code: e?.code,
               }, t);
               Alert.alert(
-                t('employer.payrollError') || 'Payroll Failed',
+                t('employer.payrollError'),
                 friendly,
               );
             } finally {
@@ -439,7 +454,7 @@ export default function EmployerDashboardScreen() {
                 style={styles.input}
                 value={companyName}
                 onChangeText={setCompanyName}
-                placeholder="EGWallet Demo Corp"
+                placeholder={t('employer.companyNamePlaceholder')}
                 placeholderTextColor="#aaa"
               />
             </View>
@@ -450,7 +465,7 @@ export default function EmployerDashboardScreen() {
                 style={styles.input}
                 value={taxId}
                 onChangeText={setTaxId}
-                placeholder="GQ-2026-001"
+                placeholder={t('employer.taxIdPlaceholder')}
                 placeholderTextColor="#aaa"
               />
             </View>
@@ -574,7 +589,7 @@ export default function EmployerDashboardScreen() {
                     style={styles.input}
                     value={employeeEmail}
                     onChangeText={setEmployeeEmail}
-                    placeholder="employee@example.com"
+                    placeholder={t('employer.employeeEmailPlaceholder')}
                     keyboardType="email-address"
                     autoCapitalize="none"
                     placeholderTextColor="#aaa"
@@ -786,15 +801,15 @@ export default function EmployerDashboardScreen() {
                           batch.status === 'completed' ? styles.statusGreen : styles.statusOrange,
                         ]}>
                           <Text style={styles.statusBadgeText}>
-                            {batch.status === 'completed' ? '✅ Complete' : '⚠️ Partial'}
+                            {batch.status === 'completed' ? t('employer.statusComplete') : t('employer.statusPartial')}
                           </Text>
                         </View>
                       </View>
                       <Text style={styles.batchDate}>
-                        {new Date(batch.createdAt).toLocaleDateString()} · Period: {batch.payPeriod}
+                        {new Date(batch.createdAt).toLocaleDateString()} · {t('employer.periodLabel')}: {batch.payPeriod}
                       </Text>
                       <Text style={styles.batchSummary}>
-                        ✅ {batch.successCount} paid · ❌ {batch.failureCount} failed · {batch.totalItems} total
+                        ✅ {batch.successCount} {t('employer.paidLabel')} · ❌ {batch.failureCount} {t('employer.failedLabel')} · {batch.totalItems} {t('employer.totalLabel')}
                       </Text>
                     </View>
                   ))
@@ -812,9 +827,9 @@ export default function EmployerDashboardScreen() {
               <Text style={styles.sectionTitle}>{t('employer.transactionLog').toUpperCase()}</Text>
             </View>
 
-            <Text style={styles.batchId} numberOfLines={1}>Batch: {lastBatchResult.batchId}</Text>
+            <Text style={styles.batchId} numberOfLines={1}>{t('employer.batchLabel')}: {lastBatchResult.batchId}</Text>
             <Text style={[styles.batchSummary, { marginTop: 4, marginBottom: 12 }]}>
-              ✅ {lastBatchResult.successCount} successful · ❌ {lastBatchResult.failureCount} failed
+              ✅ {lastBatchResult.successCount} {t('employer.successfulLabel')} · ❌ {lastBatchResult.failureCount} {t('employer.failedLabel')}
             </Text>
 
             {lastBatchResult.results.map((r, i) => (

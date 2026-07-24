@@ -5,6 +5,13 @@ import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 
 export type User = { id: string; email: string; region?: string };
 
+function throwHttpError(status: number, body: any, fallback: string): never {
+  const err: any = new Error(body?.error || body?.message || fallback);
+  err.status = status;
+  if (body?.errorCode) err.errorCode = body.errorCode;
+  throw err;
+}
+
 // Module-level cache so getDeviceId() is only awaited once per session
 let _deviceId: string | null = null;
 async function cachedDeviceId(): Promise<string> {
@@ -23,12 +30,12 @@ export async function register(email: string, password: string, region?: string,
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Register failed');
+      throwHttpError(res.status, err, 'Register failed');
     }
     return res.json();
   }, { timeout: 15000, retries: 1 });
 
-  if (!result) throw new Error('Registration failed. Please check your connection.');
+  if (!result) throw new Error('Network request failed');
   return result;
 }
 
@@ -42,12 +49,12 @@ export async function login(email: string, password: string, deviceInfo?: any) {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Login failed');
+      throwHttpError(res.status, err, 'Login failed');
     }
     return res.json();
   }, { timeout: 15000, retries: 1 });
 
-  if (!result) throw new Error('Login failed. Please check your connection.');
+  if (!result) throw new Error('Network request failed');
   return result;
 }
 
@@ -57,11 +64,14 @@ export async function me(token: string) {
     const res = await fetchWithTokenRefresh(`${API_BASE}/me`, {
       headers: { 'x-device-id': deviceId, 'Accept-Language': getApiLanguage() },
     });
-    if (!res.ok) throw new Error('Fetch profile failed');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throwHttpError(res.status, err, 'Fetch profile failed');
+    }
     return res.json();
   }, { timeout: 20000, retries: 2 });
 
-  if (!result) throw new Error('Failed to fetch profile. Please check your connection.');
+  if (!result) throw new Error('Network request failed');
   return result;
 }
 
@@ -73,12 +83,12 @@ export async function listWallets(token: string) {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Fetch wallets failed');
+      throwHttpError(res.status, err, 'Fetch wallets failed');
     }
     return res.json();
   }, { timeout: 20000, retries: 2 });
 
-  if (!result) throw new Error('Could not reach the server. Check that your computer and phone are on the same Wi-Fi.');
+  if (!result) throw new Error('Network request failed');
   return result;
 }
 

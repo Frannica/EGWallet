@@ -27,6 +27,7 @@ import { getApiErrorMessage } from '../utils/apiErrorMessage';
 import { formatMinDepositLabel, minDepositMajor } from '../utils/depositLimits';
 import { majorToMinor, formatCurrency, getCurrencySymbol, getCurrencyName, CURRENCY_INFO } from '../utils/currency';
 import { creditLocalBalance } from '../utils/localBalance';
+import { formatCurrencyNameSearch } from '../utils/safeDisplay';
 import { TOPUP_FREE_LIMIT, TOPUP_FEE_RATE } from '../config/fees';
 import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 import {
@@ -364,8 +365,8 @@ export default function DepositScreen() {
       currency,
       senderCurrency: currency,
       fee: fb?.fee ?? 0,
-      feeLabel: fb?.fee > 0 ? `Top-up Fee (${((fb.feeRate ?? 0) * 100).toFixed(1)}%)` : undefined,
-      recipientName: 'Your Wallet',
+      feeLabel: fb?.fee > 0 ? t('receipt.topUpFeeLabel').replace('{percent}', ((fb.feeRate ?? 0) * 100).toFixed(1)) : undefined,
+      recipientName: t('receipt.yourWallet'),
       timestamp: Date.now(),
       type: 'deposit',
       status: 'completed',
@@ -572,7 +573,7 @@ export default function DepositScreen() {
                     const q = currencySearch.toUpperCase().trim();
                     const list = q
                       ? [...AFRICAN_CURRENCIES_SORTED, ...WORLD_CURRENCIES_SORTED].filter(
-                          c => c.includes(q) || CURRENCY_INFO[c]?.name.toUpperCase().includes(q)
+                          c => c.includes(q) || formatCurrencyNameSearch(CURRENCY_INFO[c]?.name).includes(q)
                         )
                       : currencyTab === 'africa' ? AFRICAN_CURRENCIES_SORTED : WORLD_CURRENCIES_SORTED;
                     return list.map(code => (

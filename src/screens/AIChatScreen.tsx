@@ -9,8 +9,18 @@ import { useNavigation } from '@react-navigation/native';
 import { getLocalBalances, getPendingWithdrawals } from '../utils/localBalance';
 import { formatMinorAmount } from '../utils/currency';
 import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
+import { formatStatusLabel } from '../utils/safeDisplay';
+import { useLanguage } from '../i18n/LanguageContext';
 
-const SUPPORTED_LANGUAGES = ['en', 'es', 'fr', 'pt', 'zh', 'ja', 'ru', 'de'];
+// Kept in sync with the app-wide SupportedLanguage union in i18n/translations.ts
+// ('en' | 'fr' | 'es' | 'pt' | 'ar' | 'zh' | 'ja'), plus 'ru' / 'de' as bonus
+// languages unique to this screen. Previously this list omitted 'ar' entirely,
+// so an Arabic-speaking user who set the app language to Arabic in Settings
+// would silently see Felisa fall back to English with no way to pick Arabic —
+// a real mismatch between this screen's language support and the rest of the
+// app. 'ar' is now supported end-to-end (SUPPORTED_LANGUAGES, UI strings,
+// initial greeting, and the language picker below).
+const SUPPORTED_LANGUAGES = ['en', 'es', 'fr', 'pt', 'ar', 'zh', 'ja', 'ru', 'de'];
 
 // All UI strings translated per language
 const UI: Record<string, Record<string, string>> = {
@@ -40,6 +50,17 @@ const UI: Record<string, Record<string, string>> = {
     inputPlaceholder: 'Ask me anything...', fillRequiredFields: 'Please fill in all required fields',
     fraudAlertTitle: '\uD83D\uDEA8 FRAUD ALERT - URGENT', escalatedTitle: '\u26A1 Escalated Support Ticket', ticketCreatedTitle: '\u2713 Support Ticket Created',
     expectedResponse: 'Expected response:', priority: 'Priority:', recentTransactions: 'Recent Transactions:',
+    ev_tx_failed_open: 'Your transaction failed.', ev_tx_failed_close: 'Please check your balance and try again.',
+    ev_amount_line: 'Amount: {{amount}}.', ev_reason_line: 'Reason: {{reason}}.',
+    ev_withdrawal_open: 'Your withdrawal is being processed.', ev_withdrawal_close: 'Withdrawals typically take 3\u20135 business days.',
+    ev_suspicious: '\u26A0\uFE0F Suspicious activity detected on your account. Please review your recent transactions and change your password if needed.',
+    ev_new_recipient_open: '\u26A0\uFE0F Security Warning: You are sending money to a new recipient.',
+    ev_new_recipient_id_line: 'Recipient ID: {{recipient}}.', ev_new_recipient_close: 'Please verify their identity before confirming.',
+    ev_act_retry: 'Retry transaction', ev_act_view_tx: 'View transactions', ev_act_contact_support: 'Contact support',
+    balance_line: 'Your available balance is {{amount}}.', ticket_prefix: 'Ticket #',
+    report_unauthorized_msg: 'I want to report transaction {{txId}} ({{amount}}) as unauthorized.',
+    enter_field_placeholder: 'Enter {{field}}', skip_data_collection_msg: 'Skip data collection and create general ticket',
+    submitting_case_msg: 'Submitting case details',
   },
   es: {
     init_s1: 'Revisar mi transacción', init_s2: 'Reportar un problema', init_s3: 'Límites de cuenta', init_s4: 'Cómo enviar dinero',
@@ -67,6 +88,17 @@ const UI: Record<string, Record<string, string>> = {
     inputPlaceholder: 'Pregúntame lo que quieras...', fillRequiredFields: 'Por favor, completa todos los campos obligatorios',
     fraudAlertTitle: '🚨 ALERTA DE FRAUDE - URGENTE', escalatedTitle: '⚡ Ticket de soporte escalado', ticketCreatedTitle: '✓ Ticket de soporte creado',
     expectedResponse: 'Respuesta esperada:', priority: 'Prioridad:', recentTransactions: 'Transacciones recientes:',
+    ev_tx_failed_open: 'Su transacción falló.', ev_tx_failed_close: 'Verifique su saldo e intente nuevamente.',
+    ev_amount_line: 'Monto: {{amount}}.', ev_reason_line: 'Motivo: {{reason}}.',
+    ev_withdrawal_open: 'Su retiro está siendo procesado.', ev_withdrawal_close: 'Los retiros tardan de 3 a 5 días hábiles.',
+    ev_suspicious: '\u26A0\uFE0F Se detectó actividad sospechosa en su cuenta. Revise sus transacciones recientes y cambie su contraseña si es necesario.',
+    ev_new_recipient_open: '\u26A0\uFE0F Advertencia de seguridad: está enviando dinero a un nuevo destinatario.',
+    ev_new_recipient_id_line: 'ID del destinatario: {{recipient}}.', ev_new_recipient_close: 'Verifique su identidad antes de confirmar.',
+    ev_act_retry: 'Reintentar', ev_act_view_tx: 'Ver transacciones', ev_act_contact_support: 'Contactar soporte',
+    balance_line: 'Su saldo disponible es {{amount}}.', ticket_prefix: 'Ticket n.\u00BA ',
+    report_unauthorized_msg: 'Quiero reportar la transacción {{txId}} ({{amount}}) como no autorizada.',
+    enter_field_placeholder: 'Ingrese {{field}}', skip_data_collection_msg: 'Omitir recopilación de datos y crear un ticket general',
+    submitting_case_msg: 'Enviando detalles del caso',
   },
   fr: {
     init_s1: 'Vérifier ma transaction', init_s2: 'Signaler un problème', init_s3: 'Limites du compte', init_s4: 'Comment envoyer de l\'argent',
@@ -94,6 +126,17 @@ const UI: Record<string, Record<string, string>> = {
     inputPlaceholder: 'Posez-moi n\'importe quelle question...', fillRequiredFields: 'Veuillez remplir tous les champs obligatoires',
     fraudAlertTitle: '\uD83D\uDEA8 ALERTE FRAUDE - URGENT', escalatedTitle: '\u26A1 Ticket de support escalad\u00E9', ticketCreatedTitle: '\u2713 Ticket de support cr\u00E9\u00E9',
     expectedResponse: 'R\u00E9ponse attendue :', priority: 'Priorit\u00E9 :', recentTransactions: 'Transactions r\u00E9centes :',
+    ev_tx_failed_open: 'Votre transaction a échoué.', ev_tx_failed_close: 'Vérifiez votre solde et réessayez.',
+    ev_amount_line: 'Montant : {{amount}}.', ev_reason_line: 'Motif : {{reason}}.',
+    ev_withdrawal_open: 'Votre retrait est en cours de traitement.', ev_withdrawal_close: 'Les retraits prennent généralement 3 à 5 jours ouvrés.',
+    ev_suspicious: '\u26A0\uFE0F Activité suspecte détectée sur votre compte. Vérifiez vos transactions récentes et changez votre mot de passe si nécessaire.',
+    ev_new_recipient_open: '\u26A0\uFE0F Avertissement de sécurité : vous envoyez de l\'argent à un nouveau destinataire.',
+    ev_new_recipient_id_line: 'ID du destinataire : {{recipient}}.', ev_new_recipient_close: 'Vérifiez son identité avant de confirmer.',
+    ev_act_retry: 'Réessayer', ev_act_view_tx: 'Voir transactions', ev_act_contact_support: 'Contacter support',
+    balance_line: 'Votre solde disponible est de {{amount}}.', ticket_prefix: 'Ticket n\u00B0 ',
+    report_unauthorized_msg: 'Je souhaite signaler la transaction {{txId}} ({{amount}}) comme non autorisée.',
+    enter_field_placeholder: 'Entrez {{field}}', skip_data_collection_msg: 'Ignorer la collecte de données et créer un ticket général',
+    submitting_case_msg: 'Envoi des détails du dossier',
   },
   pt: {
     init_s1: 'Verificar minha transação', init_s2: 'Reportar um problema', init_s3: 'Limites da conta', init_s4: 'Como enviar dinheiro',
@@ -121,6 +164,55 @@ const UI: Record<string, Record<string, string>> = {
     inputPlaceholder: 'Pergunte-me qualquer coisa...', fillRequiredFields: 'Por favor, preencha todos os campos obrigat\u00F3rios',
     fraudAlertTitle: '\uD83D\uDEA8 ALERTA DE FRAUDE - URGENTE', escalatedTitle: '\u26A1 Ticket de suporte escalado', ticketCreatedTitle: '\u2713 Ticket de suporte criado',
     expectedResponse: 'Resposta esperada:', priority: 'Prioridade:', recentTransactions: 'Transa\u00E7\u00F5es recentes:',
+    ev_tx_failed_open: 'Sua transação falhou.', ev_tx_failed_close: 'Verifique seu saldo e tente novamente.',
+    ev_amount_line: 'Valor: {{amount}}.', ev_reason_line: 'Motivo: {{reason}}.',
+    ev_withdrawal_open: 'Seu saque está sendo processado.', ev_withdrawal_close: 'Os saques geralmente levam de 3 a 5 dias úteis.',
+    ev_suspicious: '\u26A0\uFE0F Atividade suspeita detectada em sua conta. Revise suas transações recentes e altere sua senha, se necessário.',
+    ev_new_recipient_open: '\u26A0\uFE0F Aviso de segurança: você está enviando dinheiro para um novo destinatário.',
+    ev_new_recipient_id_line: 'ID do destinatário: {{recipient}}.', ev_new_recipient_close: 'Verifique a identidade antes de confirmar.',
+    ev_act_retry: 'Tentar novamente', ev_act_view_tx: 'Ver transações', ev_act_contact_support: 'Contatar suporte',
+    balance_line: 'Seu saldo disponível é {{amount}}.', ticket_prefix: 'Ticket #',
+    report_unauthorized_msg: 'Quero reportar a transação {{txId}} ({{amount}}) como não autorizada.',
+    enter_field_placeholder: 'Digite {{field}}', skip_data_collection_msg: 'Pular coleta de dados e criar um ticket geral',
+    submitting_case_msg: 'Enviando detalhes do caso',
+  },
+  ar: {
+    init_s1: 'تحقق من معاملتي', init_s2: 'الإبلاغ عن مشكلة', init_s3: 'حدود الحساب', init_s4: 'كيفية إرسال الأموال',
+    qa_track: 'تتبع المعاملة', qa_track_q: 'تحقق من حالة أحدث معاملة لي',
+    qa_issue: 'الإبلاغ عن مشكلة', qa_issue_q: 'أريد الإبلاغ عن مشكلة',
+    qa_card: 'البطاقات الافتراضية', qa_card_q: 'كيف أنشئ بطاقة افتراضية؟',
+    qa_verify: 'التحقق من الهوية', qa_verify_q: 'ساعدني في التحقق من هويتي',
+    typing: 'فيليسا تكتب...',
+    fb_send: 'لإرسال الأموال، اضغط على علامة التبويب **الدفع** في الأسفل، ثم اختر **إرسال أموال**. أدخل معرف محفظة المستلم والمبلغ والعملة.',
+    fb_receive: 'لطلب الأموال، اضغط على **الدفع → طلب أموال**. شارك معرف محفظتك أو رمز QR مع المرسل.',
+    fb_card: 'يمكنك إنشاء ما يصل إلى 5 بطاقات افتراضية في علامة التبويب **البطاقة**. يمكن استخدام البطاقات الافتراضية للمدفوعات عبر الإنترنت. يمكنك تجميدها/إلغاء تجميدها في أي وقت.',
+    fb_balance: 'يظهر رصيد محفظتك في الشاشة الرئيسية **المحفظة**. اسحب للأسفل للتحديث. يمكنك الاحتفاظ بعملات متعددة.',
+    fb_deposit: 'لإضافة أموال، اضغط على **إضافة أموال** في شاشة المحفظة. أودع باستخدام بطاقة خصم أو ائتمان أو تحويل بنكي.',
+    fb_kyc: 'التحقق من الهوية (KYC) مطلوب لفتح حدود أعلى. اذهب إلى **الإعدادات → التحقق من الهوية** وقم بتحميل مستند هوية صالح.',
+    fb_fee: 'رسوم EGWallet:\n\n- إضافة أموال: مجانية لأول 6 عمليات إيداع، ثم 0.5%\n- الإرسال / الاستلام: مجاني\n- تحويل العملات: 1.15%\n- السحب المحلي: 1.28%\n- السحب الدولي: 1.75%\n\nتظهر جميع الرسوم قبل التأكيد.',
+    fb_currency: 'يدعم EGWallet أكثر من 50 عملة بما في ذلك XAF وUSD وEUR وGBP وNGN وGHS وZAR وKES وINR وCNY وJPY وBRL. حدد عملتك المفضلة في **الإعدادات**.',
+    fb_report: 'للإبلاغ عن مشكلة، اذهب إلى **سجل المعاملات** واضغط على **نزاع** بجانب المعاملة، أو استخدم هذه المحادثة لإنشاء تذكرة دعم.',
+    fb_support: 'فريق الدعم لدينا متاح على مدار الساعة طوال أيام الأسبوع. راسلنا عبر البريد الإلكتروني على **support@egwalletfinance.com or egwallet.business@gmail.com** أو زر مركز المساعدة في الإعدادات.',
+    fb_default: 'أنا فيليسا، مساعدة EGWallet الخاصة بك. يمكنني المساعدة في إرسال الأموال وإدارة البطاقات والتحقق من الأرصدة وحل المشكلات.',
+    fb_s_send: 'كيف أستلم الأموال؟', fb_s_receive: 'كيف أرسل الأموال؟', fb_s_card: 'كيف أجمد بطاقة؟',
+    fb_s_balance: 'كيف أضيف أموالاً؟', fb_s_deposit: 'ما هي حدود الإيداع؟', fb_s_kyc: 'ما هي حدود المعاملات؟',
+    fb_s_fee: 'كيف أرسل الأموال؟', fb_s_currency: 'كيف أغير عملتي؟', fb_s_report: 'كيف أتواصل مع الدعم؟',
+    fb_s_support: 'كيف أرسل الأموال؟', fb_s_default: 'إرسال أموال',
+    available24_7: 'متاح على مدار الساعة', quickActions: 'إجراءات سريعة', skip: 'تخطي', submitDetails: 'إرسال التفاصيل',
+    inputPlaceholder: 'اسألني أي شيء...', fillRequiredFields: 'يرجى ملء جميع الحقول المطلوبة',
+    fraudAlertTitle: '\uD83D\uDEA8 تنبيه احتيال - عاجل', escalatedTitle: '\u26A1 تذكرة دعم مصعدة', ticketCreatedTitle: '\u2713 تم إنشاء تذكرة الدعم',
+    expectedResponse: 'الرد المتوقع:', priority: 'الأولوية:', recentTransactions: 'المعاملات الأخيرة:',
+    ev_tx_failed_open: 'فشلت معاملتك.', ev_tx_failed_close: 'يرجى التحقق من رصيدك والمحاولة مرة أخرى.',
+    ev_amount_line: 'المبلغ: {{amount}}.', ev_reason_line: 'السبب: {{reason}}.',
+    ev_withdrawal_open: 'جارٍ معالجة عملية السحب الخاصة بك.', ev_withdrawal_close: 'عادةً ما تستغرق عمليات السحب من 3 إلى 5 أيام عمل.',
+    ev_suspicious: '\u26A0\uFE0F تم اكتشاف نشاط مشبوه في حسابك. يرجى مراجعة معاملاتك الأخيرة وتغيير كلمة المرور إذا لزم الأمر.',
+    ev_new_recipient_open: '\u26A0\uFE0F تحذير أمني: أنت ترسل أموالاً إلى مستلم جديد.',
+    ev_new_recipient_id_line: 'معرف المستلم: {{recipient}}.', ev_new_recipient_close: 'يرجى التحقق من هويته قبل التأكيد.',
+    ev_act_retry: 'إعادة المحاولة', ev_act_view_tx: 'عرض المعاملات', ev_act_contact_support: 'الاتصال بالدعم',
+    balance_line: 'رصيدك المتاح هو {{amount}}.', ticket_prefix: 'التذكرة رقم ',
+    report_unauthorized_msg: 'أريد الإبلاغ عن المعاملة {{txId}} ({{amount}}) كمعاملة غير مصرح بها.',
+    enter_field_placeholder: 'أدخل {{field}}', skip_data_collection_msg: 'تخطي جمع البيانات وإنشاء تذكرة عامة',
+    submitting_case_msg: 'جارٍ إرسال تفاصيل الحالة',
   },
   zh: {
     init_s1: '查看我的交易', init_s2: '报告问题', init_s3: '账户限额', init_s4: '如何汇款',
@@ -148,6 +240,17 @@ const UI: Record<string, Record<string, string>> = {
     inputPlaceholder: '问我任何问题...', fillRequiredFields: '请填写所有必填字段',
     fraudAlertTitle: '🚨 欺诫警报 - 紧急', escalatedTitle: '⚡ 已升级的支持票', ticketCreatedTitle: '✓ 支持工单已创建',
     expectedResponse: '预计响应时间：', priority: '优先级：', recentTransactions: '最近交易：',
+    ev_tx_failed_open: '您的交易失败。', ev_tx_failed_close: '请检查您的余额并重试。',
+    ev_amount_line: '金额：{{amount}}。', ev_reason_line: '原因：{{reason}}。',
+    ev_withdrawal_open: '您的提现正在处理中。', ev_withdrawal_close: '提现通常需要3至5个工作日。',
+    ev_suspicious: '\u26A0\uFE0F 检测到您账户存在可疑活动。请查看您最近的交易，并在必要时更改密码。',
+    ev_new_recipient_open: '\u26A0\uFE0F 安全警告：您正在向新收款人转账。',
+    ev_new_recipient_id_line: '收款人ID：{{recipient}}。', ev_new_recipient_close: '请在确认前核实其身份。',
+    ev_act_retry: '重试交易', ev_act_view_tx: '查看交易', ev_act_contact_support: '联系客服',
+    balance_line: '您的可用余额为{{amount}}。', ticket_prefix: '工单 #',
+    report_unauthorized_msg: '我想将交易{{txId}}（{{amount}}）报告为未经授权。',
+    enter_field_placeholder: '请输入{{field}}', skip_data_collection_msg: '跳过数据收集并创建通用工单',
+    submitting_case_msg: '正在提交案例详情',
   },
   ja: {
     init_s1: '取引を確認', init_s2: '問題を報告', init_s3: 'アカウントの限度額', init_s4: '送金方法',
@@ -175,6 +278,17 @@ const UI: Record<string, Record<string, string>> = {
     inputPlaceholder: '何でも肅いてください...', fillRequiredFields: '必須フィールドをすべて入力してください',
     fraudAlertTitle: '🚨 不正アクセス警告 - 緊急', escalatedTitle: '⚡ エスカレーションされたサポートチケット', ticketCreatedTitle: '✓ サポートチケット作成済み',
     expectedResponse: '予想応答時間：', priority: '優先度：', recentTransactions: '最近の取引：',
+    ev_tx_failed_open: '取引に失敗しました。', ev_tx_failed_close: '残高をご確認の上、もう一度お試しください。',
+    ev_amount_line: '金額：{{amount}}。', ev_reason_line: '理由：{{reason}}。',
+    ev_withdrawal_open: '出金処理中です。', ev_withdrawal_close: '出金には通常3～5営業日かかります。',
+    ev_suspicious: '\u26A0\uFE0F アカウントで不審な操作が検出されました。最近の取引を確認し、必要に応じてパスワードを変更してください。',
+    ev_new_recipient_open: '\u26A0\uFE0F セキュリティ警告：新しい受取人に送金しようとしています。',
+    ev_new_recipient_id_line: '受取人ID：{{recipient}}。', ev_new_recipient_close: '確定する前に本人確認を行ってください。',
+    ev_act_retry: '再試行', ev_act_view_tx: '取引を見る', ev_act_contact_support: 'サポートに連絡',
+    balance_line: 'ご利用可能残高は{{amount}}です。', ticket_prefix: 'チケット #',
+    report_unauthorized_msg: '取引{{txId}}（{{amount}}）を不正利用として報告したいです。',
+    enter_field_placeholder: '{{field}}を入力してください', skip_data_collection_msg: 'データ収集をスキップして一般チケットを作成',
+    submitting_case_msg: 'ケースの詳細を送信中',
   },
   ru: {
     init_s1: 'Проверить транзакцию', init_s2: 'Сообщить о проблеме', init_s3: 'Лимиты аккаунта', init_s4: 'Как отправить деньги',
@@ -202,6 +316,17 @@ const UI: Record<string, Record<string, string>> = {
     inputPlaceholder: 'Спросите меня о чём угодно...', fillRequiredFields: 'Пожалуйста, заполните все обязательные поля',
     fraudAlertTitle: '🚨 МОШЕННИЧЕСТВО - СРОЧНО', escalatedTitle: '⚡ Эскалированный тикет поддержки', ticketCreatedTitle: '✓ Тикет поддержки создан',
     expectedResponse: 'Ожидаемый ответ:', priority: 'Приоритет:', recentTransactions: 'Последние транзакции:',
+    ev_tx_failed_open: 'Ваша транзакция не удалась.', ev_tx_failed_close: 'Проверьте баланс и повторите попытку.',
+    ev_amount_line: 'Сумма: {{amount}}.', ev_reason_line: 'Причина: {{reason}}.',
+    ev_withdrawal_open: 'Ваш вывод средств обрабатывается.', ev_withdrawal_close: 'Вывод средств обычно занимает 3–5 рабочих дней.',
+    ev_suspicious: '\u26A0\uFE0F Обнаружена подозрительная активность на вашем счете. Проверьте последние транзакции и при необходимости смените пароль.',
+    ev_new_recipient_open: '\u26A0\uFE0F Предупреждение безопасности: вы отправляете деньги новому получателю.',
+    ev_new_recipient_id_line: 'ID получателя: {{recipient}}.', ev_new_recipient_close: 'Проверьте личность получателя перед подтверждением.',
+    ev_act_retry: 'Повторить', ev_act_view_tx: 'Просмотреть транзакции', ev_act_contact_support: 'Связаться с поддержкой',
+    balance_line: 'Ваш доступный баланс составляет {{amount}}.', ticket_prefix: 'Тикет \u2116',
+    report_unauthorized_msg: 'Я хочу сообщить о транзакции {{txId}} ({{amount}}) как о несанкционированной.',
+    enter_field_placeholder: 'Введите {{field}}', skip_data_collection_msg: 'Пропустить сбор данных и создать общий тикет',
+    submitting_case_msg: 'Отправка данных дела',
   },
   de: {
     init_s1: 'Meine Transaktion prüfen', init_s2: 'Problem melden', init_s3: 'Kontolimits', init_s4: 'Wie sende ich Geld',
@@ -229,6 +354,17 @@ const UI: Record<string, Record<string, string>> = {
     inputPlaceholder: 'Fragen Sie mich alles...', fillRequiredFields: 'Bitte f\u00FCllen Sie alle Pflichtfelder aus',
     fraudAlertTitle: '\uD83D\uDEA8 BETRUGSALARM - DRINGEND', escalatedTitle: '\u26A1 Eskaliertes Support-Ticket', ticketCreatedTitle: '\u2713 Support-Ticket erstellt',
     expectedResponse: 'Erwartete Antwort:', priority: 'Priorit\u00E4t:', recentTransactions: 'Aktuelle Transaktionen:',
+    ev_tx_failed_open: 'Ihre Transaktion ist fehlgeschlagen.', ev_tx_failed_close: 'Bitte überprüfen Sie Ihr Guthaben und versuchen Sie es erneut.',
+    ev_amount_line: 'Betrag: {{amount}}.', ev_reason_line: 'Grund: {{reason}}.',
+    ev_withdrawal_open: 'Ihre Auszahlung wird bearbeitet.', ev_withdrawal_close: 'Auszahlungen dauern in der Regel 3–5 Werktage.',
+    ev_suspicious: '\u26A0\uFE0F Verdächtige Aktivität auf Ihrem Konto festgestellt. Bitte überprüfen Sie Ihre letzten Transaktionen und ändern Sie bei Bedarf Ihr Passwort.',
+    ev_new_recipient_open: '\u26A0\uFE0F Sicherheitswarnung: Sie senden Geld an einen neuen Empfänger.',
+    ev_new_recipient_id_line: 'Empfänger-ID: {{recipient}}.', ev_new_recipient_close: 'Bitte überprüfen Sie die Identität, bevor Sie bestätigen.',
+    ev_act_retry: 'Erneut versuchen', ev_act_view_tx: 'Transaktionen anzeigen', ev_act_contact_support: 'Support kontaktieren',
+    balance_line: 'Ihr verfügbares Guthaben beträgt {{amount}}.', ticket_prefix: 'Ticket #',
+    report_unauthorized_msg: 'Ich möchte die Transaktion {{txId}} ({{amount}}) als nicht autorisiert melden.',
+    enter_field_placeholder: 'Geben Sie {{field}} ein', skip_data_collection_msg: 'Datenerfassung überspringen und allgemeines Ticket erstellen',
+    submitting_case_msg: 'Falldetails werden gesendet',
   },
 };
 
@@ -254,6 +390,7 @@ const INITIAL_GREETINGS: Record<string, string> = {
   es: "¡Hola! Me llamo Felisa. ¿En qué puedo ayudarte hoy?",
   fr: "Bonjour ! Je m'appelle Felisa. Comment puis-je vous aider aujourd'hui ?",
   pt: "Olá! Meu nome é Felisa. Como posso ajudá-lo hoje?",
+  ar: "مرحباً! اسمي فيليسا. كيف يمكنني مساعدتك اليوم؟",
   zh: "您好！我叫 Felisa。今天我能帮您什么？",
   ja: "こんにちは！私はFelisaです。本日はどのようにお手伝いできますか？",
   ru: "Здравствуйте! Меня зовут Фелиса. Как я могу помочь вам сегодня?",
@@ -318,7 +455,13 @@ type QuickAction = {
 export default function AIChatScreen({ route }: { route?: any }) {
   const auth = useAuth();
   const { isOnline } = useNetworkStatus();
-  const initialLang = getDeviceLanguage();
+  // Prefer the language the user actually chose for the rest of the app
+  // (Settings → Language) over raw device locale detection. Previously this
+  // screen ignored the app's language preference entirely, so e.g. a user
+  // running the whole app in French could still see Felisa greet them in
+  // whatever the device's OS locale happened to be.
+  const { language: appLanguage } = useLanguage();
+  const initialLang = SUPPORTED_LANGUAGES.includes(appLanguage) ? appLanguage : getDeviceLanguage();
   const [language, setLanguage] = useState<string>(initialLang);
   const [messages, setMessages] = useState<Message[]>([{
     id: '1',
@@ -352,6 +495,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
     { code: 'es', flag: '🇪🇸', name: 'Español' },
     { code: 'fr', flag: '🇫🇷', name: 'Français' },
     { code: 'pt', flag: '🇧🇷', name: 'Português' },
+    { code: 'ar', flag: '🇸🇦', name: 'العربية' },
     { code: 'zh', flag: '🇨🇳', name: '中文' },
     { code: 'ja', flag: '🇯🇵', name: '日本語' },
     { code: 'ru', flag: '🇷🇺', name: 'Русский' },
@@ -444,47 +588,41 @@ export default function AIChatScreen({ route }: { route?: any }) {
     if (event === 'transaction_failed') {
       const reason = params.failureReason || '';
       const amtStr = params.amount && params.currency ? `${params.currency} ${formatMinorAmount(Number(params.amount), params.currency)}` : '';
-      text = L === 'fr'
-        ? `Votre transaction${amtStr ? ` de ${amtStr}` : ''} a échoué${reason ? ` : ${reason}` : ''}. Vérifiez votre solde et réessayez.`
-        : L === 'es'
-        ? `Su transacción${amtStr ? ` de ${amtStr}` : ''} falló${reason ? `: ${reason}` : ''}. Verifique su saldo e intente nuevamente.`
-        : `Your transaction${amtStr ? ` of ${amtStr}` : ''} failed${reason ? `: ${reason}` : ''}. Please check your balance and try again.`;
+      const parts = [uiStr(L, 'ev_tx_failed_open')];
+      if (amtStr) parts.push(uiStr(L, 'ev_amount_line').replace('{{amount}}', amtStr));
+      if (reason) parts.push(uiStr(L, 'ev_reason_line').replace('{{reason}}', String(reason)));
+      parts.push(uiStr(L, 'ev_tx_failed_close'));
+      text = parts.join(' ');
       acts = [
-        { label: L === 'fr' ? 'Réessayer' : L === 'es' ? 'Reintentar' : 'Retry transaction', type: 'retry', icon: 'refresh' },
-        { label: L === 'fr' ? 'Voir transactions' : L === 'es' ? 'Ver transacciones' : 'View transactions', type: 'view_transaction', icon: 'list-outline' },
-        { label: L === 'fr' ? 'Contacter support' : L === 'es' ? 'Contactar soporte' : 'Contact support', type: 'contact_support', icon: 'headset' },
+        { label: uiStr(L, 'ev_act_retry'), type: 'retry', icon: 'refresh' },
+        { label: uiStr(L, 'ev_act_view_tx'), type: 'view_transaction', icon: 'list-outline' },
+        { label: uiStr(L, 'ev_act_contact_support'), type: 'contact_support', icon: 'headset' },
       ];
     } else if (event === 'withdrawal_pending') {
       const pending = userCtx?.pendingWithdrawals || {};
       const pendingStr = Object.entries(pending).filter(([, v]) => v > 0).map(([c, v]) => `${c} ${formatMinorAmount(v, c)}`).join(', ');
-      text = L === 'fr'
-        ? `Votre retrait${pendingStr ? ` de ${pendingStr}` : ''} est en cours. Les retraits prennent 3 à 5 jours ouvrés.`
-        : L === 'es'
-        ? `Su retiro${pendingStr ? ` de ${pendingStr}` : ''} está siendo procesado. Los retiros tardan 3 a 5 días hábiles.`
-        : `Your withdrawal${pendingStr ? ` of ${pendingStr}` : ''} is being processed. Withdrawals typically take 3–5 business days.`;
+      const parts = [uiStr(L, 'ev_withdrawal_open')];
+      if (pendingStr) parts.push(uiStr(L, 'ev_amount_line').replace('{{amount}}', pendingStr));
+      parts.push(uiStr(L, 'ev_withdrawal_close'));
+      text = parts.join(' ');
       acts = [
-        { label: L === 'fr' ? 'Voir transactions' : L === 'es' ? 'Ver transacciones' : 'View transactions', type: 'view_transaction', icon: 'list-outline' },
-        { label: L === 'fr' ? 'Contacter support' : L === 'es' ? 'Contactar soporte' : 'Contact support', type: 'contact_support', icon: 'headset' },
+        { label: uiStr(L, 'ev_act_view_tx'), type: 'view_transaction', icon: 'list-outline' },
+        { label: uiStr(L, 'ev_act_contact_support'), type: 'contact_support', icon: 'headset' },
       ];
     } else if (event === 'suspicious_activity') {
-      text = L === 'fr'
-        ? '⚠️ Activité suspecte détectée. Vérifiez vos transactions récentes et changez votre mot de passe si nécessaire.'
-        : L === 'es'
-        ? '⚠️ Se detectó actividad sospechosa. Revise sus transacciones recientes y cambie su contraseña si es necesario.'
-        : '⚠️ Suspicious activity detected on your account. Please review your recent transactions and change your password if needed.';
+      text = uiStr(L, 'ev_suspicious');
       acts = [
-        { label: L === 'fr' ? 'Voir transactions' : L === 'es' ? 'Ver transacciones' : 'View transactions', type: 'view_transaction', icon: 'list-outline' },
-        { label: L === 'fr' ? 'Contacter support' : L === 'es' ? 'Contactar soporte' : 'Contact support', type: 'contact_support', icon: 'headset' },
+        { label: uiStr(L, 'ev_act_view_tx'), type: 'view_transaction', icon: 'list-outline' },
+        { label: uiStr(L, 'ev_act_contact_support'), type: 'contact_support', icon: 'headset' },
       ];
     } else if (event === 'new_recipient') {
       const rId = String(params.recipientId || '').substring(0, 30);
-      text = L === 'fr'
-        ? `⚠️ Vous envoyez de l'argent à un nouveau destinataire${rId ? ` (${rId})` : ''}. Vérifiez l'identité du destinataire avant de confirmer.`
-        : L === 'es'
-        ? `⚠️ Está enviando dinero a un nuevo destinatario${rId ? ` (${rId})` : ''}. Verifique la identidad antes de confirmar.`
-        : `⚠️ Security Warning: You are sending money to a new recipient${rId ? ` (${rId})` : ''}. Please verify their identity before confirming.`;
+      const parts = [uiStr(L, 'ev_new_recipient_open')];
+      if (rId) parts.push(uiStr(L, 'ev_new_recipient_id_line').replace('{{recipient}}', rId));
+      parts.push(uiStr(L, 'ev_new_recipient_close'));
+      text = parts.join(' ');
       acts = [
-        { label: L === 'fr' ? 'Contacter support' : L === 'es' ? 'Contactar soporte' : 'Contact support', type: 'contact_support', icon: 'headset' },
+        { label: uiStr(L, 'ev_act_contact_support'), type: 'contact_support', icon: 'headset' },
       ];
     }
 
@@ -637,11 +775,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
         if (topEntry) {
           const [cur, minorAmt] = topEntry;
           const readableAmt = formatMinorAmount(minorAmt, cur);
-          fallbackText = L === 'fr'
-            ? `Votre solde disponible est de ${cur} ${readableAmt}.\n\n${uiStr(L, 'fb_balance')}`
-            : L === 'es'
-            ? `Su saldo disponible es ${cur} ${readableAmt}.\n\n${uiStr(L, 'fb_balance')}`
-            : `Your available balance is ${cur} ${readableAmt}.\n\n${uiStr(L, 'fb_balance')}`;
+          fallbackText = `${uiStr(L, 'balance_line').replace('{{amount}}', `${cur} ${readableAmt}`)}\n\n${uiStr(L, 'fb_balance')}`;
         } else {
           fallbackText = uiStr(L, 'fb_balance');
         }
@@ -753,7 +887,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
                   {item.ticketCreated.isFraudAlert ? uiStr(language, 'fraudAlertTitle') : item.ticketCreated.escalated ? uiStr(language, 'escalatedTitle') : uiStr(language, 'ticketCreatedTitle')}
                 </Text>
               </View>
-              <Text style={styles.ticketId}>Ticket #{item.ticketCreated.ticketId}</Text>
+              <Text style={styles.ticketId}>{uiStr(language, 'ticket_prefix')}{item.ticketCreated.ticketId}</Text>
               <Text style={styles.ticketSLA}>
                 {uiStr(language, 'expectedResponse')} {item.ticketCreated.sla}
               </Text>
@@ -773,7 +907,8 @@ export default function AIChatScreen({ route }: { route?: any }) {
                   style={styles.transactionItem}
                   onPress={() => {
                     const cur = tx.currency || 'USD';
-                    sendMessage(`I want to report transaction ${tx.id} (${tx.type === 'send' ? '-' : '+'}${formatMinorAmount(Math.abs(tx.amount), cur)} ${cur}) as unauthorized.`);
+                    const amtStr = `${tx.type === 'send' ? '-' : '+'}${formatMinorAmount(Math.abs(tx.amount), cur)} ${cur}`;
+                    sendMessage(uiStr(language, 'report_unauthorized_msg').replace('{{txId}}', tx.id).replace('{{amount}}', amtStr));
                   }}
                 >
                   <View style={styles.transactionRow}>
@@ -788,7 +923,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
                     <Text style={styles.transactionId}>{tx.id}</Text>
                   </View>
                   <Text style={styles.transactionStatus}>
-                    {tx.status.toUpperCase()} - {new Date(tx.timestamp).toLocaleDateString()}
+                    {formatStatusLabel(tx.status, 'unknown')} - {new Date(tx.timestamp).toLocaleDateString()}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -980,7 +1115,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
                 style={styles.fieldInput}
                 value={formData[field.name] || ''}
                 onChangeText={(text) => setFormData(prev => ({ ...prev, [field.name]: text }))}
-                placeholder={field.hint || `Enter ${field.label.toLowerCase()}`}
+                placeholder={field.hint || uiStr(language, 'enter_field_placeholder').replace('{{field}}', field.label.toLowerCase())}
                 placeholderTextColor="#AAB8C2"
                 keyboardType={field.type === 'number' ? 'numeric' : 'default'}
               />
@@ -993,7 +1128,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
               onPress={() => {
                 setStructuredDataForm(null);
                 setFormData({});
-                sendMessage('Skip data collection and create general ticket');
+                sendMessage(uiStr(language, 'skip_data_collection_msg'));
               }}
             >
               <Text style={styles.formButtonSecondaryText}>{uiStr(language, 'skip')}</Text>
@@ -1010,7 +1145,7 @@ export default function AIChatScreen({ route }: { route?: any }) {
                   return;
                 }
                 
-                sendMessage('Submitting case details', formData);
+                sendMessage(uiStr(language, 'submitting_case_msg'), formData);
               }}
             >
               <Text style={styles.formButtonPrimaryText}>{uiStr(language, 'submitDetails')}</Text>

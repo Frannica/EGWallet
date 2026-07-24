@@ -4,6 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../auth/AuthContext';
 import { detectCountryCode } from '../config/regional';
 import { useLanguage } from '../i18n/LanguageContext';
+import { getApiErrorMessage } from '../utils/apiErrorMessage';
 
 export default function AuthScreen() {
   const [email, setEmail] = useState('');
@@ -30,9 +31,15 @@ export default function AuthScreen() {
         await auth.signIn(email.trim(), password);
       }
     } catch (e: any) {
+      const friendly = getApiErrorMessage({
+        message: e?.message,
+        status: typeof e?.status === 'number' ? e.status : undefined,
+        errorCode: e?.errorCode,
+        code: e?.code,
+      }, t);
       Alert.alert(
         isSignUp ? t('auth.signUpError') : t('auth.signInError'),
-        e.message || t('auth.checkCredentials')
+        friendly
       );
     } finally {
       setLoading(false);

@@ -66,13 +66,13 @@ export function KYCDisclosure({ region }: KYCDisclosureProps) {
               style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' }}
             >
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 14, color: '#333', fontWeight: '500' }}>{item.type}</Text>
+                <Text style={{ fontSize: 14, color: '#333', fontWeight: '500' }}>{t(item.type)}</Text>
                 {item.note ? (
-                  <Text style={{ fontSize: 12, color: '#999', marginTop: 2 }}>{item.note}</Text>
+                  <Text style={{ fontSize: 12, color: '#999', marginTop: 2 }}>{t(item.note)}</Text>
                 ) : null}
               </View>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: item.fee === 'Free' ? '#2E7D32' : '#1565C0', marginLeft: 12 }}>
-                {item.fee}
+              <Text style={{ fontSize: 14, fontWeight: '700', color: item.fee === 'fees.free' ? '#2E7D32' : '#1565C0', marginLeft: 12 }}>
+                {t(item.fee)}
               </Text>
             </View>
           ))}

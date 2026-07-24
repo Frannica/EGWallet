@@ -10,6 +10,7 @@
 import NetInfo from '@react-native-community/netinfo';
 import { Alert } from 'react-native';
 import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
+import { logError } from '../utils/apiErrorHandler';
 
 type ProtectedApiOptions = {
   timeout?: number;
@@ -61,7 +62,7 @@ export async function protectedApiCall<T>(
       return {
         data: null,
         error: {
-          message: 'No internet connection. Please check your network and try again.',
+          message: 'No internet connection. Check your connection and try again.',
           isNetworkError: true,
           isTimeout: false,
           isOffline: true,
@@ -113,8 +114,8 @@ export async function protectedApiCall<T>(
       
       lastError = {
         message: isTimeout
-          ? 'Request timed out. Please check your connection and try again.'
-          : 'Network error. Please check your connection and try again.',
+          ? 'The request is taking longer than expected. Please try again.'
+          : 'Network request failed',
         isNetworkError: true,
         isTimeout,
         isOffline: false,
@@ -127,7 +128,21 @@ export async function protectedApiCall<T>(
     }
   }
 
-  // All retries exhausted
+  // All retries exhausted — report to crash reporting (Sentry in production)
+  // before surfacing the error to the caller, so backend/network failures are
+  // actually visible in production monitoring instead of only ever reaching
+  // a user-facing Alert. Offline errors are excluded (expected, user-side
+  // connectivity state, not an app/backend defect worth alerting on).
+  if (lastError && !lastError.isOffline) {
+    logError(`protectedApiCall:${url}`, {
+      type: lastError.isTimeout ? 'timeout' : lastError.isNetworkError ? 'network' : (lastError.statusCode && lastError.statusCode >= 500) ? 'server' : 'unknown',
+      message: lastError.message,
+      statusCode: lastError.statusCode,
+      retryable: lastError.isNetworkError || lastError.isTimeout || (lastError.statusCode ?? 0) >= 500,
+      originalError: lastError,
+    });
+  }
+
   return { data: null, error: lastError };
 }
 

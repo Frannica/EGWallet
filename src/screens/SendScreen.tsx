@@ -389,10 +389,10 @@ export default function SendScreen() {
         if (!accountNumber.trim()) return Alert.alert(t('common.error'), t('send.enterAccountNumber'));
         if (!accountName.trim()) return Alert.alert(t('common.error'), t('send.enterAccountHolderName'));
         if (isKoraMobileMoneyWithdrawal && !mmOperatorSlug) {
-          return Alert.alert(t('common.error'), 'Please select a mobile money operator from the list.');
+          return Alert.alert(t('common.error'), t('send.pleaseSelectOperator'));
         }
         if (isKoraBankWithdrawal && !selectedKoraBankCode) {
-          return Alert.alert(t('common.error'), 'Please select a bank from the list.');
+          return Alert.alert(t('common.error'), t('send.pleaseSelectBank'));
         }
       }
       // Bank withdrawal: warn about processing time before proceeding
@@ -479,7 +479,7 @@ export default function SendScreen() {
       const method: PaymentMethod = {
         id: Date.now().toString(),
         type: 'bank',
-        label: 'Bank Account',
+        label: t('send.bankAccountLabel'),
         last4,
       };
       const updated = [...savedPaymentMethods, method];
@@ -496,7 +496,7 @@ export default function SendScreen() {
       const method: PaymentMethod = {
         id: Date.now().toString(),
         type: addCardType ?? 'debit',
-        label: addCardType === 'credit' ? 'Credit Card' : 'Debit Card',
+        label: addCardType === 'credit' ? t('send.creditCardLabel') : t('send.debitCardLabel'),
         last4,
       };
       const updated = [...savedPaymentMethods, method];
@@ -541,7 +541,7 @@ export default function SendScreen() {
         amount: amountMinor,
         currency,
         senderCurrency: currency,
-        recipientName: toWalletId || 'Recipient',
+        recipientName: toWalletId || t('common.recipient'),
         recipientId: toWalletId,
         timestamp: Date.now(),
         transactionId: (res as any)?.transaction?.id,
@@ -601,7 +601,7 @@ export default function SendScreen() {
           currency,
           method: withdrawalMethod,
           isInternational: isIntlWithdrawal,
-          bankName: withdrawalMethod === 'credit' ? 'Credit Card' : withdrawalMethod === 'debit' ? 'Debit Card' : bankName,
+          bankName: withdrawalMethod === 'credit' ? t('send.creditCardLabel') : withdrawalMethod === 'debit' ? t('send.debitCardLabel') : bankName,
           // Card withdrawals: send last4 token only — never full PAN/CVV
           accountNumber: (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? cardLast4 : accountNumber,
           accountHolderName: accountName,
@@ -649,7 +649,7 @@ export default function SendScreen() {
         direction: 'out',
         amount: amountMinor,
         currency,
-        memo: `Withdrawal to ${withdrawalMethod === 'debit' ? 'Debit Card' : withdrawalMethod === 'credit' ? 'Credit Card' : bankName}`,
+        memo: t('send.withdrawalToMemo').replace('{{method}}', withdrawalMethod === 'debit' ? t('send.debitCardLabel') : withdrawalMethod === 'credit' ? t('send.creditCardLabel') : bankName),
       });
       const wData = await response.json();
       const feeCalc = wData.feeBreakdown;
@@ -673,9 +673,9 @@ export default function SendScreen() {
         currency,
         senderCurrency: currency,
         fee: feeCalc?.fee ?? Math.round(amountMinor * (isIntlWithdrawal ? WITHDRAW_INTL_RATE : WITHDRAW_LOCAL_RATE)),
-        feeLabel: `Withdrawal Fee (${isIntlWithdrawal ? '1.75%' : '1.28%'})`,
-        recipientName: accountName || (withdrawalMethod === 'credit' ? 'Credit Card' : withdrawalMethod === 'debit' ? 'Debit Card' : bankName),
-        recipientId: (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? `Card ending ${cardLast4}` : accountNumber,
+        feeLabel: t('receipt.withdrawalFeeLabel').replace('{percent}', isIntlWithdrawal ? '1.75' : '1.28'),
+        recipientName: accountName || (withdrawalMethod === 'credit' ? t('send.creditCardLabel') : withdrawalMethod === 'debit' ? t('send.debitCardLabel') : bankName),
+        recipientId: (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? t('send.cardEnding').replace('{{last4}}', cardLast4) : accountNumber,
         timestamp: Date.now(),
         transactionId: wData.withdrawal?.id,
         type: 'withdrawal',
@@ -791,9 +791,9 @@ export default function SendScreen() {
         senderCurrency: currency,
         receiverCurrency: preview?.receiverCurrency ?? currency,
         fee: preview?.fxFeeAmount ?? 0,
-        feeLabel: preview?.isCrossCurrency ? 'FX Conversion Fee (1.15%)' : undefined,
+        feeLabel: preview?.isCrossCurrency ? t('receipt.fxConversionFeeLabel').replace('{percent}', '1.15') : undefined,
         fxRate: preview?.rateDisplay ?? undefined,
-        recipientName: toWalletId || 'Recipient',
+        recipientName: toWalletId || t('common.recipient'),
         recipientId: toWalletId,
         timestamp: Date.now(),
         transactionId: (res as any)?.transaction?.id,
@@ -1020,11 +1020,11 @@ export default function SendScreen() {
       >
         <TouchableOpacity activeOpacity={1} style={styles.operatorModalSheet} onPress={() => {}}>
           <View style={styles.operatorModalHandle} />
-          <Text style={styles.operatorModalTitle}>Select Mobile Money Operator</Text>
+          <Text style={styles.operatorModalTitle}>{t('send.selectMobileMoneyOperator')}</Text>
           <ScrollView>
             {mmOperators.length === 0 ? (
               <Text style={styles.operatorEmptyText}>
-                {loadingOperators ? 'Loading operators…' : 'No operators available right now. Please try again shortly.'}
+                {loadingOperators ? t('send.loadingOperators') : t('send.noOperatorsAvailable')}
               </Text>
             ) : (
               mmOperators.map(op => (
@@ -1065,11 +1065,11 @@ export default function SendScreen() {
       >
         <TouchableOpacity activeOpacity={1} style={styles.operatorModalSheet} onPress={() => {}}>
           <View style={styles.operatorModalHandle} />
-          <Text style={styles.operatorModalTitle}>Select Your Bank</Text>
+          <Text style={styles.operatorModalTitle}>{t('send.selectYourBank')}</Text>
           <ScrollView>
             {koraBanks.length === 0 ? (
               <Text style={styles.operatorEmptyText}>
-                {loadingKoraBanks ? 'Loading banks…' : 'No banks available right now. Please try again shortly.'}
+                {loadingKoraBanks ? t('send.loadingBanks') : t('send.noBanksAvailable')}
               </Text>
             ) : (
               koraBanks.map(b => (
@@ -1538,7 +1538,7 @@ export default function SendScreen() {
                       <Ionicons name="business" size={20} color={xafLocalBankUnavailable ? '#C7D0DB' : withdrawalMethod === 'bank' ? '#1565C0' : '#657786'} />
                       <Text style={[styles.methodText, withdrawalMethod === 'bank' && styles.methodTextActive, xafLocalBankUnavailable && styles.methodTextDisabled]}>{t('send.bank')}</Text>
                       <Text style={xafLocalBankUnavailable ? styles.methodBadgeDisabled : styles.methodBadgeSlow}>
-                        {xafLocalBankUnavailable ? 'Not available' : t('send.bankDays')}
+                        {xafLocalBankUnavailable ? t('send.methodNotAvailable') : t('send.bankDays')}
                       </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
@@ -1627,7 +1627,7 @@ export default function SendScreen() {
                           disabled={loading}
                         >
                           <Text style={bankName ? styles.pickerFieldValue : styles.pickerFieldPlaceholder}>
-                            {loadingOperators ? 'Loading operators…' : (bankName || 'Select mobile money operator')}
+                            {loadingOperators ? t('send.loadingOperators') : (bankName || t('send.selectMobileMoneyOperatorInline'))}
                           </Text>
                           <Ionicons name="chevron-down" size={16} color="#657786" />
                         </TouchableOpacity>
@@ -1638,7 +1638,7 @@ export default function SendScreen() {
                           disabled={loading}
                         >
                           <Text style={bankName ? styles.pickerFieldValue : styles.pickerFieldPlaceholder}>
-                            {loadingKoraBanks ? 'Loading banks…' : (bankName || 'Select your bank')}
+                            {loadingKoraBanks ? t('send.loadingBanks') : (bankName || t('send.selectYourBankInline'))}
                           </Text>
                           <Ionicons name="chevron-down" size={16} color="#657786" />
                         </TouchableOpacity>
@@ -1668,7 +1668,7 @@ export default function SendScreen() {
                         style={styles.input}
                       />
                       {(isKoraMobileMoneyWithdrawal || isKoraBankWithdrawal) && resolvingAccount && (
-                        <Text style={styles.infoText}>Verifying account with Kora…</Text>
+                        <Text style={styles.infoText}>{t('send.verifyingAccount')}</Text>
                       )}
                     </View>
 
@@ -1684,10 +1684,10 @@ export default function SendScreen() {
                         style={[styles.input, (isKoraMobileMoneyWithdrawal || isKoraBankWithdrawal) && !!resolvedAccountName && styles.inputConfirmed]}
                       />
                       {(isKoraMobileMoneyWithdrawal || isKoraBankWithdrawal) && !!resolvedAccountName && (
-                        <Text style={styles.infoTextConfirmed}>✓ Verified with Kora — confirm this is the correct recipient</Text>
+                        <Text style={styles.infoTextConfirmed}>{t('send.accountVerifiedConfirm')}</Text>
                       )}
                       {(isKoraMobileMoneyWithdrawal || isKoraBankWithdrawal) && !resolvedAccountName && !resolvingAccount && accountNumber.trim().length >= 5 && (mmOperatorSlug || selectedKoraBankCode) && (
-                        <Text style={styles.infoText}>Automatic verification is not available for this bank/operator — please enter the account holder name manually and confirm it is correct.</Text>
+                        <Text style={styles.infoText}>{t('send.verificationNotAvailable')}</Text>
                       )}
                     </View>
                     {withdrawalMethod === 'bank' && !isIntlWithdrawal && !isKoraBankWithdrawal && (
@@ -1697,7 +1697,7 @@ export default function SendScreen() {
                           <TextInput
                             value={bankCode}
                             onChangeText={setBankCode}
-                            placeholder="e.g., 057"
+                            placeholder={t('send.bankCodeExample')}
                             placeholderTextColor="#AAB8C2"
                             keyboardType="default"
                             maxLength={20}
@@ -1710,7 +1710,7 @@ export default function SendScreen() {
                           <TextInput
                             value={branchCode}
                             onChangeText={setBranchCode}
-                            placeholder="e.g., 001"
+                            placeholder={t('send.branchCodeExample')}
                             placeholderTextColor="#AAB8C2"
                             keyboardType="default"
                             maxLength={20}
@@ -1722,16 +1722,16 @@ export default function SendScreen() {
                       </>
                     )}
                     {isKoraBankWithdrawal && (
-                      <Text style={styles.infoText}>The bank code for your selected bank is applied automatically — no manual entry needed.</Text>
+                      <Text style={styles.infoText}>{t('send.bankCodeAutomatic')}</Text>
                     )}
                     {withdrawalMethod === 'bank' && isIntlWithdrawal && !isKoraBankWithdrawal && (
                       <>
                         <View style={styles.section}>
-                          <Text style={styles.label}>IBAN <Text style={{ color: '#9BAEC8', fontWeight: 'normal' }}>{t('send.optional')}</Text></Text>
+                          <Text style={styles.label}>{t('send.ibanLabel')} <Text style={{ color: '#9BAEC8', fontWeight: 'normal' }}>{t('send.optional')}</Text></Text>
                           <TextInput
                             value={iban}
                             onChangeText={v => setIban(v.replace(/\s/g, '').toUpperCase())}
-                            placeholder="e.g., GB29NWBK60161331926819"
+                            placeholder={t('send.ibanExample')}
                             placeholderTextColor="#AAB8C2"
                             autoCapitalize="characters"
                             maxLength={34}
@@ -1740,11 +1740,11 @@ export default function SendScreen() {
                           />
                         </View>
                         <View style={styles.section}>
-                          <Text style={styles.label}>SWIFT / BIC <Text style={{ color: '#9BAEC8', fontWeight: 'normal' }}>{t('send.optional')}</Text></Text>
+                          <Text style={styles.label}>{t('send.swiftBicLabel')} <Text style={{ color: '#9BAEC8', fontWeight: 'normal' }}>{t('send.optional')}</Text></Text>
                           <TextInput
                             value={swiftBic}
                             onChangeText={v => setSwiftBic(v.replace(/\s/g, '').toUpperCase())}
-                            placeholder="e.g., NWBKGB2L"
+                            placeholder={t('send.swiftExample')}
                             placeholderTextColor="#AAB8C2"
                             autoCapitalize="characters"
                             maxLength={11}
@@ -1757,7 +1757,7 @@ export default function SendScreen() {
                           <TextInput
                             value={withdrawalCountry}
                             onChangeText={setWithdrawalCountry}
-                            placeholder="e.g., United Kingdom"
+                            placeholder={t('send.countryExample')}
                             placeholderTextColor="#AAB8C2"
                             maxLength={60}
                             editable={!loading}

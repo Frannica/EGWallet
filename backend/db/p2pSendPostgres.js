@@ -2,7 +2,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { pool } = require('./pool');
-const { alignWalletBalanceBeforeMutation } = require('./walletBalanceAlign');
+const { lockWalletBalanceRow } = require('./walletBalanceAlign');
 const { msToDate, upsertRuntimeWalletMetadata } = require('./runtimeWalletSync');
 
 function mapTxRow(tx) {
@@ -130,26 +130,21 @@ async function commitP2PSendPostgres({
       [fromWalletId, toWalletId]
     );
 
-    const debitAligned = await alignWalletBalanceBeforeMutation(
-      client,
-      fromWalletId,
-      debitCurrency,
-      stateDb,
-      { pendingDebit: debitAmount }
-    );
-    if (debitAligned.amount < Number(debitAmount)) {
+    // Postgres is the sole source of truth for the pre-operation balance —
+    // never derived from (or overwritten by) the JSON app_metadata blob,
+    // except as a one-time seed if this wallet/currency has never been
+    // touched in Postgres before (see lockWalletBalanceRow doc comment).
+    const debitBefore = await lockWalletBalanceRow(client, fromWalletId, debitCurrency, {
+      stateDb, pendingDebit: debitAmount,
+    });
+    if (debitBefore < Number(debitAmount)) {
       await client.query('ROLLBACK');
       return { replay: false, insufficientFunds: true };
     }
 
-    const destAligned = await alignWalletBalanceBeforeMutation(
-      client,
-      toWalletId,
-      receivedCurrency,
-      stateDb,
-      { pendingCredit: receivedAmount }
-    );
-    const destBefore = destAligned.amount;
+    const destBefore = await lockWalletBalanceRow(client, toWalletId, receivedCurrency, {
+      stateDb, pendingCredit: receivedAmount,
+    });
 
     await client.query(
       'UPDATE wallet_balances SET amount = amount - $1 WHERE wallet_id = $2 AND currency = $3',
@@ -210,8 +205,8 @@ async function commitP2PSendPostgres({
         fromWalletId,
         debitCurrency,
         debitAmount,
-        debitAligned.amount,
-        debitAligned.amount - Number(debitAmount),
+        debitBefore,
+        debitBefore - Number(debitAmount),
         txRow.timestamp,
         `p2p:${txRow.id}`,
         uuidv4(),
@@ -241,7 +236,15 @@ async function commitP2PSendPostgres({
     }
 
     await client.query('COMMIT');
-    return { replay: false, insufficientFunds: false };
+    // Return the true post-commit Postgres balances so the caller can heal
+    // its JSON display cache to match the authoritative ledger, instead of
+    // trusting its own pre-computed (and potentially stale) in-memory guess.
+    return {
+      replay: false,
+      insufficientFunds: false,
+      debitWalletBalanceAfter: debitBefore - Number(debitAmount),
+      creditWalletBalanceAfter: destBefore + Number(receivedAmount),
+    };
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     if (error.code === '23505' && clientKey) {

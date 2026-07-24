@@ -246,8 +246,8 @@ export default function QRScannerScreen() {
     if (!expiresAt) return null;
     const remaining = Math.floor((expiresAt - Date.now()) / 1000 / 60);
     if (remaining <= 0) return t('qrScan.expired');
-    if (remaining < 5) return `⚠️ Expires in ${remaining} min`;
-    return `Valid for ~${remaining} min`;
+    if (remaining < 5) return t('qrScanner.expiresInMin').replace('{{min}}', String(remaining));
+    return t('qrScanner.validForMin').replace('{{min}}', String(remaining));
   };
 
   // ── Main camera UI ────────────────────────────────────────────────────────
@@ -334,7 +334,7 @@ export default function QRScannerScreen() {
                   <Ionicons name="qr-code" size={26} color="#1565C0" />
                 </View>
                 <Text style={styles.sheetTitle}>
-                  {validatedQr?.type === 'dynamic' ? 'Confirm Payment' : t('qrScan.payViaQr')}
+                  {validatedQr?.type === 'dynamic' ? t('qrScan.confirmPayment') : t('qrScan.payViaQr')}
                 </Text>
               </View>
 

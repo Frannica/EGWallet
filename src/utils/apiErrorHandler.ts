@@ -34,7 +34,7 @@ export function classifyError(error: any): ApiError {
   if (error?.message?.includes('Timeout') || error?.code === 'ETIMEDOUT') {
     return {
       type: 'timeout',
-      message: 'Request timed out. Please check your connection and try again.',
+      message: 'The request is taking longer than expected. Please try again.',
       retryable: true,
       originalError: error,
     };
@@ -66,7 +66,7 @@ export function classifyError(error: any): ApiError {
   if (error?.statusCode && error.statusCode >= 500) {
     return {
       type: 'server',
-      message: 'Server error. Please try again later.',
+      message: 'Our servers are temporarily unavailable. Please try again in a few minutes.',
       statusCode: error.statusCode,
       retryable: true,
       originalError: error,

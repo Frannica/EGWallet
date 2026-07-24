@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import { AppState } from 'react-native';
+import { useLanguage } from '../i18n/LanguageContext';
 
 type BiometricState = {
   isLocked: boolean;
@@ -24,6 +25,7 @@ export function useBiometric() {
 }
 
 export const BiometricProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { t } = useLanguage();
   const [isLocked, setIsLocked] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
@@ -113,10 +115,10 @@ export const BiometricProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     try {
       const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Unlock EGWallet',
-        fallbackLabel: 'Use Passcode',
+        promptMessage: t('biometric.unlockPrompt'),
+        fallbackLabel: t('biometric.usePasscode'),
         disableDeviceFallback: false,
-        cancelLabel: 'Cancel',
+        cancelLabel: t('common.cancel'),
       });
 
       if (result.success) {
@@ -138,8 +140,8 @@ export const BiometricProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     // Test biometric first
     const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: 'Enable Biometric Lock',
-      fallbackLabel: 'Use Passcode',
+      promptMessage: t('biometric.enablePrompt'),
+      fallbackLabel: t('biometric.usePasscode'),
       disableDeviceFallback: false,
     });
 

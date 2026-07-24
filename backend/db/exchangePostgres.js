@@ -2,7 +2,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { pool } = require('./pool');
-const { alignWalletBalanceBeforeMutation } = require('./walletBalanceAlign');
+const { lockWalletBalanceRow } = require('./walletBalanceAlign');
 const { upsertRuntimeWalletMetadata } = require('./runtimeWalletSync');
 
 function msToDate(ms) {
@@ -83,26 +83,20 @@ async function commitExchangePostgres({
       await upsertRuntimeWalletMetadata(client, wallet);
     }
 
-    const fromAligned = await alignWalletBalanceBeforeMutation(
-      client,
-      walletId,
-      fromCurrency,
-      stateDb,
-      { pendingDebit: amount }
-    );
-    if (fromAligned.amount < Number(amount)) {
+    // Postgres is the sole source of truth for the pre-operation balance
+    // (JSON only ever seeds a brand-new, never-before-seen row — see
+    // lockWalletBalanceRow doc comment).
+    const fromBefore = await lockWalletBalanceRow(client, walletId, fromCurrency, {
+      stateDb, pendingDebit: amount,
+    });
+    if (fromBefore < Number(amount)) {
       await client.query('ROLLBACK');
       return { insufficientFunds: true };
     }
 
-    const toAligned = await alignWalletBalanceBeforeMutation(
-      client,
-      walletId,
-      toCurrency,
-      stateDb,
-      { pendingCredit: netReceived }
-    );
-    const toBefore = toAligned.amount;
+    const toBefore = await lockWalletBalanceRow(client, walletId, toCurrency, {
+      stateDb, pendingCredit: netReceived,
+    });
 
     await client.query(
       'UPDATE wallet_balances SET amount = amount - $1 WHERE wallet_id = $2 AND currency = $3',
@@ -161,8 +155,8 @@ async function commitExchangePostgres({
         walletId,
         fromCurrency,
         amount,
-        fromAligned.amount,
-        fromAligned.amount - Number(amount),
+        fromBefore,
+        fromBefore - Number(amount),
         txRow.timestamp,
         `exchange:${txRow.id}`,
         uuidv4(),
@@ -192,7 +186,12 @@ async function commitExchangePostgres({
     }
 
     await client.query('COMMIT');
-    return { replay: false, insufficientFunds: false };
+    return {
+      replay: false,
+      insufficientFunds: false,
+      fromWalletBalanceAfter: fromBefore - Number(amount),
+      toWalletBalanceAfter: toBefore + Number(netReceived),
+    };
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     if (error.code === '23505' && clientKey) {

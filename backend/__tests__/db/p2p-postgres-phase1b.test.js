@@ -35,10 +35,10 @@ async function seedWallet(client, { userId, walletId, currency, amount }) {
 
 async function cleanup(client, ids) {
   await client.query('DELETE FROM idempotency_records WHERE user_id = ANY($1::uuid[])', [ids.users]);
-  await client.query('DELETE FROM ledger WHERE wallet_id = ANY($1::uuid[])', [ids.wallets]);
+  await client.query('DELETE FROM ledger WHERE wallet_id = ANY($1::text[])', [ids.wallets]);
   await client.query('DELETE FROM transactions WHERE id = ANY($1::uuid[])', [ids.transactions]);
-  await client.query('DELETE FROM wallet_balances WHERE wallet_id = ANY($1::uuid[])', [ids.wallets]);
-  await client.query('DELETE FROM wallets WHERE id = ANY($1::uuid[])', [ids.wallets]);
+  await client.query('DELETE FROM wallet_balances WHERE wallet_id = ANY($1::text[])', [ids.wallets]);
+  await client.query('DELETE FROM wallets WHERE id = ANY($1::text[])', [ids.wallets]);
   await client.query('DELETE FROM users WHERE id = ANY($1::uuid[])', [ids.users]);
 }
 
@@ -338,9 +338,16 @@ test('phase1b p2p runtime-state sync upserts missing relational users and wallet
       { id: ids.users[0], email: `${ids.users[0]}@runtime.test`, passwordHash: 'x', region: 'US', role: 'individual', createdAt: Date.now() },
       { id: ids.users[1], email: `${ids.users[1]}@runtime.test`, passwordHash: 'x', region: 'US', role: 'individual', createdAt: Date.now() },
     ],
+    // Sender's true (JSON-only, pre-migration) balance is 9000. commitP2PSendPostgres's
+    // `stateDb` contract is POST-mutation (the caller — index.js — always mutates the
+    // JSON balances in-memory before calling), so this reflects sender at
+    // 9000 - 1500 = 7500 and receiver at 0 + 1500 = 1500 *after* the send,
+    // exactly like every real caller. The Postgres backfill-on-first-touch
+    // path reconstructs the correct pre-operation amount (9000 / 0) from
+    // this post-mutation snapshot plus the pending debit/credit.
     wallets: [
-      { id: ids.wallets[0], userId: ids.users[0], balances: [{ currency: 'USD', amount: 9000 }], createdAt: Date.now(), maxLimitUSD: 250000 },
-      { id: ids.wallets[1], userId: ids.users[1], balances: [{ currency: 'USD', amount: 0 }], createdAt: Date.now(), maxLimitUSD: 250000 },
+      { id: ids.wallets[0], userId: ids.users[0], balances: [{ currency: 'USD', amount: 7500 }], createdAt: Date.now(), maxLimitUSD: 250000 },
+      { id: ids.wallets[1], userId: ids.users[1], balances: [{ currency: 'USD', amount: 1500 }], createdAt: Date.now(), maxLimitUSD: 250000 },
     ],
     transactions: [],
     paymentRequests: [],
@@ -383,7 +390,7 @@ test('phase1b p2p runtime-state sync upserts missing relational users and wallet
     assert.equal(result.replay, false);
     assert.equal(result.insufficientFunds, false);
     const userRows = await client.query('SELECT COUNT(*)::int AS c FROM users WHERE id = ANY($1::uuid[])', [ids.users]);
-    const walletRows = await client.query('SELECT COUNT(*)::int AS c FROM wallets WHERE id = ANY($1::uuid[])', [ids.wallets]);
+    const walletRows = await client.query('SELECT COUNT(*)::int AS c FROM wallets WHERE id = ANY($1::text[])', [ids.wallets]);
     const senderBal = await client.query('SELECT amount FROM wallet_balances WHERE wallet_id = $1 AND currency = $2', [ids.wallets[0], 'USD']);
     const receiverBal = await client.query('SELECT amount FROM wallet_balances WHERE wallet_id = $1 AND currency = $2', [ids.wallets[1], 'USD']);
     assert.equal(userRows.rows[0].c, 2);

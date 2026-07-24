@@ -31,6 +31,8 @@ const SUITES = [
   ['PaymentSheet — single-flight guard (no stacked sheets)', require('./payment-sheet-single-flight.node.test.js')],
   ['Money flow — $300 split + idempotent pay',            require('../backend/__tests__/money-flow.test.js')],
   ['Ledger sync — single-source incremental architecture', require('../backend/__tests__/ledger-sync-architecture.test.js')],
+  ['Critical stability audit — null-safe rendering across money screens', require('./critical-stability-audit.node.test.js')],
+  ['Virtual card display — safe masking across API shapes', require('./virtual-card-display.node.test.js')],
 ];
 
 // ── Runner ────────────────────────────────────────────────────────────────────

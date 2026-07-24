@@ -57,12 +57,19 @@ module.exports = function phase14(check) {
     dis.includes('data?.dispute?.ticketNumber'));
   check('[Dispute] finalTicket overrides when backend responds',
     dis.includes('if (data?.dispute?.ticketNumber) finalTicket = data.dispute.ticketNumber'));
+  // Superseded by localized dispute.emailSubjectWord / dispute.emailLabelTicket
+  // i18n keys (i18n pass) — the email subject/body labels are now translated,
+  // but finalTicket itself is still interpolated directly into both.
   check('[Dispute] emailSubject uses finalTicket',
-    dis.includes('`[${finalTicket}] Dispute:'));
+    dis.includes('`[${finalTicket}] ${t(\'dispute.emailSubjectWord\')}:'));
   check('[Dispute] emailBody uses finalTicket',
-    dis.includes('Ticket: ${finalTicket}'));
-  check('[Dispute] Alert message uses finalTicket',
-    dis.includes('Ticket ${finalTicket} created'));
+    dis.includes("${t('dispute.emailLabelTicket')}: ${finalTicket}"));
+  // Superseded by the localized dispute.submittedBody i18n key (i18n pass):
+  // the literal "Ticket ${finalTicket} created" string was replaced with a
+  // translated template whose {ticket} placeholder is still filled with the
+  // real finalTicket value via .replace('{ticket}', finalTicket).
+  check('[Dispute] Alert message uses finalTicket via localized template',
+    dis.includes(".replace('{ticket}', finalTicket)"));
   check('[Dispute] Fallback error uses finalTicket',
     dis.includes('with ticket number ${finalTicket}'));
 

@@ -11,16 +11,35 @@ import { useLanguage } from '../i18n/LanguageContext';
 import { getApiErrorMessage } from '../utils/apiErrorMessage';
 import { CardSkeleton } from '../components/SkeletonLoader';
 import { useToast } from '../utils/toast';
+import { formatCardExpiry, formatMaskedCardNumber } from '../utils/virtualCardDisplay';
+import { formatStatusLabel } from '../utils/safeDisplay';
 
 interface VirtualCard {
   id: string;
-  cardNumber: string;
-  cvv: string;
+  cardNumber?: string;
+  last4?: string;
+  maskedNumber?: string;
+  cvv?: string;
   expiryMonth: string;
   expiryYear: string;
   currency: string;
   label: string;
   status: 'active' | 'frozen';
+}
+
+function normalizeCardFromApi(raw: any, defaultLabel: string): VirtualCard {
+  return {
+    id: String(raw?.id ?? ''),
+    cardNumber: raw?.cardNumber,
+    last4: raw?.last4,
+    maskedNumber: raw?.maskedNumber,
+    cvv: raw?.cvv,
+    expiryMonth: raw?.expiryMonth ?? '--',
+    expiryYear: raw?.expiryYear ?? '--',
+    currency: raw?.currency ?? 'USD',
+    label: raw?.label ?? defaultLabel,
+    status: raw?.status === 'frozen' ? 'frozen' : 'active',
+  };
 }
 
 export default function CardScreen() {
@@ -64,7 +83,11 @@ export default function CardScreen() {
     try {
       setLoading(true);
       const data = await getVirtualCards(auth.token);
-      setCards(data.cards || []);
+      setCards(
+        (data.cards || [])
+          .map((raw: any) => normalizeCardFromApi(raw, t('card.defaultLabel')))
+          .filter((c: VirtualCard) => c.id)
+      );
     } catch (error: any) {
       setCards([]);
       Alert.alert(t('common.error'), getApiErrorMessage(error, t));
@@ -90,7 +113,7 @@ export default function CardScreen() {
               setIsCreating(true);
               setLoading(true);
               const walletId = wallets[0]?.id || 'demo';
-              await createVirtualCard(auth.token!, walletId, 'USD', 'My Virtual Card');
+              await createVirtualCard(auth.token!, walletId, 'USD', t('card.defaultLabel'));
               if (__DEV__) console.log('[Card] Created via API');
               toast.show(t('card.cardCreated'));
               loadCards();
@@ -155,10 +178,6 @@ export default function CardScreen() {
     ]);
   };
 
-  const maskCardNumber = (number: string) => {
-    return `**** **** **** ${number.slice(-4)}`;
-  };
-
   if (selectedCard) {
     return (
       <Animated.ScrollView style={[styles.container, { opacity: fadeAnim }]} contentContainerStyle={styles.content}>
@@ -182,14 +201,14 @@ export default function CardScreen() {
               <Ionicons name="card" size={28} color="rgba(255,255,255,0.9)" />
               <Text style={styles.cardBrand}>EGWallet</Text>
             </View>
-            <Text style={styles.cardNumber}>{maskCardNumber(selectedCard.cardNumber)}</Text>
+            <Text style={styles.cardNumber}>{formatMaskedCardNumber(selectedCard)}</Text>
             <View style={styles.cardFooter}>
               <View>
-                <Text style={styles.cardLabel}>{t('card.expires').toUpperCase()}</Text>
-                <Text style={styles.cardValue}>{selectedCard.expiryMonth}/{selectedCard.expiryYear}</Text>
+                <Text style={styles.cardLabel}>{formatStatusLabel(t('card.expires'), 'expires')}</Text>
+                <Text style={styles.cardValue}>{formatCardExpiry(selectedCard.expiryMonth, selectedCard.expiryYear)}</Text>
               </View>
               <View>
-                <Text style={styles.cardLabel}>{t('card.cvv').toUpperCase()}</Text>
+                <Text style={styles.cardLabel}>{formatStatusLabel(t('card.cvv'), 'cvv')}</Text>
                 <Text style={styles.cardValue}>***</Text>
               </View>
               <View style={styles.visaBadge}>
@@ -202,7 +221,7 @@ export default function CardScreen() {
         <View style={styles.cardInfo}>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>{t('card.number')}</Text>
-            <Text style={styles.infoValue}>{maskCardNumber(selectedCard.cardNumber)}</Text>
+            <Text style={styles.infoValue}>{formatMaskedCardNumber(selectedCard)}</Text>
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>{t('card.cvv')}</Text>
@@ -210,7 +229,7 @@ export default function CardScreen() {
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>{t('card.expiry')}</Text>
-            <Text style={styles.infoValue}>{selectedCard.expiryMonth}/{selectedCard.expiryYear}</Text>
+            <Text style={styles.infoValue}>{formatCardExpiry(selectedCard.expiryMonth, selectedCard.expiryYear)}</Text>
           </View>
           <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
             <Text style={styles.infoLabel}>{t('card.status')}</Text>
@@ -248,20 +267,44 @@ export default function CardScreen() {
     );
   }
 
+  // Virtual card issuance requires a real card-network integration (Stripe
+  // Issuing cardholder + funded Issuing balance + real-time authorization).
+  // That integration is not wired up yet, so any "card" this screen could
+  // create would be a non-functional, unspendable fake — never present that
+  // as a real production feature. Existing cards (if any were provisioned in
+  // a prior test/dev configuration) still render read-only below; new
+  // creation is disabled everywhere.
+  const virtualCardsAvailable = false;
+
+  if (!virtualCardsAvailable && cards.length === 0) {
+    return (
+      <Animated.ScrollView style={[styles.container, { opacity: fadeAnim }]} contentContainerStyle={styles.content}>
+        <OfflineErrorBanner visible={!isOnline} onRetry={() => { loadCards(); loadWallets(); }} />
+        <View style={styles.header}>
+          <Text style={styles.title}>{t('card.title')}</Text>
+        </View>
+        {loading ? (
+          <View style={styles.cardsList}>
+            <CardSkeleton />
+          </View>
+        ) : (
+          <View style={styles.emptyContainer}>
+            <View style={styles.emptyIconBg}>
+              <Ionicons name="time-outline" size={40} color="#1565C0" />
+            </View>
+            <Text style={styles.emptyTitle}>{t('card.notAvailable')}</Text>
+            <Text style={styles.emptyText}>{t('card.notAvailableDesc')}</Text>
+          </View>
+        )}
+      </Animated.ScrollView>
+    );
+  }
+
   return (
     <Animated.ScrollView style={[styles.container, { opacity: fadeAnim }]} contentContainerStyle={styles.content}>
       <OfflineErrorBanner visible={!isOnline} onRetry={() => { loadCards(); loadWallets(); }} />
       <View style={styles.header}>
         <Text style={styles.title}>{t('card.title')}</Text>
-        {cards.length < 5 ? (
-          <TouchableOpacity style={styles.addButton} onPress={handleCreateCard} disabled={loading} activeOpacity={0.75}>
-            <Ionicons name="add" size={22} color="#1565C0" />
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.cardLimitBadge}>
-            <Text style={styles.cardLimitText}>{t('card.maxLimit')}</Text>
-          </View>
-        )}
       </View>
 
       {loading && cards.length === 0 ? (
@@ -277,10 +320,6 @@ export default function CardScreen() {
           </View>
           <Text style={styles.emptyTitle}>{t('card.noCards')}</Text>
           <Text style={styles.emptyText}>{t('card.noCardsDesc')}</Text>
-          <TouchableOpacity style={styles.createFirstButton} onPress={handleCreateCard} disabled={loading} activeOpacity={0.8}>
-            <Ionicons name="add-circle" size={20} color="#FFFFFF" />
-            <Text style={styles.createFirstButtonText}>{t('card.createCard')}</Text>
-          </TouchableOpacity>
         </View>
       ) : (
         <View style={styles.cardsList}>
@@ -299,8 +338,8 @@ export default function CardScreen() {
               <View style={styles.cardMini}>
                 <Ionicons name="card" size={22} color="#1565C0" />
                 <View style={styles.cardMiniInfo}>
-                  <Text style={styles.cardMiniNumber}>{maskCardNumber(card.cardNumber)}</Text>
-                  <Text style={styles.cardMiniExpiry}>{t('card.expires')} {card.expiryMonth}/{card.expiryYear}</Text>
+                  <Text style={styles.cardMiniNumber}>{formatMaskedCardNumber(card)}</Text>
+                  <Text style={styles.cardMiniExpiry}>{t('card.expires')} {formatCardExpiry(card.expiryMonth, card.expiryYear)}</Text>
                 </View>
               </View>
               <View style={styles.cardMiniStatus}>

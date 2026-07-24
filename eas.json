@@ -26,6 +26,9 @@
       "android": {
         "buildType": "app-bundle"
       },
+      "cache": {
+        "disabled": true
+      },
       "env": {
         "SENTRY_DISABLE_AUTO_UPLOAD": "true",
         "EXPO_PUBLIC_API_URL": "https://egwalletsimple-production.up.railway.app",
