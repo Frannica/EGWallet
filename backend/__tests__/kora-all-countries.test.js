@@ -126,13 +126,13 @@ test('payoutRouter NEVER falls through to "stripe" for a Kora-unsupported Africa
   }
 });
 
-test('payoutRouter unchanged for rest-of-world / unknown countries (regression)', () => {
-  assert.equal(payoutRouter('US'), 'stripe');
-  assert.equal(payoutRouter('FR'), 'stripe');
-  assert.equal(payoutRouter('GB'), 'stripe');
-  assert.equal(payoutRouter(''), 'stripe');
-  assert.equal(payoutRouter(null), 'stripe');
-  assert.equal(payoutRouter(undefined), 'stripe');
+test('payoutRouter returns null (COUNTRY_NOT_SUPPORTED) for rest-of-world / unknown countries — no legacy stripe fallback', () => {
+  assert.equal(payoutRouter('US'), null);
+  assert.equal(payoutRouter('FR'), null);
+  assert.equal(payoutRouter('GB'), null);
+  assert.equal(payoutRouter(''), null);
+  assert.equal(payoutRouter(null), null);
+  assert.equal(payoutRouter(undefined), null);
 });
 
 // ─── 3. isPayoutProviderReady: null-provider countries are never "ready" ──
@@ -235,8 +235,8 @@ test('Every Kora country supports at least one of bank_account / mobile_money (n
 // ─── 6. USD/GBP: real Kora corridor, deliberately not implemented here ────
 
 test('USD/GBP intentionally NOT routed to Kora — the full bank_account payload (address, beneficiary_type, docs) is not implemented', () => {
-  assert.equal(payoutRouter('US'), 'stripe');
-  assert.equal(payoutRouter('GB'), 'stripe');
+  assert.equal(payoutRouter('US'), null);
+  assert.equal(payoutRouter('GB'), null);
   assert.equal(isKoraBankAccountSupported('USD'), false);
   assert.equal(isKoraBankAccountSupported('GBP'), false);
 });
@@ -398,7 +398,10 @@ test('index.js: POST /withdrawals returns a distinct 400 COUNTRY_NOT_SUPPORTED f
   assert.ok(nullCheckIdx > -1, 'unsupported-country guard not found');
   assert.ok(readyCheckIdx > -1, 'provider-ready guard not found');
   assert.ok(nullCheckIdx < readyCheckIdx, 'unsupported-country guard must run BEFORE the generic provider-ready guard');
-  const block = indexSource.slice(nullCheckIdx, nullCheckIdx + 400);
+  // Window sized to comfortably fit the full country-list error message
+  // (Nigeria/Kenya/South Africa/Ghana/Ivory Coast/Cameroon/Egypt/Tanzania) —
+  // see the matching 600-char window used below for the same guard.
+  const block = indexSource.slice(nullCheckIdx, nullCheckIdx + 600);
   assert.match(block, /COUNTRY_NOT_SUPPORTED/);
   assert.match(block, /status\(400\)/);
 });
@@ -406,22 +409,28 @@ test('index.js: POST /withdrawals returns a distinct 400 COUNTRY_NOT_SUPPORTED f
 test('index.js: POST /withdrawals returns a clear 400 COUNTRY_NOT_SUPPORTED (not a generic 503) for US/UK/Europe when Stripe Connect is not configured', () => {
   // Requirement: never claim US/UK/Europe withdrawals "work" and never return
   // a misleading generic provider error implying a fixable/transient outage.
-  // payoutRouter() defaults any country outside the 8 Kora corridors and the
-  // explicit KORA_UNSUPPORTED_COUNTRIES list to 'stripe' — but Stripe Connect
-  // payouts are not wired up for ANY corridor in this deployment
-  // (STRIPE_CONNECT_READY / STRIPE_CONNECT_ACCOUNT). That combination must
-  // surface as an honest "not supported yet" message, not "temporarily
-  // unavailable, contact support" (which implies a config bug, not a missing
-  // feature).
+  // payoutRouter() returns null for any country outside the Kora corridors and
+  // not explicitly Stripe-Connect-approved — there is no legacy 'stripe'
+  // fallback to gate anymore. That must surface as an honest "not supported
+  // yet" 400/COUNTRY_NOT_SUPPORTED from the FIRST (unconditional) guard, not
+  // as "temporarily unavailable, contact support" (503/PROVIDER_NOT_READY),
+  // which implies a fixable config bug rather than a missing feature.
   const withdrawalsHandlerStart = indexSource.indexOf("app.post('/withdrawals'");
   assert.ok(withdrawalsHandlerStart > -1, 'POST /withdrawals handler not found');
-  const readyCheckIdx = indexSource.indexOf('isPayoutProviderReady(resolvedCountry', withdrawalsHandlerStart);
-  assert.ok(readyCheckIdx > -1, 'provider-ready guard not found');
-  const block = indexSource.slice(readyCheckIdx, readyCheckIdx + 1600);
-  assert.match(block, /unreadyProvider === 'stripe'/, 'must branch on the unready provider being the stripe fallback');
-  assert.match(block, /status\(400\)/, 'stripe-fallback unready countries must be a 400, not a 503');
-  assert.match(block, /COUNTRY_NOT_SUPPORTED/, 'must use the same distinct errorCode as the explicit unsupported-country guard');
+  const nullCheckIdx = indexSource.indexOf('payoutRouter(resolvedCountry) === null', withdrawalsHandlerStart);
+  assert.ok(nullCheckIdx > -1, 'unsupported-country guard not found');
+  const block = indexSource.slice(nullCheckIdx, nullCheckIdx + 600);
+  assert.match(block, /status\(400\)/, 'unsupported-country countries must be a 400, not a 503');
+  assert.match(block, /COUNTRY_NOT_SUPPORTED/, 'must use the distinct COUNTRY_NOT_SUPPORTED errorCode');
   assert.match(block, /not available yet/i, 'message must say the corridor is not supported yet, not that it is a temporary outage');
+
+  // And the guard must run for EVERY environment/value, not just when a
+  // truthy resolvedCountry happens to be present.
+  assert.doesNotMatch(
+    indexSource.slice(nullCheckIdx - 20, nullCheckIdx),
+    /resolvedCountry\s*&&\s*$/,
+    'the COUNTRY_NOT_SUPPORTED guard must not be skippable via a falsy resolvedCountry'
+  );
 });
 
 test('index.js: GET /payout/banks rejects countries with no Kora bank_account corridor', () => {

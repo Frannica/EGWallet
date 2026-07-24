@@ -63,13 +63,39 @@ function toPublicDocument(doc) {
   };
 }
 
+/**
+ * Ensures a `users` row exists for `userId` so the kyc_documents FK is
+ * satisfiable. This is a shim for callers whose primary user record lives in
+ * the JSON-blob app state rather than the relational `users` table.
+ *
+ * Falls back to a synthetic per-user email (`${userId}@users.local`) when the
+ * caller-supplied email collides with a *different* existing user id under
+ * `users_email_lower_idx` (e.g. a stale/synthetic fixture, or an app-state
+ * email that was since changed for another account). Using a SAVEPOINT keeps
+ * this recoverable without aborting the caller's outer transaction.
+ */
 async function ensureRelationalUser(client, { userId, email, region, role }) {
-  await client.query(
-    `INSERT INTO users (id, email, password_hash, region, role, created_at)
-     VALUES ($1, $2, 'kyc-upload', $3, $4, NOW())
-     ON CONFLICT (id) DO NOTHING`,
-    [userId, email || `${userId}@users.local`, region || 'US', role || 'individual'],
-  );
+  const primaryEmail = email || `${userId}@users.local`;
+  await client.query('SAVEPOINT ensure_relational_user');
+  try {
+    await client.query(
+      `INSERT INTO users (id, email, password_hash, region, role, created_at)
+       VALUES ($1, $2, 'kyc-upload', $3, $4, NOW())
+       ON CONFLICT (id) DO NOTHING`,
+      [userId, primaryEmail, region || 'US', role || 'individual'],
+    );
+    await client.query('RELEASE SAVEPOINT ensure_relational_user');
+  } catch (error) {
+    if (error.code !== '23505') throw error;
+    await client.query('ROLLBACK TO SAVEPOINT ensure_relational_user');
+    await client.query(
+      `INSERT INTO users (id, email, password_hash, region, role, created_at)
+       VALUES ($1, $2, 'kyc-upload', $3, $4, NOW())
+       ON CONFLICT (id) DO NOTHING`,
+      [userId, `${userId}@users.local`, region || 'US', role || 'individual'],
+    );
+    await client.query('RELEASE SAVEPOINT ensure_relational_user');
+  }
 }
 
 async function insertKycDocument({

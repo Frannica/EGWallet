@@ -88,6 +88,19 @@ const {
   listKoraBanks, listKoraMobileMoneyOperators, resolveKoraBankAccount, resolveKoraMobileMoneyAccount,
 } = require('./payoutProviders');
 const {
+  isStripeConnectEnabled,
+  isCountryStripeConnectApproved,
+  getApprovedCountries: getStripeConnectApprovedCountries,
+  ensureConnectOnboardingLink,
+  refreshConnectAccountStatus,
+  getConnectAccountStatus,
+  constructConnectWebhookEvent,
+  getConnectAccountByStripeAccountId,
+  syncConnectAccountFromStripe,
+  reserveConnectWebhookEvent,
+  markConnectWebhookEventProcessed,
+} = require('./stripeConnect');
+const {
   blockMoneyOperation,
   requiresAdminIntervention,
   isAccountRestricted,
@@ -1152,7 +1165,7 @@ const translations = {
     error_request_not_found: "Request not found.",
     error_request_processed: "Request has already been processed.",
     error_card_not_found: "Card not found.",
-    error_virtual_cards_unavailable: "Virtual cards are not available yet. This feature is coming soon.",
+    error_virtual_cards_unavailable: "Virtual card spending is not available on your account right now.",
     error_card_deleted: "This card has been deleted.",
     error_max_cards: "Maximum 5 cards allowed.",
     error_budget_not_found: "Budget not found.",
@@ -1295,7 +1308,7 @@ const translations = {
     error_request_not_found: "Solicitud no encontrada.",
     error_request_processed: "La solicitud ya fue procesada.",
     error_card_not_found: "Tarjeta no encontrada.",
-    error_virtual_cards_unavailable: "Las tarjetas virtuales aun no estan disponibles. Esta funcion llegara pronto.",
+    error_virtual_cards_unavailable: "El gasto con tarjeta virtual no esta disponible en tu cuenta en este momento.",
     error_card_deleted: "Esta tarjeta ha sido eliminada.",
     error_max_cards: "Se permiten un máximo de 5 tarjetas.",
     error_budget_not_found: "Presupuesto no encontrado.",
@@ -1438,7 +1451,7 @@ const translations = {
     error_request_not_found: "Demande introuvable.",
     error_request_processed: "La demande a déjà été traitée.",
     error_card_not_found: "Carte introuvable.",
-    error_virtual_cards_unavailable: "Les cartes virtuelles ne sont pas encore disponibles. Cette fonctionnalite arrive bientot.",
+    error_virtual_cards_unavailable: "Les depenses par carte virtuelle ne sont pas disponibles sur votre compte actuellement.",
     error_card_deleted: "Cette carte a été supprimée.",
     error_max_cards: "Maximum 5 cartes autorisées.",
     error_budget_not_found: "Budget introuvable.",
@@ -1581,7 +1594,7 @@ const translations = {
     error_request_not_found: "Pedido não encontrado.",
     error_request_processed: "O pedido já foi processado.",
     error_card_not_found: "Cartão não encontrado.",
-    error_virtual_cards_unavailable: "Os cartoes virtuais ainda nao estao disponiveis. Este recurso esta chegando em breve.",
+    error_virtual_cards_unavailable: "Os gastos com cartao virtual nao estao disponiveis na sua conta no momento.",
     error_card_deleted: "Este cartão foi eliminado.",
     error_max_cards: "Máximo de 5 cartões permitidos.",
     error_budget_not_found: "Orçamento não encontrado.",
@@ -1724,7 +1737,7 @@ const translations = {
     error_request_not_found: "请求不存在。",
     error_request_processed: "请求已被处理。",
     error_card_not_found: "卡片不存在。",
-    error_virtual_cards_unavailable: "虚拟卡功能尚未开放，敬请期待。",
+    error_virtual_cards_unavailable: "您的账户当前无法使用虚拟卡消费。",
     error_card_deleted: "该卡片已被删除。",
     error_max_cards: "最多允许5张卡片。",
     error_budget_not_found: "预算不存在。",
@@ -1867,7 +1880,7 @@ const translations = {
     error_request_not_found: "リクエストが見つかりません。",
     error_request_processed: "リクエストは既に処理済みです。",
     error_card_not_found: "カードが見つかりません。",
-    error_virtual_cards_unavailable: "バーチャルカードはまだご利用いただけません。近日公開予定です。",
+    error_virtual_cards_unavailable: "現在、お客様のアカウントではバーチャルカードでのお支払いをご利用いただけません。",
     error_card_deleted: "このカードは削除されています。",
     error_max_cards: "最大5枚のカードまで使用できます。",
     error_budget_not_found: "予算が見つかりません。",
@@ -2010,7 +2023,7 @@ const translations = {
     error_request_not_found: "Запрос не найден.",
     error_request_processed: "Запрос уже был обработан.",
     error_card_not_found: "Карта не найдена.",
-    error_virtual_cards_unavailable: "Виртуальные карты пока недоступны. Эта функция скоро появится.",
+    error_virtual_cards_unavailable: "Расходы по виртуальной карте сейчас недоступны для вашего аккаунта.",
     error_card_deleted: "Эта карта была удалена.",
     error_max_cards: "Допускается не более 5 карт.",
     error_budget_not_found: "Бюджет не найден.",
@@ -2153,7 +2166,7 @@ const translations = {
     error_request_not_found: "Zahlungsanforderung nicht gefunden.",
     error_request_processed: "Diese Anforderung wurde bereits verarbeitet.",
     error_card_not_found: "Karte nicht gefunden.",
-    error_virtual_cards_unavailable: "Virtuelle Karten sind noch nicht verfuegbar. Diese Funktion kommt bald.",
+    error_virtual_cards_unavailable: "Ausgaben mit virtueller Karte sind derzeit fuer Ihr Konto nicht verfuegbar.",
     error_card_deleted: "Diese Karte wurde gelöscht.",
     error_max_cards: "Sie können maximal 5 virtuelle Karten haben.",
     error_budget_not_found: "Budget nicht gefunden.",
@@ -2543,6 +2556,111 @@ app.post('/webhooks/stripe',
   }
 );
 
+// ─── POST /webhooks/stripe-connect ──────────────────────────────────────────
+// Receives Stripe CONNECT platform events (registered as a separate "Connect"
+// webhook destination in the Stripe Dashboard, signed with
+// STRIPE_CONNECT_WEBHOOK_SECRET — distinct from the account-scoped
+// /webhooks/stripe endpoint above). Inert unless STRIPE_CONNECT_ENABLED=true;
+// see the compliance note atop stripeConnect.js for why this must stay off
+// until Stripe has explicitly approved EGWallet's business model for Connect.
+app.post('/webhooks/stripe-connect',
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    if (!isStripeConnectEnabled()) {
+      logger.warn('[webhook/stripe-connect] Received event but STRIPE_CONNECT_ENABLED is not true — ignoring');
+      return res.status(503).json({ error: 'Stripe Connect is not enabled' });
+    }
+    const sig = req.headers['stripe-signature'];
+    let event;
+    try {
+      event = constructConnectWebhookEvent(req.body, sig);
+    } catch (err) {
+      logger.warn('[webhook/stripe-connect] Signature verification failed', { error: err.message });
+      return res.status(400).json({ error: 'Webhook signature verification failed' });
+    }
+
+    // Durable, retry-safe idempotency — a duplicate delivery of the same
+    // event_id (Stripe redelivers on any non-2xx response) is a guaranteed
+    // no-op regardless of event type, in addition to the status-check
+    // idempotency below for payout events.
+    let reserved;
+    try {
+      reserved = await reserveConnectWebhookEvent({
+        eventId: event.id,
+        eventType: event.type,
+        stripeAccountId: event.account || null,
+      });
+    } catch (err) {
+      logger.error('[webhook/stripe-connect] Could not reserve event for idempotent processing', { error: err.message });
+      return res.status(500).json({ error: 'Processing failed' });
+    }
+    if (!reserved) {
+      logger.info('[webhook/stripe-connect] Duplicate event delivery — already processed', { eventId: event.id, type: event.type });
+      return res.json({ received: true, duplicate: true });
+    }
+
+    try {
+      if (event.type === 'account.updated') {
+        const account = event.data.object;
+        await syncConnectAccountFromStripe(account.id, account);
+        logger.info('[webhook/stripe-connect] account.updated synced', {
+          stripeAccountId: account.id,
+          chargesEnabled: account.charges_enabled,
+          payoutsEnabled: account.payouts_enabled,
+        });
+        await markConnectWebhookEventProcessed(event.id);
+        return res.json({ received: true });
+      }
+
+      const STRIPE_CONNECT_PAYOUT_EVENTS = new Set(['payout.paid', 'payout.failed', 'payout.canceled']);
+      if (!STRIPE_CONNECT_PAYOUT_EVENTS.has(event.type)) {
+        await markConnectWebhookEventProcessed(event.id);
+        return res.json({ received: true });
+      }
+
+      const payout = event.data.object;
+      const withdrawalId = payout.metadata?.withdrawalId;
+      if (!withdrawalId) {
+        logger.warn('[webhook/stripe-connect] Payout event missing withdrawalId metadata', { payoutId: payout.id });
+        await markConnectWebhookEventProcessed(event.id);
+        return res.json({ received: true });
+      }
+
+      await withBalanceMutex(async () => {
+        const db = loadAppState();
+        const w = (db.withdrawals || []).find((x) => x.id === withdrawalId);
+        if (!w || w.status !== 'processing') return; // already resolved — idempotent
+        if (event.type === 'payout.paid') {
+          markWithdrawalPaid(db, withdrawalId, payout.id, 'stripe_connect');
+          logger.info('[webhook/stripe-connect] Marked paid', { withdrawalId, payoutId: payout.id });
+        } else {
+          // The Transfer step (platform → connected account) already succeeded
+          // by the time any payout event can exist — payoutDispatchRef is
+          // always set here. Funds are safely sitting in the connected
+          // account's own Stripe balance, not lost — never auto-refund;
+          // require reconciliation / a manual re-payout instead.
+          w.reconcileRequired = true;
+          saveAppState(db);
+          logger.warn('[webhook/stripe-connect] Payout failure event — funds remain in connected account balance, leaving processing for reconcile', {
+            withdrawalId, payoutId: payout.id, status: payout.status,
+          });
+          return;
+        }
+        await commitWithdrawalStateUpdate(
+          db,
+          (db.withdrawals || []).find((x) => x.id === withdrawalId),
+          'processing'
+        );
+      });
+      await markConnectWebhookEventProcessed(event.id);
+      res.json({ received: true });
+    } catch (err) {
+      logger.error('[webhook/stripe-connect] Processing error', { withdrawalId: event?.data?.object?.metadata?.withdrawalId, error: err.message });
+      res.status(500).json({ error: 'Processing failed' });
+    }
+  }
+);
+
 // ─── POST /webhooks/kora ────────────────────────────────────────────────────
 // Receives signed Kora disbursement events.
 //
@@ -2775,6 +2893,11 @@ app.get('/health', (req, res) => {
     // Kora is confirmed initializing correctly. Provider readiness is still
     // surfaced (booleans only, never key values) via koraProviderReady below.
     koraProviderReady: isPayoutProviderReady('NG'),
+    // Booleans only — never country lists or account IDs. See the compliance
+    // note atop stripeConnect.js for why this must stay false in production
+    // until Stripe explicitly approves EGWallet's business model for Connect.
+    stripeConnectEnabled: isStripeConnectEnabled(),
+    stripeConnectWebhookConfigured: !!process.env.STRIPE_CONNECT_WEBHOOK_SECRET,
   };
   res.status(200).json(healthStatus);
 });
@@ -3048,12 +3171,17 @@ app.post('/auth/register',
   const wallet = { id: uuidv4(), userId: id, balances: [{ currency: preferredCurrency, amount: 0 }], createdAt: Date.now(), maxLimitUSD: 250000 };
   db.wallets.push(wallet);
 
-  provisionVirtualCardForUser(db, {
-    userId: id,
-    walletId: wallet.id,
-    currency: preferredCurrency,
-    label: 'Virtual Card',
-  });
+  // Virtual card issuance requires a real Stripe Issuing integration. Auto-provisioning
+  // a card record here would fabricate a non-functional card number/CVV for every new
+  // user — never do that outside of an explicitly enabled, real card-network integration.
+  if (isVirtualCardIssuingEnabled()) {
+    provisionVirtualCardForUser(db, {
+      userId: id,
+      walletId: wallet.id,
+      currency: preferredCurrency,
+      label: 'Virtual Card',
+    });
+  }
 
   // Register first device (no alert needed on registration)
   if (!db.devices) db.devices = [];
@@ -3137,8 +3265,10 @@ app.post('/auth/login',
   u.lockedUntil = null;
   appendLoginHistory(u, { ...loginEntry, success: true });
 
+  // See signup handler: never fabricate a virtual card outside of a real,
+  // explicitly-enabled Stripe Issuing integration.
   const primaryWallet = (db.wallets || []).find((w) => w.userId === u.id);
-  if (primaryWallet) {
+  if (primaryWallet && isVirtualCardIssuingEnabled()) {
     provisionVirtualCardForUser(db, {
       userId: u.id,
       walletId: primaryWallet.id,
@@ -4056,43 +4186,35 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
   });
 
   // ── Fail safely for countries with no Kora/Stripe payout corridor ─────────
-  // payoutRouter() returns null for countries that share a currency with a
-  // Kora corridor (e.g. Equatorial Guinea/XAF, Senegal/XOF) but are not
-  // themselves Kora-supported. These must NEVER silently fall through to
-  // Stripe — return a clear, permanent "not supported" error (400), distinct
-  // from the generic "provider not ready" 503 below which implies a
-  // transient/config issue rather than a corridor that plainly doesn't exist.
-  if (resolvedCountry && payoutRouter(resolvedCountry) === null) {
+  // payoutRouter() returns null for every country that is not one of Kora's 8
+  // confirmed corridors and not an explicitly Stripe-Connect-approved
+  // corridor — this now includes the US, UK, and all of Europe while Stripe
+  // Connect stays disabled/unapproved, plus known non-corridors like
+  // Equatorial Guinea/XAF and Senegal/XOF. Runs unconditionally (in every
+  // NODE_ENV, and even when resolvedCountry could not be determined at all)
+  // so this can never be bypassed outside production. These must NEVER
+  // silently fall through to the legacy single-account Stripe path — return a
+  // clear, permanent "not supported" error (400) before any hold/debit.
+  if (payoutRouter(resolvedCountry) === null) {
     logger.warn('POST /withdrawals blocked — country has no supported payout corridor', {
       userId: req.user.userId, country: resolvedCountry, currency,
     });
     return res.status(400).json({
-      error: 'Withdrawals are not currently supported for your country. Please contact support.',
+      error: 'Withdrawals for your country are not available yet. EGWallet currently supports withdrawals to Nigeria, Kenya, South Africa, Ghana, Ivory Coast, Cameroon, Egypt, and Tanzania. Support for more countries is coming soon.',
       errorCode: 'COUNTRY_NOT_SUPPORTED',
     });
   }
 
-  // ── Block in production when no payout provider is configured ────────────
-  // Prevents funds entering holdBalance with no path to release them.
+  // ── Block in production when the matched provider isn't actually configured ──
+  // Prevents funds entering holdBalance with no path to release them. By this
+  // point payoutRouter() has already returned 'kora' or 'stripe_connect' (the
+  // null case was rejected above), so this only ever means "the right
+  // provider was chosen but its credentials/flag aren't set" — a transient
+  // config issue, not an unsupported corridor — hence 503, not 400.
   if (process.env.NODE_ENV === 'production' && !isPayoutProviderReady(resolvedCountry || '')) {
-    const unreadyProvider = payoutRouter(resolvedCountry);
     logger.error('POST /withdrawals blocked — no payout provider configured for region', {
-      userId: req.user.userId, country: resolvedCountry, provider: unreadyProvider,
+      userId: req.user.userId, country: resolvedCountry, provider: payoutRouter(resolvedCountry),
     });
-    // Distinguish "this corridor genuinely isn't supported yet" (Stripe Connect
-    // payouts are not wired up for ANY country in this deployment — see
-    // STRIPE_CONNECT_READY / STRIPE_CONNECT_ACCOUNT) from "a configured
-    // provider is temporarily down". Every country that falls through
-    // payoutRouter()'s default to 'stripe' — which today means every country
-    // outside Kora's 8 confirmed corridors, including the US, UK, and all of
-    // Europe — must get an honest, specific, non-transient message instead of
-    // a generic 503 that implies a fixable outage.
-    if (unreadyProvider === 'stripe') {
-      return res.status(400).json({
-        error: 'Withdrawals for your country are not available yet. EGWallet currently supports withdrawals to Nigeria, Kenya, South Africa, Ghana, Ivory Coast, Cameroon, Egypt, and Tanzania. Support for more countries is coming soon.',
-        errorCode: 'COUNTRY_NOT_SUPPORTED',
-      });
-    }
     return res.status(503).json({
       error: 'Withdrawals are temporarily unavailable. Please contact support.',
       errorCode: 'PROVIDER_NOT_READY',
@@ -4286,6 +4408,101 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
   // Dispatch payout immediately unless fraud/AML review is required.
   if (!_withdrawNeedsAdminReview && _capturedWithdrawalId) {
     setImmediate(() => executePayout(_capturedWithdrawalId, logger, withBalanceMutex));
+  }
+});
+
+// ─── Stripe Connect — onboarding for US/UK/European withdrawal corridors ─────
+// Inert (503 STRIPE_CONNECT_DISABLED) unless STRIPE_CONNECT_ENABLED=true and
+// the user's country is in STRIPE_CONNECT_APPROVED_COUNTRIES — see the
+// compliance note atop stripeConnect.js.
+
+// GET /stripe-connect/countries — which ISO-2 countries this deployment has
+// actually enabled Stripe Connect withdrawals for (may be empty).
+app.get('/stripe-connect/countries', authMiddleware, (req, res) => {
+  res.json({
+    enabled: isStripeConnectEnabled(),
+    countries: isStripeConnectEnabled() ? Array.from(getStripeConnectApprovedCountries()) : [],
+  });
+});
+
+// GET /stripe-connect/status — onboarding-status screen data (DB read only).
+app.get('/stripe-connect/status', authMiddleware, async (req, res) => {
+  try {
+    const status = await getConnectAccountStatus(req.user.userId);
+    res.json(status);
+  } catch (err) {
+    logger.error('[/stripe-connect/status] failed', { userId: req.user.userId, error: err.message });
+    res.status(500).json({ error: 'Unable to retrieve Stripe account status right now.' });
+  }
+});
+
+// POST /stripe-connect/onboard — creates (or reuses) the user's Express
+// connected account and returns a fresh Stripe-hosted onboarding URL.
+app.post('/stripe-connect/onboard', authMiddleware, async (req, res) => {
+  const { country } = req.body || {};
+  const iso2 = normalizeCountryToISO2(country) || null;
+  const db = loadAppState();
+  const user = (db.users || []).find((u) => u.id === req.user.userId);
+  if (!user) return res.status(404).json({ error: t('error_sender_not_found', req.lang || 'en') });
+
+  const appBaseUrl = process.env.PUBLIC_APP_URL || process.env.APP_BASE_URL || 'https://egwalletfinance.com';
+  try {
+    const result = await ensureConnectOnboardingLink({
+      userId: req.user.userId,
+      email: user.email,
+      country: iso2 || user.region,
+      refreshUrl: `${appBaseUrl}/stripe-connect/refresh`,
+      returnUrl: `${appBaseUrl}/stripe-connect/return`,
+    });
+    res.json(result);
+  } catch (err) {
+    logger.error('[/stripe-connect/onboard] failed', { userId: req.user.userId, error: err.message });
+    res.status(err.status || 500).json({ error: err.message, errorCode: err.errorCode });
+  }
+});
+
+// POST /stripe-connect/refresh-link — Account Links expire quickly; the
+// mobile app calls this to get a new one if the user navigated away or the
+// link timed out (Stripe's refresh_url target).
+app.post('/stripe-connect/refresh-link', authMiddleware, async (req, res) => {
+  const db = loadAppState();
+  const user = (db.users || []).find((u) => u.id === req.user.userId);
+  if (!user) return res.status(404).json({ error: t('error_sender_not_found', req.lang || 'en') });
+
+  const appBaseUrl = process.env.PUBLIC_APP_URL || process.env.APP_BASE_URL || 'https://egwalletfinance.com';
+  try {
+    const result = await ensureConnectOnboardingLink({
+      userId: req.user.userId,
+      email: user.email,
+      country: user.region,
+      refreshUrl: `${appBaseUrl}/stripe-connect/refresh`,
+      returnUrl: `${appBaseUrl}/stripe-connect/return`,
+    });
+    res.json(result);
+  } catch (err) {
+    logger.error('[/stripe-connect/refresh-link] failed', { userId: req.user.userId, error: err.message });
+    res.status(err.status || 500).json({ error: err.message, errorCode: err.errorCode });
+  }
+});
+
+// POST /stripe-connect/sync — pulls the latest status directly from Stripe
+// (used by the return_url screen right after the user finishes hosted
+// onboarding, so the UI doesn't have to wait for the account.updated webhook).
+app.post('/stripe-connect/sync', authMiddleware, async (req, res) => {
+  try {
+    const synced = await refreshConnectAccountStatus(req.user.userId);
+    if (!synced) return res.status(404).json({ error: 'No Stripe Connect account found — start onboarding first.' });
+    res.json({
+      onboardingStatus: synced.onboarding_status,
+      payoutsEnabled: synced.payouts_enabled,
+      chargesEnabled: synced.charges_enabled,
+      detailsSubmitted: synced.details_submitted,
+      currentlyDue: synced.currently_due || [],
+      disabledReason: synced.disabled_reason || null,
+    });
+  } catch (err) {
+    logger.error('[/stripe-connect/sync] failed', { userId: req.user.userId, error: err.message });
+    res.status(500).json({ error: 'Unable to sync Stripe account status right now.' });
   }
 });
 
@@ -6272,8 +6489,13 @@ app.post('/virtual-cards', authMiddleware, (req, res) => {
   res.json(response);
 });
 
-// List virtual cards
+// List virtual cards. While virtual card issuing is disabled, never surface any
+// legacy/stray fabricated card rows created before this gate existed — a fake,
+// unspendable card must never be presented to a user as a real feature.
 app.get('/virtual-cards', authMiddleware, (req, res) => {
+  if (!isVirtualCardIssuingEnabled()) {
+    return res.json({ cards: [] });
+  }
   const db = loadAppState();
   const cards = (db.virtualCards || [])
     .filter((c) => c.userId === req.user.userId && c.status !== 'deleted' && c.status !== 'closed')
@@ -6284,6 +6506,12 @@ app.get('/virtual-cards', authMiddleware, (req, res) => {
 
 // Get single card
 app.get('/virtual-cards/:id', authMiddleware, (req, res) => {
+  if (!isVirtualCardIssuingEnabled()) {
+    return res.status(503).json({
+      error: t('error_virtual_cards_unavailable', req.lang || 'en'),
+      errorCode: 'VIRTUAL_CARDS_UNAVAILABLE',
+    });
+  }
   const db = loadAppState();
   const card = (db.virtualCards || []).find((c) => c.id === req.params.id && c.userId === req.user.userId);
   if (!card) return res.status(404).json({ error: t('error_card_not_found', req.lang || 'en') });
@@ -6292,6 +6520,12 @@ app.get('/virtual-cards/:id', authMiddleware, (req, res) => {
 
 // Freeze/unfreeze card
 app.post('/virtual-cards/:id/toggle-freeze', authMiddleware, (req, res) => {
+  if (!isVirtualCardIssuingEnabled()) {
+    return res.status(503).json({
+      error: t('error_virtual_cards_unavailable', req.lang || 'en'),
+      errorCode: 'VIRTUAL_CARDS_UNAVAILABLE',
+    });
+  }
   const db = loadAppState();
   const { idempotencyKey } = req.body;
   

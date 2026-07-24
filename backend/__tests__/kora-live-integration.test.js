@@ -69,14 +69,14 @@ function decryptKoraPayload(encryptionKey, encoded) {
 
 // ── Provider list / routing unchanged ─────────────────────────────────────────
 
-test('Kora: country routing unchanged — Africa → kora, everything else → stripe', () => {
+test('Kora: country routing unchanged for Africa; everything else is null (COUNTRY_NOT_SUPPORTED), no legacy stripe fallback', () => {
   assert.equal(payoutRouter('NG'), 'kora');
   assert.equal(payoutRouter('GH'), 'kora');
   assert.equal(payoutRouter('CM'), 'kora');
-  assert.equal(payoutRouter('US'), 'stripe');
-  assert.equal(payoutRouter('FR'), 'stripe');
-  assert.equal(payoutRouter(''), 'stripe');
-  assert.equal(payoutRouter(null), 'stripe');
+  assert.equal(payoutRouter('US'), null);
+  assert.equal(payoutRouter('FR'), null);
+  assert.equal(payoutRouter(''), null);
+  assert.equal(payoutRouter(null), null);
 });
 
 test('Kora: no existing provider removed — stripePayout and koraPayout both still defined', () => {

@@ -284,6 +284,13 @@ test.after(async () => {
     await pool.query(`DELETE FROM admin_refresh_tokens WHERE admin_id IN (SELECT id FROM admin_users WHERE email LIKE '%@test.egwallet')`).catch(() => {});
     await pool.query(`DELETE FROM admin_user_notes WHERE admin_id IN (SELECT id FROM admin_users WHERE email LIKE '%@test.egwallet')`).catch(() => {});
     await pool.query('DELETE FROM admin_users WHERE email LIKE $1', ['%@test.egwallet']).catch(() => {});
+    // ensureRelationalUser() (kycUploadPostgres.js) shims a `users` row for this
+    // test's fixed fixture email on every run — clean it up so repeated runs
+    // against a persistent test database never collide on users_email_lower_idx.
+    if (testUserId) {
+      await pool.query('DELETE FROM users WHERE id = $1', [testUserId]).catch(() => {});
+    }
+    await pool.query('DELETE FROM users WHERE email = $1', ['platform-user@egwallet.test']).catch(() => {});
     await pool.end();
   }
   if (server) await new Promise((resolve) => server.close(resolve));

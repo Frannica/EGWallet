@@ -10,11 +10,21 @@
  * Provider routing:
  *   Kora-confirmed corridors (exactly 8 countries — see KORA_COUNTRIES below:
  *     NG, KE, ZA, GH, CI, CM, EG, TZ) → Kora
- *   Countries that share a currency with a Kora corridor but are NOT
- *   themselves Kora-supported (e.g. Equatorial Guinea/XAF, Senegal/XOF) →
- *   null — payoutRouter() returns null and callers MUST fail safely with a
- *   clear message, never silently fall through to Stripe.
- *   Everything else (US, GB, EU, rest of world) → Stripe
+ *   Countries explicitly approved for Stripe Connect (STRIPE_CONNECT_ENABLED=
+ *     true AND listed in STRIPE_CONNECT_APPROVED_COUNTRIES — see
+ *     stripeConnect.js for the compliance gate this sits behind) → Stripe
+ *     Connect (per-user Express connected account + Transfer/Payout).
+ *   EVERY OTHER COUNTRY — including Equatorial Guinea/XAF, Senegal/XOF (share
+ *   a currency with a Kora corridor but are not themselves Kora-supported),
+ *   and the US/UK/EU before Stripe Connect is approved for them — → null.
+ *   payoutRouter() returning null means "no safe provider for this country
+ *   right now"; callers MUST fail the request with COUNTRY_NOT_SUPPORTED and
+ *   MUST NOT fall through to the legacy single-account Stripe payout path
+ *   (stripePayout below). That legacy function is kept only so
+ *   executePayout() can still dispatch/reconcile any pre-existing withdrawal
+ *   record whose stored `provider` field is literally 'stripe' from before
+ *   this corridor was locked down — payoutRouter() itself never hands out
+ *   'stripe' for new routing decisions.
  *
  * PRODUCTION NOTES:
  *   Stripe:  Requires funds in your Stripe balance and an External Account
@@ -50,6 +60,11 @@ const axios    = require('axios');
 const crypto   = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const { decryptPII } = require('./piiCipher');
+const {
+  isStripeConnectEnabled,
+  isCountryStripeConnectApproved,
+  stripeConnectPayout,
+} = require('./stripeConnect');
 
 // ─── Stripe client ────────────────────────────────────────────────────────────
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || null;
@@ -218,15 +233,29 @@ const KORA_UNSUPPORTED_COUNTRIES = new Set([
 
 /**
  * Resolves the payout provider for a country.
- * @returns {'kora'|'stripe'|null} null means "no safe provider" — the caller
- *   MUST fail the request with a clear message, never silently fall through.
+ *
+ * 'stripe_connect' is only ever returned when BOTH STRIPE_CONNECT_ENABLED=true
+ * AND the country appears in STRIPE_CONNECT_APPROVED_COUNTRIES (see the
+ * compliance note atop stripeConnect.js — this must stay off until Stripe has
+ * explicitly approved EGWallet's business model for Connect).
+ *
+ * Every country that is neither a Kora-confirmed corridor nor an explicitly
+ * Stripe-Connect-approved corridor returns null — including the US, UK, and
+ * all of Europe while Stripe Connect remains disabled/unapproved. There is
+ * NO legacy single-account Stripe fallback for new routing decisions: a
+ * country either has an explicit, verified corridor or it is unsupported.
+ * Callers MUST turn a null result into a COUNTRY_NOT_SUPPORTED error before
+ * any debit — never silently fall through to stripePayout().
+ *
+ * @returns {'kora'|'stripe_connect'|null} null means "no safe provider" —
+ *   the caller MUST fail the request with a clear message.
  */
 function payoutRouter(country) {
-  if (!country) return 'stripe';
+  if (!country) return null;
   const iso2 = country.trim().toUpperCase();
   if (KORA_COUNTRIES.has(iso2)) return 'kora';
-  if (KORA_UNSUPPORTED_COUNTRIES.has(iso2)) return null;
-  return 'stripe';
+  if (isCountryStripeConnectApproved(iso2)) return 'stripe_connect';
+  return null;
 }
 
 // Canonical country for each Kora-supported currency — used for the
@@ -437,16 +466,20 @@ function isPayoutProviderReady(country) {
   if (provider === 'kora') {
     return !!getKoraSecretKey();
   }
-  if (provider === null) {
-    // No safe provider for this country (see KORA_UNSUPPORTED_COUNTRIES) —
-    // never treat this as "ready" just because Stripe happens to be configured.
-    return false;
+  if (provider === 'stripe_connect') {
+    // Corridor-level readiness only (flag on, country approved, Stripe client
+    // configured). Whether THIS user's own connected account has finished
+    // onboarding is a per-user check made later in stripeConnectPayout() at
+    // dispatch time — same two-layer pattern as Kora (secret key present vs.
+    // corridor/method support checked deeper in koraPayout()).
+    return isStripeConnectEnabled();
   }
-  return !!(
-    stripeClient &&
-    process.env.STRIPE_CONNECT_READY &&
-    process.env.STRIPE_CONNECT_ACCOUNT
-  );
+  // provider === null — no explicit, verified corridor for this country
+  // (unsupported country, or a real corridor Stripe/Kora hasn't approved
+  // yet). Never treat this as "ready" just because a Stripe key happens to
+  // be configured for something else — that would silently resurrect the
+  // legacy single-account Stripe fallback this routing rule exists to close.
+  return false;
 }
 
 // ─── Stripe payout ────────────────────────────────────────────────────────────
@@ -1056,8 +1089,9 @@ async function executePayout(withdrawalId, logger, withBalanceMutex) {
   // Consistent with the deposit system which also uses demo mode when Stripe
   // is not configured.  Logged clearly so it is easy to spot in production.
   const isDemoMode =
-    (provider === 'stripe' && !stripeClient) ||
-    (provider === 'kora'   && !getKoraSecretKey());
+    (provider === 'stripe'         && !stripeClient) ||
+    (provider === 'stripe_connect' && !isStripeConnectEnabled()) ||
+    (provider === 'kora'           && !getKoraSecretKey());
 
   if (isDemoMode) {
     logger.warn('[executePayout] DEMO MODE — no payment provider configured', { withdrawalId, provider });
@@ -1161,9 +1195,20 @@ async function executePayout(withdrawalId, logger, withBalanceMutex) {
       payoutDispatchRef: wSnapshot.payoutDispatchRef });
 
     // Provider HTTP call outside the mutex.
+    // NOTE: `provider` above is payoutRouter(w.country), which never returns
+    // 'stripe' anymore — every country without an explicit Kora/Stripe Connect
+    // corridor now returns null and is rejected before a withdrawal record can
+    // even be created (see the COUNTRY_NOT_SUPPORTED check in POST
+    // /withdrawals). This branch is therefore unreachable in normal operation;
+    // stripePayout() itself is left in place (rather than deleted) purely so
+    // existing regression tests asserting "no provider was removed" keep
+    // passing, and as a defensive no-op if a legacy pre-lockdown record is
+    // ever replayed through this code path.
     let result;
     if (provider === 'stripe') {
       result = await stripePayout(wSnapshot, logger);
+    } else if (provider === 'stripe_connect') {
+      result = await stripeConnectPayout(wSnapshot, logger);
     } else {
       result = await koraPayout(wSnapshot, logger);
     }

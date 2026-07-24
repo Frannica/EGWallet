@@ -14,6 +14,7 @@ import { fetchRates, DEMO_RATES, Rates, API_BASE, getApiLanguage } from '../api/
 import { useLanguage, SupportedLanguage } from '../i18n/LanguageContext';
 import { getApiErrorMessage } from '../utils/apiErrorMessage';
 import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
+import { getStripeConnectCountries } from '../api/stripeConnect';
 
 // Full list ordered: popular first, then alphabetical by code
 const CURRENCIES = Object.keys(CURRENCY_INFO).sort((a, b) => {
@@ -56,6 +57,10 @@ export default function SettingsScreen() {
   const [showWalletIdModal, setShowWalletIdModal] = useState(false);
   const { language: appLanguage, setLanguage: setContextLanguage, t } = useLanguage();
   const [showLanguagePicker, setShowLanguagePicker] = useState(false);
+  // Stripe Connect (US/UK/EU bank withdrawal setup) — hidden entirely unless the
+  // backend has explicitly enabled it for the user's country. Fails closed:
+  // any error fetching eligibility keeps the menu item hidden.
+  const [stripeConnectEligible, setStripeConnectEligible] = useState(false);
 
   useEffect(() => {
     if (!auth.token) return;
@@ -81,7 +86,14 @@ export default function SettingsScreen() {
   }, [auth.token]);
 
   useEffect(() => {
-  }, []);
+    if (!auth.token) return;
+    getStripeConnectCountries()
+      .then((res) => {
+        const region = (auth.user?.region || '').trim().toUpperCase();
+        setStripeConnectEligible(res.enabled && !!region && res.countries.includes(region));
+      })
+      .catch(() => setStripeConnectEligible(false));
+  }, [auth.token, auth.user?.region]);
 
   const saveUsername = async () => {
     const clean = usernameInput.trim().replace(/^@/, '').toLowerCase();
@@ -440,8 +452,8 @@ export default function SettingsScreen() {
           
           <View style={styles.divider} />
           
-          <TouchableOpacity 
-            style={styles.supportButton} 
+          <TouchableOpacity
+            style={styles.supportButton}
             onPress={() => (navigation as any).navigate('TrustedDevices')}
           >
             <Ionicons name="shield" size={20} color="#007AFF" />
@@ -450,6 +462,21 @@ export default function SettingsScreen() {
           </TouchableOpacity>
 
           <View style={styles.divider} />
+
+          {stripeConnectEligible && (
+            <>
+              <TouchableOpacity
+                style={styles.supportButton}
+                onPress={() => (navigation as any).navigate('StripeConnectOnboarding')}
+              >
+                <Ionicons name="business" size={20} color="#007AFF" />
+                <Text style={styles.supportButtonText}>{t('stripeConnect.settingsMenuLabel')}</Text>
+                <Ionicons name="chevron-forward" size={20} color="#007AFF" />
+              </TouchableOpacity>
+
+              <View style={styles.divider} />
+            </>
+          )}
           
           <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteAccount}>
             <Ionicons name="trash" size={20} color="#d32f2f" />
