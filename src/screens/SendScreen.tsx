@@ -104,7 +104,7 @@ export default function SendScreen() {
   // mobile-money payouts (no bank_account), bank code entry is replaced with a
   // picker fed by Kora's own List MMO API, and the account name is
   // resolved/confirmed via Kora's account-resolution API where supported.
-  const [mmOperators, setMmOperators] = useState<Array<{ name: string; slug: string; code?: string }>>([]);
+  const [mmOperators, setMmOperators] = useState<Array<{ name: string; slug: string; code?: string; min?: number; max?: number }>>([]);
   const [mmOperatorSlug, setMmOperatorSlug] = useState<string>('');
   const [loadingOperators, setLoadingOperators] = useState(false);
   const [showOperatorPicker, setShowOperatorPicker] = useState(false);
@@ -216,6 +216,71 @@ export default function SendScreen() {
 
   const koraMobileCountryForCurrency = KORA_MOBILE_COUNTRY_BY_CURRENCY[currency];
   const koraBankCountryForCurrency   = KORA_BANK_COUNTRY_BY_CURRENCY[currency];
+
+  // Currently-selected mobile money operator (carries Kora's own live
+  // min/max for this operator, fetched via GET /payout/mobile-money-operators —
+  // same source the backend validates against in koraCorridorRules.js).
+  const selectedOperator = mmOperators.find(o => o.slug === mmOperatorSlug) || null;
+
+  // Kora corridor-safety client checks — mirror backend/koraCorridorRules.js
+  // exactly so a request that will definitely be rejected server-side (and
+  // never touch the wallet) is caught here first, with a clear message,
+  // before the user even taps confirm. NOT a substitute for the backend
+  // check — the backend re-validates against the same live Kora data on
+  // every request regardless of what the client sends.
+  const KORA_MOBILE_PHONE_FORMAT: Record<string, { regex: RegExp; example: string; hint: string }> = {
+    KE: { regex: /^254[17]\d{8}$/, example: '254712345678',  hint: 'Format: 254 + 9 digits (no leading 0 or +)' },
+    GH: { regex: /^233\d{9}$/,     example: '233241234567',  hint: 'Format: 233 + 9 digits (no leading 0 or +)' },
+    CI: { regex: /^225\d{10}$/,    example: '2250512345678', hint: 'Format: 225 + 10-digit local number starting with 0' },
+    CM: { regex: /^237\d{9}$/,     example: '237671234567',  hint: 'Format: 237 + 9 digits (no leading 0 or +)' },
+    EG: { regex: /^20\d{10}$/,     example: '201012345678',  hint: 'Format: 20 + 10 digits (no leading 0 or +)' },
+    TZ: { regex: /^255\d{9}$/,     example: '255751234567',  hint: 'Format: 255 + 9 digits (no leading 0 or +)' },
+  };
+  const KORA_BANK_ACCOUNT_FORMAT: Record<string, { regex: RegExp; description: string }> = {
+    NG: { regex: /^\d{10}$/,   description: '10-digit NUBAN account number' },
+    KE: { regex: /^\d{5,17}$/, description: '5-17 digit account number' },
+    ZA: { regex: /^\d{6,11}$/, description: '6-11 digit account number' },
+  };
+
+  /**
+   * Validates the current withdrawal form against Kora's real corridor rules
+   * client-side. Returns an error string, or null if the form passes every
+   * check this screen can verify locally (amount min/max, phone/account
+   * format, XAF/XOF multiple-of-5). The backend re-validates independently.
+   */
+  function validateKoraCorridorClientSide(amt: number): string | null {
+    if (isKoraMobileMoneyWithdrawal) {
+      const cc = koraMobileCountryForCurrency || '';
+      const phoneRule = KORA_MOBILE_PHONE_FORMAT[cc];
+      if (phoneRule && !phoneRule.regex.test(accountNumber.trim())) {
+        return t('send.invalidPhoneFormat')
+          .replace('{example}', phoneRule.example)
+          .replace('{hint}', phoneRule.hint);
+      }
+      if (selectedOperator) {
+        if (typeof selectedOperator.min === 'number' && amt < selectedOperator.min) {
+          return t('send.belowMinimumWithdrawal')
+            .replace('{min}', formatMajorAmount(selectedOperator.min, currency))
+            .replace(/\{currency\}/g, currency);
+        }
+        if (typeof selectedOperator.max === 'number' && amt > selectedOperator.max) {
+          return t('send.aboveMaximumWithdrawal')
+            .replace('{max}', formatMajorAmount(selectedOperator.max, currency))
+            .replace(/\{currency\}/g, currency);
+        }
+      }
+      if ((currency === 'XAF' || currency === 'XOF') && amt % 5 !== 0) {
+        return t('send.mustBeMultipleOfFive').replace(/\{currency\}/g, currency);
+      }
+    } else if (isKoraBankWithdrawal) {
+      const cc = koraBankCountryForCurrency || '';
+      const acctRule = KORA_BANK_ACCOUNT_FORMAT[cc];
+      if (acctRule && !acctRule.regex.test(accountNumber.trim())) {
+        return t('send.invalidAccountFormat').replace('{description}', acctRule.description);
+      }
+    }
+    return null;
+  }
 
   // Local withdrawal via mobile money for any Kora mobile-money corridor
   // (Cameroon/XAF, Ghana/GHS, Ivory Coast/XOF, Egypt/EGP, Tanzania/TZS,
@@ -393,6 +458,10 @@ export default function SendScreen() {
         }
         if (isKoraBankWithdrawal && !selectedKoraBankCode) {
           return Alert.alert(t('common.error'), t('send.pleaseSelectBank'));
+        }
+        const corridorError = validateKoraCorridorClientSide(amt);
+        if (corridorError) {
+          return Alert.alert(t('common.error'), corridorError);
         }
       }
       // Bank withdrawal: warn about processing time before proceeding
@@ -1039,7 +1108,16 @@ export default function SendScreen() {
                   }}
                 >
                   <Ionicons name="phone-portrait-outline" size={20} color="#1565C0" />
-                  <Text style={styles.operatorRowText}>{op.name}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.operatorRowText}>{op.name}</Text>
+                    {(typeof op.min === 'number' || typeof op.max === 'number') && (
+                      <Text style={styles.operatorLimitText}>
+                        {t('send.operatorLimitRange')
+                          .replace('{min}', formatMajorAmount(op.min ?? 0, currency))
+                          .replace('{max}', formatMajorAmount(op.max ?? 0, currency))}
+                      </Text>
+                    )}
+                  </View>
                 </TouchableOpacity>
               ))
             )}
@@ -1787,6 +1865,16 @@ export default function SendScreen() {
                   <Text style={styles.currencyBadgeText}>{currency}</Text>
                 </View>
               </View>
+              {activeTab === 'withdraw' && isKoraMobileMoneyWithdrawal && selectedOperator && (typeof selectedOperator.min === 'number' || typeof selectedOperator.max === 'number') && (
+                <Text style={styles.corridorLimitHint}>
+                  {t('send.operatorLimitHint')
+                    .replace('{min}', formatMajorAmount(selectedOperator.min ?? 0, currency))
+                    .replace('{max}', formatMajorAmount(selectedOperator.max ?? 0, currency))}
+                </Text>
+              )}
+              {activeTab === 'withdraw' && isKoraMobileMoneyWithdrawal && (currency === 'XAF' || currency === 'XOF') && (
+                <Text style={styles.corridorLimitHint}>{t('send.multipleOfFiveHint').replace(/\{currency\}/g, currency)}</Text>
+              )}
             </View>
 
             <View style={styles.section}>
@@ -2407,6 +2495,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#14171A',
     marginLeft: 12,
+  },
+  operatorLimitText: {
+    fontSize: 12,
+    color: '#657786',
+    marginLeft: 12,
+    marginTop: 2,
+  },
+  corridorLimitHint: {
+    fontSize: 12,
+    color: '#657786',
+    marginTop: 4,
+    marginBottom: 4,
   },
   operatorEmptyText: {
     fontSize: 14,

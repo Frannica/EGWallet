@@ -1709,6 +1709,11 @@ module.exports = {
   listKoraMobileMoneyOperators,
   resolveKoraBankAccount,
   resolveKoraMobileMoneyAccount,
+  // Shared minor-unit → Kora-major-unit conversion + zero-decimal currency set —
+  // used by koraCorridorRules.js to convert amountMinor to the same major-unit
+  // representation Kora's own min/max limits are expressed in.
+  toKoraAmount,
+  ZERO_DECIMAL,
   // Exposed for unit testing only — not part of the runtime execution path used by index.js.
   _test: {
     getKoraSecretKey, getKoraPublicKey, getKoraEncryptionKey, encryptKoraPayload,

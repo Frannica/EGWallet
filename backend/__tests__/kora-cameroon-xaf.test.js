@@ -458,10 +458,12 @@ test('index.js: GET /payout/banks calls listKoraBanks (Kora\'s official List Ban
   assert.match(match[0], /listKoraBanks\(country\)/);
 });
 
-test('index.js: GET /payout/mobile-money-operators calls listKoraMobileMoneyOperators', () => {
+test('index.js: GET /payout/mobile-money-operators fetches operators via the cached/fallback-safe koraCorridorRules helper (which itself calls listKoraMobileMoneyOperators — see koraCorridorRules.js)', () => {
   const match = indexSource.match(/app\.get\('\/payout\/mobile-money-operators',[\s\S]*?\n\}\);/);
   assert.ok(match);
-  assert.match(match[0], /listKoraMobileMoneyOperators\(country\)/);
+  assert.match(match[0], /getMobileMoneyOperatorsForApp\(country\)/);
+  const koraCorridorRulesSource = fs.readFileSync(path.join(__dirname, '..', 'koraCorridorRules.js'), 'utf8');
+  assert.match(koraCorridorRulesSource, /listKoraMobileMoneyOperators\(country\)/);
 });
 
 test('index.js: POST /payout/resolve-account never fabricates an account name on Kora failure', () => {

@@ -31,6 +31,10 @@ const ERROR_CODE_TO_I18N: Record<string, string> = {
   KORA_BANK_UNSUPPORTED: 'send.bankNotSupportedForCurrency',
   KORA_MOBILE_MONEY_UNSUPPORTED: 'send.mobileMoneyNotSupportedForCurrency',
   VIRTUAL_CARDS_UNAVAILABLE: 'card.notAvailable',
+  // Kora's live operator/bank list could not be verified (no live data, no
+  // usable cache) — the backend FAILS CLOSED and rejects before any wallet
+  // hold. This is safely retryable: no funds moved, just try again shortly.
+  PROVIDER_VALIDATION_UNAVAILABLE: 'send.corridorValidationUnavailable',
 };
 
 /** Normalize backend error text for legacy responses without errorCode. */

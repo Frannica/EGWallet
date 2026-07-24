@@ -88,6 +88,10 @@ const {
   listKoraBanks, listKoraMobileMoneyOperators, resolveKoraBankAccount, resolveKoraMobileMoneyAccount,
 } = require('./payoutProviders');
 const {
+  validateKoraWithdrawalPreHold,
+  getMobileMoneyOperators: getMobileMoneyOperatorsForApp,
+} = require('./koraCorridorRules');
+const {
   isStripeConnectEnabled,
   isCountryStripeConnectApproved,
   getApprovedCountries: getStripeConnectApprovedCountries,
@@ -4240,6 +4244,50 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
     }
   }
 
+  // ── Corridor safety rules — BEFORE any wallet hold/debit ──────────────────
+  // Real, Kora-verified per-operator minimum/maximum amount, phone/account
+  // number format, operator/bank whitelist, and XAF/XOF multiple-of-5
+  // precision — see koraCorridorRules.js for sourcing. Rejecting here means a
+  // request that would definitely fail at Kora never enters holdBalance at
+  // all, instead of being held and then refunded after a failed dispatch.
+  if (payoutRouter(resolvedCountry) === 'kora' && (method === 'bank' || method === 'mobile')) {
+    let corridorCheck;
+    try {
+      corridorCheck = await validateKoraWithdrawalPreHold({
+        country: resolvedCountry,
+        currency,
+        method,
+        amountMinor: amount,
+        bankCode: bankCode || null,
+        accountNumber: sanitizedAccountNumber,
+      });
+    } catch (corridorErr) {
+      logger.error('[/withdrawals] Corridor rule validation failed unexpectedly', {
+        userId: req.user.userId, country: resolvedCountry, currency, method, error: corridorErr.message,
+      });
+      return res.status(503).json({
+        error: 'Unable to verify withdrawal details right now. Please try again shortly.',
+        errorCode: 'CORRIDOR_VALIDATION_UNAVAILABLE',
+      });
+    }
+    if (!corridorCheck.ok) {
+      logger.warn('POST /withdrawals blocked by corridor rule', {
+        userId: req.user.userId, country: resolvedCountry, currency, method,
+        errorCode: corridorCheck.code, reason: corridorCheck.error,
+      });
+      // PROVIDER_VALIDATION_UNAVAILABLE is a temporary, safely-retryable
+      // availability failure (fail-closed — no unverified operator/bank was
+      // ever accepted) — 503, not a 400 validation error the user must fix.
+      const statusCode = corridorCheck.code === 'PROVIDER_VALIDATION_UNAVAILABLE' ? 503 : 400;
+      return res.status(statusCode).json({
+        error: corridorCheck.error,
+        errorCode: corridorCheck.code,
+        ...(corridorCheck.min !== undefined && { min: corridorCheck.min }),
+        ...(corridorCheck.max !== undefined && { max: corridorCheck.max }),
+      });
+    }
+  }
+
   // ── Client-supplied idempotency key (required) ────────────────────────────
   const clientKey = req.body.idempotencyKey || req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
   if (!clientKey) return res.status(400).json({ error: 'Idempotency-Key header is required' });
@@ -4535,8 +4583,13 @@ app.get('/payout/mobile-money-operators', authMiddleware, async (req, res) => {
     return res.status(400).json({ error: `Kora does not support mobile-money payouts for ${country}.`, country, operators: [] });
   }
   try {
-    const operators = await listKoraMobileMoneyOperators(country);
-    res.json({ country, operators: operators || [] });
+    // Uses the same cached/fallback-safe source POST /withdrawals validates
+    // against (koraCorridorRules.getMobileMoneyOperators), so the min/max the
+    // app displays and enforces client-side always matches what the backend
+    // will actually enforce — including the min/max fields Kora returns per
+    // operator (see koraCorridorRules.js for sourcing/fallback behavior).
+    const { operators, source } = await getMobileMoneyOperatorsForApp(country);
+    res.json({ country, operators: operators || [], source });
   } catch (err) {
     logger.error('[/payout/mobile-money-operators] Kora List MMO failed', { country, error: err.message });
     res.status(err.status || 502).json({ error: 'Unable to retrieve mobile money operators right now. Please try again shortly.' });

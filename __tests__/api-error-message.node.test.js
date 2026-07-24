@@ -43,6 +43,7 @@ const dictionary = {
   'send.countryNotSupported': 'Withdrawals for your country are not available yet. We currently support withdrawals to Nigeria, Kenya, South Africa, Ghana, Ivory Coast, Cameroon, Egypt, and Tanzania.',
   'send.bankNotSupportedForCurrency': 'Bank withdrawals are not available for this currency. Please use Mobile Money instead.',
   'send.mobileMoneyNotSupportedForCurrency': 'Mobile Money withdrawals are not available for this currency.',
+  'send.corridorValidationUnavailable': "We couldn't verify your bank/operator details right now. No funds were held. Please try again in a few minutes.",
   'card.notAvailable': 'Virtual Cards Coming Soon',
 };
 
@@ -174,5 +175,17 @@ test('errorCode VIRTUAL_CARDS_UNAVAILABLE maps to the card-not-available copy', 
   assert.equal(
     getApiErrorMessage({ status: 503, errorCode: 'VIRTUAL_CARDS_UNAVAILABLE', message: 'Virtual cards are not available yet.' }, t),
     dictionary['card.notAvailable'],
+  );
+});
+
+// Kora's live bank/operator list could not be verified (fail-closed — see
+// koraCorridorRules.js). This arrives as a 503 (safely retryable) but must
+// surface the specific "no funds held, try again" copy, not the generic
+// exchange.ratesUnavailable 503 fallback which would confusingly imply an FX
+// problem rather than a payout-provider validation problem.
+test('errorCode PROVIDER_VALIDATION_UNAVAILABLE maps to the specific fail-closed retry copy, not the generic rates-unavailable 503 fallback', () => {
+  assert.equal(
+    getApiErrorMessage({ status: 503, errorCode: 'PROVIDER_VALIDATION_UNAVAILABLE', message: 'We could not verify bank details for ZA right now. Please try again in a few minutes.' }, t),
+    dictionary['send.corridorValidationUnavailable'],
   );
 });
