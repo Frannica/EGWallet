@@ -1,11 +1,10 @@
 /**
- * Phase 09 regression guards
+ * Phase 09 regression guards (updated for card-withdrawal removal)
  *
- * Invariants protected:
- *  1. Debit card SEND button is not permanently disabled due to CVC gate
- *  2. CVC / CVV field is removed from the SendScreen payment-method modal
- *  3. No CVC data is ever sent to any backend endpoint from SendScreen
- *  4. Credit card type exists in PaymentMethod union (used for transfers)
+ * Original invariants (CVC never collected / never sent) still hold.
+ * Additionally: debit/credit card withdrawal options and the dead
+ * "pay with card" payment-method modal are fully removed — EGWallet has
+ * no capability to push funds to an arbitrary user-entered card.
  */
 
 'use strict';
@@ -19,33 +18,39 @@ const SEND = fs.readFileSync(
 );
 
 module.exports = function phase09(check) {
-  // ── 1. Send button disabled condition must NOT include !withdrawalCardCvc ──
-  // The button's disabled prop/style should not gate on withdrawalCardCvc being truthy.
   check(
     'Send button disabled condition does not gate on !withdrawalCardCvc',
     !SEND.includes('!withdrawalCardCvc'),
   );
 
-  // ── 2. CVC TextInput no longer rendered in payment-method add modal ────────
   check(
-    'CVC / CVV TextInput is not rendered in SendScreen payment-method modal',
-    !SEND.includes("fieldLabel}>CVC / CVV</Text>"),
+    'CVC / CVV TextInput is not rendered in SendScreen',
+    !SEND.includes('CVC / CVV') && !SEND.includes('withdrawalCardCvc'),
   );
 
-  // ── 3. No raw CVC value sent to any backend fetch body ────────────────────
   check(
     'CVC value not included in any fetch/JSON body in SendScreen',
     !SEND.includes('"cvc"') && !SEND.includes("'cvc'") &&
     !SEND.includes('"cvv"') && !SEND.includes("'cvv'"),
   );
+
   check(
-    'withdrawalCardCvc state is not rendered as a TextInput value',
-    !(SEND.match(/value=\{withdrawalCardCvc\}/g) || []).length,
+    'Debit/credit card withdrawal methods are removed from SendScreen',
+    !SEND.includes("setWithdrawalMethod('debit')") &&
+    !SEND.includes("setWithdrawalMethod('credit')") &&
+    !SEND.includes('withdrawalCardNumber'),
   );
 
-  // ── 4. Card type union includes 'credit' for transfers ────────────────────
   check(
-    "PaymentMethod type includes 'credit' for transfer payment methods",
-    SEND.includes("type: 'debit' | 'credit' | 'bank'"),
+    'Withdrawal method type is only bank | mobile',
+    SEND.includes("useState<'bank' | 'mobile'>('mobile')") ||
+    SEND.includes('useState<\'bank\' | \'mobile\'>(\'mobile\')'),
+  );
+
+  check(
+    'Dead pay-with-card payment-method modal is removed',
+    !SEND.includes('showPaymentMethodModal') &&
+    !SEND.includes('completeSendWithPaymentMethod') &&
+    !SEND.includes("type: 'debit' | 'credit' | 'bank'"),
   );
 };

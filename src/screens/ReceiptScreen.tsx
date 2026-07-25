@@ -6,7 +6,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { formatCurrency } from '../utils/currency';
 import { useLanguage } from '../i18n/LanguageContext';
 
-type TxType = 'send' | 'receive' | 'deposit' | 'withdrawal';
+type TxType = 'send' | 'receive' | 'deposit' | 'withdrawal' | 'exchange';
 type TxStatus = 'completed' | 'pending' | 'failed';
 
 type Params = {
@@ -17,7 +17,13 @@ type Params = {
   recipientName: string;
   recipientId?: string;
   timestamp: number;
+  // Durable, server-issued transaction ID. NEVER fabricate a placeholder
+  // when this is missing — the receipt must show "Reference unavailable"
+  // instead (see shortRef below).
   transactionId?: string;
+  // Stripe PaymentIntent ID for deposits — safe to display (not a secret),
+  // useful for the user to cross-reference their bank/card statement.
+  paymentReference?: string;
   fee?: number;         // in minor units
   feeLabel?: string;   // e.g. "FX Conversion Fee (1.15%)"
   fxRate?: string;     // e.g. "1 USD = 655 XAF"
@@ -40,6 +46,7 @@ export default function ReceiptScreen() {
     receive:    { headline: t('receipt.moneyReceived'),      subtitle: t('receipt.fundsAdded'),      icon: 'arrow-down-circle', iconColors: ['#15803D', '#166534'] },
     deposit:    { headline: t('receipt.depositSuccess'),     subtitle: t('receipt.fundsAdded'),      icon: 'add-circle',        iconColors: ['#A16207', '#854D0E'] },
     withdrawal: { headline: t('receipt.withdrawalSubmitted'), subtitle: t('receipt.beingProcessed'), icon: 'log-out',           iconColors: ['#F57C00', '#E65100'] },
+    exchange:   { headline: t('receipt.exchangeCompleted'),  subtitle: t('receipt.exchangeSuccess'), icon: 'swap-horizontal',   iconColors: ['#7B3FA0', '#5A2D7A'] },
   };
   const STATUS_COLORS_T: Record<TxStatus, { bg: string; text: string; icon: string; label: string }> = {
     completed: { bg: '#DCFCE7', text: '#15803D', icon: 'checkmark-circle', label: t('receipt.completed') },
@@ -56,7 +63,11 @@ export default function ReceiptScreen() {
     month: 'long', day: 'numeric', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
-  const shortRef = p.transactionId?.substring(0, 16) ?? 'TX' + Date.now().toString().slice(-8);
+  // Durable server-issued reference only — never fabricate a placeholder ID.
+  // If no verified transaction ID was passed in, tell the user plainly
+  // rather than showing invented data.
+  const hasRealRef = typeof p.transactionId === 'string' && p.transactionId.length > 0;
+  const shortRef = hasRealRef ? p.transactionId!.substring(0, 16) : t('receipt.referenceUnavailable');
 
   // Build the share text
   const shareAmountLine =
@@ -92,6 +103,11 @@ export default function ReceiptScreen() {
     rows.push({ label: t('common.from'), value: p.recipientName });
   } else if (txType === 'deposit') {
     rows.push({ label: t('receipt.addedTo'), value: p.recipientName || t('receipt.yourWallet') });
+  } else if (txType === 'exchange') {
+    rows.push({
+      label: t('receipt.converted'),
+      value: p.senderCurrency && p.receiverCurrency ? `${p.senderCurrency} → ${p.receiverCurrency}` : (p.recipientName || ''),
+    });
   } else {
     rows.push({ label: t('common.to'), value: p.recipientName });
     if (p.recipientId && p.recipientId !== p.recipientName) {
@@ -101,9 +117,11 @@ export default function ReceiptScreen() {
 
   // Amount + currencies
   rows.push({ label: t('common.amount'), value: formatCurrency(p.amount, p.currency), bold: true });
-  if (p.senderCurrency) rows.push({ label: t('receipt.senderCurrency'), value: p.senderCurrency });
-  if (isCrossCurrency && p.receiverCurrency) {
-    rows.push({ label: t('receipt.recipientCurrency'), value: p.receiverCurrency, accent: true });
+  if (txType !== 'exchange') {
+    if (p.senderCurrency) rows.push({ label: t('receipt.senderCurrency'), value: p.senderCurrency });
+    if (isCrossCurrency && p.receiverCurrency) {
+      rows.push({ label: t('receipt.recipientCurrency'), value: p.receiverCurrency, accent: true });
+    }
   }
 
   // Fee
@@ -119,6 +137,15 @@ export default function ReceiptScreen() {
   // Date & ref
   rows.push({ label: t('receipt.dateTime'), value: dateStr });
   rows.push({ label: t('receipt.reference'), value: shortRef });
+  // Deposit receipts safely surface the Stripe PaymentIntent reference too —
+  // it is not sensitive (no card data), and lets the user cross-reference
+  // their bank/card statement. Only shown when a real one was provided.
+  if (txType === 'deposit' && p.paymentReference) {
+    rows.push({
+      label: t('receipt.paymentReference'),
+      value: p.paymentReference.length > 24 ? p.paymentReference.substring(0, 24) + '…' : p.paymentReference,
+    });
+  }
 
   return (
     <LinearGradient colors={['#DEEEFF', '#F5F9FF', '#FFFFFF']} style={styles.container}>

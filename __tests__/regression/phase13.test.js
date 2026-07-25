@@ -2,13 +2,13 @@
  * Phase 13 regression guards — Critical withdrawal safety
  *
  * Invariants protected:
- *  A. Withdrawal default method is 'debit', not 'bank'
+ *  A. Withdrawal default method is a real payout path ('mobile'), never debit/credit card
  *  B. Bank withdrawal shows 3-5 business day warning before confirmation
- *  C. Withdrawal method order: debit first, bank third (with 3-5 days badge)
+ *  C. Method selector offers only bank + mobile money (no debit/credit card)
  *  D. availableBalance (not totalBalance) used for overdraft check in checkBalanceAndProceed
  *  E. pendingWithdrawal concept present in localBalance.ts (addPendingWithdrawal, clearPendingWithdrawal)
  *  F. onWithdrawConfirmed: addPendingWithdrawal before request, clearPendingWithdrawal on success+failure
- *  G. Validation: both debit AND credit use card branch (not bank branch)
+ *  G. Card withdrawal validation branches are fully removed
  */
 
 'use strict';
@@ -21,12 +21,17 @@ const LOCAL_BAL   = fs.readFileSync(path.resolve(__dirname, '../../src/utils/loc
 
 module.exports = function phase13(check) {
   // ════════════════════════════════════════════════════════════════════════════
-  // A) Default withdrawal method is 'debit'
+  // A) Default withdrawal method is a real payout path (mobile), never a card
   // ════════════════════════════════════════════════════════════════════════════
 
   check(
-    "[Withdrawal] Default withdrawalMethod state is 'debit' (not 'bank')",
-    SEND.includes("useState<'bank' | 'mobile' | 'debit' | 'credit'>('debit')"),
+    "[Withdrawal] Default withdrawalMethod state is 'mobile' (real Kora path)",
+    SEND.includes("useState<'bank' | 'mobile'>('mobile')"),
+  );
+
+  check(
+    '[Withdrawal] Debit/credit card methods are not in the type union',
+    !SEND.includes("'bank' | 'mobile' | 'debit' | 'credit'"),
   );
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -44,39 +49,19 @@ module.exports = function phase13(check) {
   );
 
   // ════════════════════════════════════════════════════════════════════════════
-  // C) Method order: debit first, bank has 3-5 days badge
+  // C) Method selector: bank + mobile only; bank has 3-5 days badge
   // ════════════════════════════════════════════════════════════════════════════
 
-  // Scope the ordering check to the actual method-selector JSX (onPress
-  // handlers), not just any occurrence of setWithdrawalMethod(...) in the
-  // file — e.g. an auto-switch-away-from-bank useEffect (for Kora corridors
-  // where bank isn't available) legitimately calls
-  // setWithdrawalMethod('mobile') earlier in the file, which is unrelated
-  // to the visual order of the selector buttons.
-  const debitIdx  = SEND.indexOf("onPress={() => setWithdrawalMethod('debit')}");
-  const creditIdx = SEND.indexOf("onPress={() => setWithdrawalMethod('credit')}");
-  const bankIdx   = SEND.indexOf("setWithdrawalMethod('bank')", creditIdx === -1 ? 0 : creditIdx);
-  const mobileIdx = SEND.indexOf("setWithdrawalMethod('mobile')", bankIdx === -1 ? 0 : bankIdx);
-
-  // Find the first occurrence of each (in the method selector section)
   check(
-    '[Withdrawal] Debit card method selector appears before Credit card',
-    debitIdx !== -1 && creditIdx !== -1 && debitIdx < creditIdx,
+    '[Withdrawal] Debit/credit card method selectors are absent',
+    !SEND.includes("onPress={() => setWithdrawalMethod('debit')}") &&
+    !SEND.includes("onPress={() => setWithdrawalMethod('credit')}"),
   );
 
   check(
-    '[Withdrawal] Credit card method selector appears before Bank',
-    creditIdx !== -1 && bankIdx !== -1 && creditIdx < bankIdx,
-  );
-
-  check(
-    '[Withdrawal] Bank method selector appears before Mobile Money',
-    bankIdx !== -1 && mobileIdx !== -1 && bankIdx < mobileIdx,
-  );
-
-  check(
-    "[Withdrawal] Debit card has 'Instant' badge in method selector",
-    SEND.includes('methodBadge') && SEND.includes("send.instant"),
+    '[Withdrawal] Bank and Mobile Money method selectors are present',
+    SEND.includes("setWithdrawalMethod('bank')") &&
+    SEND.includes("setWithdrawalMethod('mobile')"),
   );
 
   check(
@@ -184,11 +169,13 @@ module.exports = function phase13(check) {
   );
 
   // ════════════════════════════════════════════════════════════════════════════
-  // G) Validation: credit card uses card branch (not bank branch)
+  // G) Card withdrawal validation branches are fully removed
   // ════════════════════════════════════════════════════════════════════════════
 
   check(
-    "[Withdrawal] onSend validation: credit card checked in card branch (withdrawalMethod === 'credit')",
-    SEND.includes("withdrawalMethod === 'debit' || withdrawalMethod === 'credit'"),
+    '[Withdrawal] onSend validation has no debit/credit card branch',
+    !SEND.includes("withdrawalMethod === 'debit' || withdrawalMethod === 'credit'") &&
+    !SEND.includes('enterCardNumber') &&
+    !SEND.includes('enterCardExpiry'),
   );
 };

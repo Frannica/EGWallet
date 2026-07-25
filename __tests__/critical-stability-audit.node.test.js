@@ -142,7 +142,7 @@ module.exports = function runCriticalStabilityAudit(check) {
   auditFlow('Withdraw', [
     { label: 'Withdraw tab uses stale-FX guards (SendScreen)', pass: /shouldBlockForStaleFxQuote/.test(sendScreen) },
     { label: 'Withdraw uses pending withdrawal tracking', pass: /addPendingWithdrawal/.test(sendScreen) && /clearPendingWithdrawal/.test(sendScreen) },
-    { label: 'Withdraw card last4 from user input only (not API PAN)', pass: /withdrawalCardNumber\.replace/.test(sendScreen) },
+    { label: 'Withdraw never collects card PAN (card withdrawals removed)', pass: !/withdrawalCardNumber/.test(sendScreen) && !/setWithdrawalMethod\(['"]debit['"]\)/.test(sendScreen) },
   ]);
 
   // ── 8. Exchange ───────────────────────────────────────────────────────────

@@ -41,18 +41,18 @@ const ROLE_PERMISSIONS = {
   super_admin: ['*'],
   support: [
     'stats:read', 'health:read', 'audit:read', 'users:read', 'users:write', 'users:export',
-    'notes:read', 'notes:write', 'timeline:read', 'kyc:read', 'withdrawals:read', 'logs:read', 'search:read',
+    'notes:read', 'notes:write', 'timeline:read', 'kyc:read', 'withdrawals:read', 'refunds:read', 'logs:read', 'search:read',
     'tickets:read', 'tickets:write', 'disputes:read', 'disputes:write', 'notifications:read', 'notifications:write',
     'fraud:read',
   ],
   compliance: [
     'stats:read', 'health:read', 'audit:read', 'users:read', 'timeline:read', 'kyc:read', 'kyc:approve',
-    'withdrawals:read', 'withdrawals:write', 'notes:read', 'search:read',
+    'withdrawals:read', 'withdrawals:write', 'refunds:read', 'refunds:write', 'notes:read', 'search:read',
     'disputes:read', 'disputes:write', 'fraud:read',
   ],
   read_only: [
     'stats:read', 'health:read', 'audit:read', 'users:read', 'timeline:read', 'kyc:read',
-    'withdrawals:read', 'notes:read', 'logs:read', 'search:read',
+    'withdrawals:read', 'refunds:read', 'notes:read', 'logs:read', 'search:read',
     'tickets:read', 'disputes:read', 'notifications:read', 'fraud:read',
   ],
 };

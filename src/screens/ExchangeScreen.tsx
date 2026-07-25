@@ -157,14 +157,26 @@ export default function ExchangeScreen({ route, navigation }: any) {
     const amountMinor = majorToMinor(num, fromCurrency);
     const netReceive = quote.receivedAmountMinorAfterFee ?? quote.receivedAmountMinor ?? 0;
     try {
-      await exchangeCurrency(auth.token, walletId, fromCurrency, toCurrency, amountMinor, exchangeIdempotencyKeyRef.current);
+      const result = await exchangeCurrency(auth.token, walletId, fromCurrency, toCurrency, amountMinor, exchangeIdempotencyKeyRef.current);
       // Reset key only after confirmed success so retries reuse the same key
       exchangeIdempotencyKeyRef.current = generateId();
       await debitLocalBalance(fromCurrency, amountMinor);
       await creditLocalBalance(toCurrency, netReceive);
-      Alert.alert(t('common.success'), t('exchange.success'), [
-        { text: t('common.ok'), onPress: () => navigation.goBack() },
-      ]);
+      const tx = result?.transaction;
+      (navigation as any).navigate('Receipt', {
+        amount: amountMinor,
+        currency: fromCurrency,
+        senderCurrency: fromCurrency,
+        receiverCurrency: toCurrency,
+        fee: result?.feeBreakdown?.fxFee ?? quote.fxFeeAmount ?? 0,
+        feeLabel: t('exchange.fee'),
+        fxRate: result?.feeBreakdown?.rateDisplay ?? quote.rateDisplay,
+        recipientName: t('receipt.yourWallet'),
+        timestamp: Date.now(),
+        transactionId: tx?.id,
+        type: 'exchange',
+        status: 'completed',
+      });
     } catch (err: any) {
       if (err?.name === 'AbortError') return;
       if (__DEV__) console.warn('[ExchangeScreen] confirmExchange failed', {

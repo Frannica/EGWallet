@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, TextInput, Alert, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, Share } from 'react-native';
+import { View, Text, TextInput, Alert, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { sendTransaction, getWalletCurrency, fetchFxQuote, FxQuote, generateId } from '../api/transactions';
@@ -15,13 +15,6 @@ import { WITHDRAW_LOCAL_RATE, WITHDRAW_INTL_RATE, FX_CONVERSION_RATE } from '../
 import { useLanguage } from '../i18n/LanguageContext';
 import { getApiErrorMessage } from '../utils/apiErrorMessage';
 import { formatStatusLabel, formatWalletIdShort } from '../utils/safeDisplay';
-
-interface PaymentMethod {
-  id: string;
-  type: 'debit' | 'credit' | 'bank';
-  label: string;
-  last4: string;
-}
 
 // Sends are FREE; FX fee is applied on cross-currency conversion (backend)
 const FEE_PERCENTAGE = 0;
@@ -94,11 +87,12 @@ export default function SendScreen() {
   const [iban, setIban] = useState<string>('');
   const [swiftBic, setSwiftBic] = useState<string>('');
   const [withdrawalCountry, setWithdrawalCountry] = useState<string>('');
-  const [withdrawalMethod, setWithdrawalMethod] = useState<'bank' | 'mobile' | 'debit' | 'credit'>('debit');
+  // Debit/credit card withdrawal was removed: EGWallet has no capability to push
+  // funds to an arbitrary user-entered card. Only real Kora bank/mobile-money
+  // payout methods (and, once officially enabled, Stripe Connect linked bank
+  // accounts) are ever offered here — see backend ALLOWED_WITHDRAWAL_METHODS.
+  const [withdrawalMethod, setWithdrawalMethod] = useState<'bank' | 'mobile'>('mobile');
   const [isIntlWithdrawal, setIsIntlWithdrawal] = useState(false);
-  const [withdrawalCardNumber, setWithdrawalCardNumber] = useState<string>('');
-  const [withdrawalCardExpiry, setWithdrawalCardExpiry] = useState<string>('');
-  const [withdrawalCardCvc, setWithdrawalCardCvc] = useState<string>('');
 
   // Kora mobile-money corridors: for currencies where Kora only supports
   // mobile-money payouts (no bank_account), bank code entry is replaced with a
@@ -119,19 +113,6 @@ export default function SendScreen() {
   const [loadingKoraBanks, setLoadingKoraBanks] = useState(false);
   const [showBankPicker, setShowBankPicker] = useState(false);
 
-  // Payment method (for send-without-balance flow)
-  const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
-  const [savedPaymentMethods, setSavedPaymentMethods] = useState<PaymentMethod[]>([]);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod | null>(null);
-  const [showAddCardForm, setShowAddCardForm] = useState(false);
-  const [addCardType, setAddCardType] = useState<'debit' | 'credit' | 'bank' | null>(null);
-  const [cardNumber, setCardNumber] = useState('');
-  const [cardHolder, setCardHolder] = useState('');
-  const [cardExpiry, setCardExpiry] = useState('');
-  const [cardCvc, setCardCvc] = useState('');
-  const [bankAccountNum, setBankAccountNum] = useState('');
-  const [bankRoutingNum, setBankRoutingNum] = useState('');
-  
   // FX state — receiver currency preview
   const [receiverCurrency, setReceiverCurrency] = useState<string | null>(null);
   const [fxQuote, setFxQuote] = useState<FxQuote | null>(null);
@@ -444,25 +425,19 @@ export default function SendScreen() {
     if (activeTab === 'transfer') {
       if (!toWalletId.trim()) return Alert.alert(t('common.error'), t('send.enterDestWalletId'));
     } else {
-      // Withdrawal validation
-      if (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') {
-        if (!withdrawalCardNumber.trim()) return Alert.alert(t('common.error'), t('send.enterCardNumber'));
-        if (!withdrawalCardExpiry.trim()) return Alert.alert(t('common.error'), t('send.enterCardExpiry'));
-        if (!accountName.trim()) return Alert.alert(t('common.error'), t('send.enterCardholderName'));
-      } else {
-        if (!bankName.trim()) return Alert.alert(t('common.error'), t('send.enterBankName'));
-        if (!accountNumber.trim()) return Alert.alert(t('common.error'), t('send.enterAccountNumber'));
-        if (!accountName.trim()) return Alert.alert(t('common.error'), t('send.enterAccountHolderName'));
-        if (isKoraMobileMoneyWithdrawal && !mmOperatorSlug) {
-          return Alert.alert(t('common.error'), t('send.pleaseSelectOperator'));
-        }
-        if (isKoraBankWithdrawal && !selectedKoraBankCode) {
-          return Alert.alert(t('common.error'), t('send.pleaseSelectBank'));
-        }
-        const corridorError = validateKoraCorridorClientSide(amt);
-        if (corridorError) {
-          return Alert.alert(t('common.error'), corridorError);
-        }
+      // Withdrawal validation — only real Kora bank/mobile-money methods exist.
+      if (!bankName.trim()) return Alert.alert(t('common.error'), t('send.enterBankName'));
+      if (!accountNumber.trim()) return Alert.alert(t('common.error'), t('send.enterAccountNumber'));
+      if (!accountName.trim()) return Alert.alert(t('common.error'), t('send.enterAccountHolderName'));
+      if (isKoraMobileMoneyWithdrawal && !mmOperatorSlug) {
+        return Alert.alert(t('common.error'), t('send.pleaseSelectOperator'));
+      }
+      if (isKoraBankWithdrawal && !selectedKoraBankCode) {
+        return Alert.alert(t('common.error'), t('send.pleaseSelectBank'));
+      }
+      const corridorError = validateKoraCorridorClientSide(amt);
+      if (corridorError) {
+        return Alert.alert(t('common.error'), corridorError);
       }
       // Bank withdrawal: warn about processing time before proceeding
       if (withdrawalMethod === 'bank') {
@@ -526,105 +501,6 @@ export default function SendScreen() {
     }
   }
 
-  function getPaymentMethodIcon(type: PaymentMethod['type']) {
-    if (type === 'bank') return 'business-outline';
-    if (type === 'credit') return 'card-outline';
-    return 'card';
-  }
-
-  function getPaymentMethodColor(type: PaymentMethod['type']) {
-    if (type === 'bank') return '#2E7D32';
-    if (type === 'credit') return '#6A1B9A';
-    return '#1565C0';
-  }
-
-  function handleAddPaymentMethod() {
-    if (addCardType === 'bank') {
-      if (!bankAccountNum.trim() || !bankRoutingNum.trim() || !cardHolder.trim()) {
-        Alert.alert(t('send.missingInfo'), t('send.pleaseFillFields'));
-        return;
-      }
-      const last4 = bankAccountNum.slice(-4).padStart(4, '*');
-      const method: PaymentMethod = {
-        id: Date.now().toString(),
-        type: 'bank',
-        label: t('send.bankAccountLabel'),
-        last4,
-      };
-      const updated = [...savedPaymentMethods, method];
-      setSavedPaymentMethods(updated);
-      setSelectedPaymentMethod(method);
-      resetAddCardForm();
-      completeSendWithPaymentMethod(method);
-    } else {
-      if (!cardNumber.trim() || !cardHolder.trim() || !cardExpiry.trim()) {
-        Alert.alert(t('send.missingInfo'), t('send.pleaseFillFields'));
-        return;
-      }
-      const last4 = cardNumber.replace(/\s/g, '').slice(-4);
-      const method: PaymentMethod = {
-        id: Date.now().toString(),
-        type: addCardType ?? 'debit',
-        label: addCardType === 'credit' ? t('send.creditCardLabel') : t('send.debitCardLabel'),
-        last4,
-      };
-      const updated = [...savedPaymentMethods, method];
-      setSavedPaymentMethods(updated);
-      setSelectedPaymentMethod(method);
-      resetAddCardForm();
-      completeSendWithPaymentMethod(method);
-    }
-  }
-
-  function resetAddCardForm() {
-    setCardNumber('');
-    setCardHolder('');
-    setCardExpiry('');
-    setCardCvc('');
-    setBankAccountNum('');
-    setBankRoutingNum('');
-    setShowAddCardForm(false);
-    setAddCardType(null);
-    setShowPaymentMethodModal(false);
-  }
-
-  async function completeSendWithPaymentMethod(method: PaymentMethod) {
-    if (__DEV__) console.log('[Send] completeSendWithPaymentMethod — method:', method.label);
-    if (!auth.token || !fromWalletId) return Alert.alert(t('common.error'), t('common.notAuthenticated'));
-    const amt = parseFloat(amount.replace(/,/g, ''));
-    if (!amt || amt <= 0) return Alert.alert(t('common.error'), t('send.enterValidAmount'));
-    const amountMinor = majorToMinor(amt, currency);
-    if (!toWalletId) return Alert.alert(t('common.error'), t('send.enterDestWalletId'));
-    setLoading(true);
-    try {
-      const res = await sendTransaction(auth.token, fromWalletId, toWalletId, amountMinor, currency, undefined, sendIdempotencyKeyRef.current);
-      // Reset key only after confirmed success so retries reuse the same key
-      sendIdempotencyKeyRef.current = generateId();
-      await refreshAndSetWallets();
-      setAmount('');
-      setToWalletId('');
-      setSelectedPaymentMethod(method);
-      setShowPaymentMethodModal(false);
-      toast.show(t('send.paymentSentToast'));
-      (navigation as any).navigate('Receipt', {
-        amount: amountMinor,
-        currency,
-        senderCurrency: currency,
-        recipientName: toWalletId || t('common.recipient'),
-        recipientId: toWalletId,
-        timestamp: Date.now(),
-        transactionId: (res as any)?.transaction?.id,
-        type: 'send',
-        status: 'completed',
-      });
-    } catch (e: any) {
-      Alert.alert(t('send.transactionFailed'), getApiErrorMessage(e, t));
-    } finally {
-      setLoading(false);
-      try { await refreshAndSetWallets(); } catch { /* best-effort sync */ }
-    }
-  }
-  
   async function onWithdrawConfirmed() {
     if (loading) return;
     if (__DEV__) console.log('[Send] Withdraw confirmed — currency:', currency, 'method:', withdrawalMethod);
@@ -656,8 +532,6 @@ export default function SendScreen() {
       // Lock funds locally before the network request (pending deduction prevents double-spend)
       await addPendingWithdrawal(currency, amountMinor);
 
-      const cardLast4 = withdrawalCardNumber.replace(/\s/g, '').slice(-4);
-
       const response = await fetchWithTokenRefresh(`${API_BASE}/withdrawals`, {
         method: 'POST',
         headers: {
@@ -670,12 +544,9 @@ export default function SendScreen() {
           currency,
           method: withdrawalMethod,
           isInternational: isIntlWithdrawal,
-          bankName: withdrawalMethod === 'credit' ? t('send.creditCardLabel') : withdrawalMethod === 'debit' ? t('send.debitCardLabel') : bankName,
-          // Card withdrawals: send last4 token only — never full PAN/CVV
-          accountNumber: (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? cardLast4 : accountNumber,
+          bankName,
+          accountNumber,
           accountHolderName: accountName,
-          ...((withdrawalMethod === 'debit' || withdrawalMethod === 'credit') && { cardExpiry: withdrawalCardExpiry }),
-          ...((withdrawalMethod === 'debit' || withdrawalMethod === 'credit') && { cardLast4 }),
           ...(withdrawalMethod === 'bank' && !isIntlWithdrawal && !isKoraBankWithdrawal && bankCode.trim()   && { bankCode:    bankCode.trim() }),
           ...(withdrawalMethod === 'bank' && !isIntlWithdrawal && !isKoraBankWithdrawal && branchCode.trim() && { branchCode:  branchCode.trim() }),
           ...(withdrawalMethod === 'bank' && isIntlWithdrawal  && !isKoraBankWithdrawal && iban.trim()       && { iban:        iban.trim().toUpperCase() }),
@@ -718,7 +589,7 @@ export default function SendScreen() {
         direction: 'out',
         amount: amountMinor,
         currency,
-        memo: t('send.withdrawalToMemo').replace('{{method}}', withdrawalMethod === 'debit' ? t('send.debitCardLabel') : withdrawalMethod === 'credit' ? t('send.creditCardLabel') : bankName),
+        memo: t('send.withdrawalToMemo').replace('{{method}}', bankName),
       });
       const wData = await response.json();
       const feeCalc = wData.feeBreakdown;
@@ -743,8 +614,8 @@ export default function SendScreen() {
         senderCurrency: currency,
         fee: feeCalc?.fee ?? Math.round(amountMinor * (isIntlWithdrawal ? WITHDRAW_INTL_RATE : WITHDRAW_LOCAL_RATE)),
         feeLabel: t('receipt.withdrawalFeeLabel').replace('{percent}', isIntlWithdrawal ? '1.75' : '1.28'),
-        recipientName: accountName || (withdrawalMethod === 'credit' ? t('send.creditCardLabel') : withdrawalMethod === 'debit' ? t('send.debitCardLabel') : bankName),
-        recipientId: (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? t('send.cardEnding').replace('{{last4}}', cardLast4) : accountNumber,
+        recipientName: accountName || bankName,
+        recipientId: accountNumber,
         timestamp: Date.now(),
         transactionId: wData.withdrawal?.id,
         type: 'withdrawal',
@@ -899,179 +770,6 @@ export default function SendScreen() {
     if (bi !== -1) return 1;
     return a.localeCompare(b);
   });
-
-  // Payment Method Modal (for insufficient balance flow)
-  const paymentMethodModal = (
-    <Modal
-      visible={showPaymentMethodModal}
-      transparent
-      animationType="slide"
-      onRequestClose={() => { setShowPaymentMethodModal(false); setShowAddCardForm(false); setAddCardType(null); }}
-    >
-      <View style={styles.modalOverlay}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%' }}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {showAddCardForm ? (addCardType === 'bank' ? t('send.addBankAccount') : addCardType === 'credit' ? t('send.addCreditCard') : t('send.addDebitCard')) : t('send.addPaymentMethod')}
-              </Text>
-              <TouchableOpacity onPress={() => { setShowPaymentMethodModal(false); setShowAddCardForm(false); setAddCardType(null); }}>
-                <Ionicons name="close" size={24} color="#14171A" />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={styles.modalScroll}>
-              {!showAddCardForm ? (
-                <>
-                  {/* Insufficient balance banner */}
-                  <View style={styles.insufficientBanner}>
-                    <Ionicons name="information-circle" size={20} color="#1565C0" />
-                    <Text style={styles.insufficientText}>
-                      {t('send.insufficientBanner')}
-                    </Text>
-                  </View>
-
-                  {/* Saved methods */}
-                  {savedPaymentMethods.length > 0 && (
-                    <>
-                      <Text style={styles.pmSectionLabel}>{t('send.savedMethods')}</Text>
-                      {savedPaymentMethods.map(method => (
-                        <TouchableOpacity
-                          key={method.id}
-                          style={styles.pmOption}
-                          onPress={() => { setSelectedPaymentMethod(method); setShowPaymentMethodModal(false); completeSendWithPaymentMethod(method); }}
-                        >
-                          <View style={[styles.pmIconCircle, { backgroundColor: getPaymentMethodColor(method.type) + '18' }]}>
-                            <Ionicons name={getPaymentMethodIcon(method.type) as any} size={22} color={getPaymentMethodColor(method.type)} />
-                          </View>
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.pmLabel}>{method.label}</Text>
-                            <Text style={styles.pmSub}>**** {method.last4}</Text>
-                          </View>
-                          <Ionicons name="chevron-forward" size={18} color="#9BAAB8" />
-                        </TouchableOpacity>
-                      ))}
-                      <View style={styles.pmDivider} />
-                      <Text style={styles.pmSectionLabel}>{t('send.addNew')}</Text>
-                    </>
-                  )}
-
-                  {/* Add new method options */}
-                  <TouchableOpacity style={styles.pmOption} onPress={() => { setAddCardType('debit'); setShowAddCardForm(true); }}>
-                    <View style={[styles.pmIconCircle, { backgroundColor: '#1565C018' }]}>
-                      <Ionicons name="card" size={22} color="#1565C0" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.pmLabel}>{t('send.addDebitCard')}</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color="#9BAAB8" />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.pmOption} onPress={() => { setAddCardType('credit'); setShowAddCardForm(true); }}>
-                    <View style={[styles.pmIconCircle, { backgroundColor: '#6A1B9A18' }]}>
-                      <Ionicons name="card-outline" size={22} color="#6A1B9A" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.pmLabel}>{t('send.addCreditCard')}</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color="#9BAAB8" />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.pmOption} onPress={() => { setAddCardType('bank'); setShowAddCardForm(true); }}>
-                    <View style={[styles.pmIconCircle, { backgroundColor: '#2E7D3218' }]}>
-                      <Ionicons name="business-outline" size={22} color="#2E7D32" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.pmLabel}>{t('send.addBankAccount')}</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color="#9BAAB8" />
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <>
-                  <TouchableOpacity style={styles.pmBackRow} onPress={() => { setShowAddCardForm(false); setAddCardType(null); }}>
-                    <Ionicons name="arrow-back" size={18} color="#1565C0" />
-                    <Text style={styles.pmBackText}>{t('deposit.back')}</Text>
-                  </TouchableOpacity>
-
-                  {addCardType === 'bank' ? (
-                    <>
-                      <Text style={styles.pmFormLabel}>{t('deposit.accountHolderName')}</Text>
-                      <TextInput
-                        value={cardHolder}
-                        onChangeText={setCardHolder}
-                        placeholder={t('deposit.fullName')}
-                        placeholderTextColor="#AAB8C2"
-                        style={styles.pmInput}
-                      />
-                      <Text style={styles.pmFormLabel}>{t('deposit.accountNumber')}</Text>
-                      <TextInput
-                        value={bankAccountNum}
-                        onChangeText={setBankAccountNum}
-                        placeholder={t('deposit.enterAccountNum')}
-                        placeholderTextColor="#AAB8C2"
-                        keyboardType="number-pad"
-                        style={styles.pmInput}
-                      />
-                      <Text style={styles.pmFormLabel}>{t('deposit.routingCode')}</Text>
-                      <TextInput
-                        value={bankRoutingNum}
-                        onChangeText={setBankRoutingNum}
-                        placeholder={t('deposit.enterRoutingNum')}
-                        placeholderTextColor="#AAB8C2"
-                        keyboardType="number-pad"
-                        style={styles.pmInput}
-                      />
-                    </>
-                  ) : (
-                    <>
-                      <Text style={styles.pmFormLabel}>{t('deposit.cardNumber')}</Text>
-                      <TextInput
-                        value={cardNumber}
-                        onChangeText={v => setCardNumber(v.replace(/\D/g, '').replace(/(.{4})/g, '$1 ').trim())}
-                        placeholder="1234 5678 9012 3456"
-                        placeholderTextColor="#AAB8C2"
-                        keyboardType="number-pad"
-                        maxLength={19}
-                        style={styles.pmInput}
-                      />
-                      <Text style={styles.pmFormLabel}>{t('deposit.cardholderName')}</Text>
-                      <TextInput
-                        value={cardHolder}
-                        onChangeText={setCardHolder}
-                        placeholder={t('deposit.nameAsOnCard')}
-                        placeholderTextColor="#AAB8C2"
-                        style={styles.pmInput}
-                      />
-                      <Text style={styles.pmFormLabel}>{t('deposit.expiryDate')}</Text>
-                      <TextInput
-                        value={cardExpiry}
-                        onChangeText={v => {
-                          const digits = v.replace(/\D/g, '');
-                          if (digits.length <= 2) setCardExpiry(digits);
-                          else setCardExpiry(digits.slice(0, 2) + '/' + digits.slice(2, 4));
-                        }}
-                        placeholder="MM/YY"
-                        placeholderTextColor="#AAB8C2"
-                        keyboardType="number-pad"
-                        maxLength={5}
-                        style={styles.pmInput}
-                      />
-                    </>
-                  )}
-
-                  <TouchableOpacity style={styles.pmConfirmButton} onPress={handleAddPaymentMethod} disabled={loading}>
-                    {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.pmConfirmButtonText}>{t('send.payNow')}</Text>}
-                  </TouchableOpacity>
-                  <Text style={styles.pmSecureNote}>{t('deposit.secureNote')}</Text>
-                </>
-              )}
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </View>
-    </Modal>
-  );
 
   // Cameroon mobile-money operator picker — Kora's official List MMO API, used
   // instead of free-text operator entry so the correct operator slug is always sent.
@@ -1262,19 +960,10 @@ export default function SendScreen() {
     return (
       <View style={styles.container}>
         {scamTipsModal}
-        {paymentMethodModal}
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.confirmHeader}>
             <Text style={styles.confirmTitle}>{activeTab === 'transfer' ? t('send.reviewTransaction') : t('send.reviewWithdrawal')}</Text>
           <Text style={styles.confirmSubtitle}>{t('send.confirmDetails')}</Text>
-            {selectedPaymentMethod && (
-              <View style={styles.pmBadge}>
-                <Ionicons name={getPaymentMethodIcon(selectedPaymentMethod.type) as any} size={14} color="#1565C0" />
-                <Text style={styles.pmBadgeText}>
-                  {t('send.payingFrom')}: {selectedPaymentMethod.label} **** {selectedPaymentMethod.last4}
-                </Text>
-              </View>
-            )}
           </View>
 
           <View style={styles.summaryCard}>
@@ -1287,21 +976,6 @@ export default function SendScreen() {
                 <Text style={styles.summaryLabel}>{t('send.toWallet')}</Text>
                 <Text style={styles.summaryValue}>{toWalletId.substring(0, 12)}...</Text>
               </View>
-            ) : (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? (
-              <>
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>{t('card.number')}</Text>
-                  <Text style={styles.summaryValue}>**** **** **** {withdrawalCardNumber.replace(/\s/g, '').slice(-4)}</Text>
-                </View>
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>{t('card.expiry')}</Text>
-                  <Text style={styles.summaryValue}>{withdrawalCardExpiry}</Text>
-                </View>
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>{t('send.cardholder')}</Text>
-                  <Text style={styles.summaryValue}>{accountName}</Text>
-                </View>
-              </>
             ) : (
               <>
                 <View style={styles.summaryRow}>
@@ -1464,7 +1138,6 @@ export default function SendScreen() {
     <View style={styles.container}>
       <OfflineErrorBanner visible={!isOnline} onRetry={() => loadWallets()} />
       {scamTipsModal}
-      {paymentMethodModal}
       {operatorPickerModal}
       {bankPickerModal}
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -1594,21 +1267,6 @@ export default function SendScreen() {
                   <Text style={styles.label}>{t('send.withdrawalMethod')}</Text>
                   <View style={styles.methodSelector}>
                     <TouchableOpacity
-                      style={[styles.methodOption, withdrawalMethod === 'debit' && styles.methodOptionActive]}
-                      onPress={() => setWithdrawalMethod('debit')}
-                    >
-                      <Ionicons name="card" size={20} color={withdrawalMethod === 'debit' ? '#1565C0' : '#657786'} />
-                      <Text style={[styles.methodText, withdrawalMethod === 'debit' && styles.methodTextActive]}>{t('send.debitCard')}</Text>
-                      <Text style={styles.methodBadge}>{t('send.instant')}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.methodOption, withdrawalMethod === 'credit' && styles.methodOptionActive]}
-                      onPress={() => setWithdrawalMethod('credit')}
-                    >
-                      <Ionicons name="card-outline" size={20} color={withdrawalMethod === 'credit' ? '#1565C0' : '#657786'} />
-                      <Text style={[styles.methodText, withdrawalMethod === 'credit' && styles.methodTextActive]}>{t('send.creditCard')}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
                       style={[styles.methodOption, withdrawalMethod === 'bank' && styles.methodOptionActive, xafLocalBankUnavailable && styles.methodOptionDisabled]}
                       onPress={() => { if (!xafLocalBankUnavailable) setWithdrawalMethod('bank'); }}
                       disabled={xafLocalBankUnavailable}
@@ -1650,52 +1308,7 @@ export default function SendScreen() {
                   </TouchableOpacity>
                 </View>
 
-                {(withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? (
-                  <>
-                    <View style={styles.section}>
-                      <Text style={styles.label}>{t('card.number')}</Text>
-                      <TextInput
-                        value={withdrawalCardNumber}
-                        onChangeText={v => setWithdrawalCardNumber(v.replace(/\D/g, '').replace(/(.{4})/g, '$1 ').trim())}
-                        placeholder="1234 5678 9012 3456"
-                        placeholderTextColor="#AAB8C2"
-                        keyboardType="number-pad"
-                        maxLength={19}
-                        editable={!loading}
-                        style={styles.input}
-                      />
-                    </View>
-                    <View style={styles.section}>
-                      <Text style={styles.label}>{t('send.expiryDate')}</Text>
-                      <TextInput
-                        value={withdrawalCardExpiry}
-                        onChangeText={v => {
-                          const digits = v.replace(/\D/g, '');
-                          if (digits.length <= 2) setWithdrawalCardExpiry(digits);
-                          else setWithdrawalCardExpiry(digits.slice(0, 2) + '/' + digits.slice(2, 4));
-                        }}
-                        placeholder="MM/YY"
-                        placeholderTextColor="#AAB8C2"
-                        keyboardType="number-pad"
-                        maxLength={5}
-                        editable={!loading}
-                        style={styles.input}
-                      />
-                    </View>
-                    <View style={styles.section}>
-                      <Text style={styles.label}>{t('send.cardholderName')}</Text>
-                      <TextInput
-                        value={accountName}
-                        onChangeText={setAccountName}
-                        placeholder={t('deposit.nameAsOnCard')}
-                        placeholderTextColor="#AAB8C2"
-                        editable={!loading}
-                        style={styles.input}
-                      />
-                    </View>
-                  </>
-                ) : (
-                  <>
+                <>
                     <View style={styles.section}>
                       <Text style={styles.label}>{withdrawalMethod === 'bank' ? t('send.bankWithdrawal') : t('send.mobileOperator')}</Text>
                       {isKoraMobileMoneyWithdrawal ? (
@@ -1844,8 +1457,7 @@ export default function SendScreen() {
                         </View>
                       </>
                     )}
-                  </>
-                )}
+                </>
               </>
             )}
 
@@ -2009,8 +1621,7 @@ export default function SendScreen() {
                   loading || 
                   !isOnline || 
                   (activeTab === 'transfer' && !toWalletId) ||
-                  (activeTab === 'withdraw' && withdrawalMethod !== 'debit' && withdrawalMethod !== 'credit' && (!bankName || !accountNumber || !accountName)) ||
-                  (activeTab === 'withdraw' && (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') && (!withdrawalCardNumber || !withdrawalCardExpiry || !accountName))
+                  (activeTab === 'withdraw' && (!bankName || !accountNumber || !accountName))
                 ) && styles.sendButtonDisabled
               ]}
               onPress={onSend}
@@ -2019,8 +1630,7 @@ export default function SendScreen() {
                 loading || 
                 !isOnline || 
                 (activeTab === 'transfer' && !toWalletId) ||
-                (activeTab === 'withdraw' && withdrawalMethod !== 'debit' && withdrawalMethod !== 'credit' && (!bankName || !accountNumber || !accountName)) ||
-                (activeTab === 'withdraw' && (withdrawalMethod === 'debit' || withdrawalMethod === 'credit') && (!withdrawalCardNumber || !withdrawalCardExpiry || !accountName))
+                (activeTab === 'withdraw' && (!bankName || !accountNumber || !accountName))
               }
             >
               <Text style={styles.sendButtonText}>

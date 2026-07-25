@@ -40,35 +40,41 @@ interface FeePreview {
   fxFeeAmount: number;
 }
 
-function showPaymentSuccessAlert(
+// Navigates to the shared Receipt screen with the real, server-issued
+// transaction ID — never a fabricated reference. Falls back to an Alert
+// only if the server response is missing a transaction (should not happen
+// on a successful pay, but keeps the UI safe if it ever does).
+function showPaymentSuccessReceipt(
   t: (key: string) => string,
   navigation: any,
+  requesterEmail: string,
   request: PaymentRequest,
   tx: any,
 ) {
-  if (tx?.wasConverted) {
-    const debitDisplay = formatAmount(minorToMajor(tx.amount, tx.currency), tx.currency);
-    const feeDisplay = formatAmount(minorToMajor(tx.fxFeeAmount, tx.currency), tx.currency);
-    const creditDisplay = formatAmount(minorToMajor(tx.receivedAmount, tx.receivedCurrency), tx.receivedCurrency);
-    Alert.alert(
-      t('payRequest.paymentSentTitle'),
-      t('payRequest.paymentSentFxMsg')
-        .replace('{debitAmount}', debitDisplay)
-        .replace('{debitCurrency}', tx.currency)
-        .replace('{creditAmount}', creditDisplay)
-        .replace('{creditCurrency}', tx.receivedCurrency)
-        .replace('{feeAmount}', feeDisplay)
-        .replace('{feeCurrency}', tx.currency),
-      [{ text: t('common.done'), onPress: () => navigation.goBack() }],
-    );
-  } else {
+  if (!tx?.id) {
     const displayAmount = formatAmount(minorToMajor(request.amount, request.currency), request.currency);
     Alert.alert(
       t('payRequest.paymentSentTitle'),
       t('payRequest.paymentSentMsg').replace('{{amount}}', displayAmount).replace('{{currency}}', request.currency),
       [{ text: t('common.done'), onPress: () => navigation.goBack() }],
     );
+    return;
   }
+
+  const wasConverted = !!tx.wasConverted;
+  navigation.navigate('Receipt', {
+    amount: tx.amount ?? request.amount,
+    currency: tx.currency ?? request.currency,
+    senderCurrency: tx.currency ?? request.currency,
+    receiverCurrency: wasConverted ? tx.receivedCurrency : undefined,
+    fee: wasConverted ? tx.fxFeeAmount ?? 0 : 0,
+    feeLabel: wasConverted ? t('receipt.fxConversionFeeLabel').replace('{percent}', '1.15') : undefined,
+    recipientName: requesterEmail || t('payRequest.egWalletUser'),
+    timestamp: tx.timestamp ?? Date.now(),
+    transactionId: tx.id,
+    type: 'send',
+    status: 'completed',
+  });
 }
 
 // ── Screen ────────────────────────────────────────────────────────────────────
@@ -171,7 +177,7 @@ export default function PayRequestScreen({ route, navigation }: any) {
       const paidRequest = payData.request || request;
       setRequest(prev => prev ? { ...prev, ...paidRequest, status: 'paid' } : prev);
 
-      showPaymentSuccessAlert(t, navigation, { ...request, status: 'paid' }, payData.transaction);
+      showPaymentSuccessReceipt(t, navigation, requesterEmail, { ...request, status: 'paid' }, payData.transaction);
     } catch (e: any) {
       const friendly = getApiErrorMessage({
         message: e?.message,

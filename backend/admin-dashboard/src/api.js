@@ -190,6 +190,38 @@ export async function reconcileWithdrawal(id) {
   return res.json();
 }
 
+export async function fetchRefunds(filters = {}) {
+  const params = new URLSearchParams();
+  if (filters.status) params.set('status', filters.status);
+  if (filters.currency) params.set('currency', filters.currency);
+  if (filters.userId) params.set('userId', filters.userId);
+  if (filters.page) params.set('page', String(filters.page));
+  if (filters.limit) params.set('limit', String(filters.limit));
+  const qs = params.toString();
+  const res = await adminFetch(`/admin/refunds${qs ? '?' + qs : ''}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Server error: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchRefundById(id) {
+  const res = await adminFetch(`/admin/refunds/${id}`);
+  if (res.status === 404) throw new Error('Refund not found.');
+  if (!res.ok) throw new Error(`Server error: ${res.status}`);
+  return res.json();
+}
+
+export async function reconcileRefund(id) {
+  const res = await adminFetch(`/admin/refunds/${id}/reconcile`, { method: 'POST', body: '{}' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Server error: ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function fetchSupportTickets(filters = {}) {
   const params = new URLSearchParams();
   if (filters.status) params.set('status', filters.status);

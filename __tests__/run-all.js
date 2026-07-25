@@ -33,6 +33,8 @@ const SUITES = [
   ['Ledger sync — single-source incremental architecture', require('../backend/__tests__/ledger-sync-architecture.test.js')],
   ['Critical stability audit — null-safe rendering across money screens', require('./critical-stability-audit.node.test.js')],
   ['Virtual card display — safe masking across API shapes', require('./virtual-card-display.node.test.js')],
+  ['Receipt reference integrity — no fabricated references, real IDs only', require('./receipt-reference-integrity.node.test.js')],
+  ['Card withdrawal removed + Stripe refund UI wired', require('./card-withdrawal-and-refund-ui.node.test.js')],
 ];
 
 // ── Runner ────────────────────────────────────────────────────────────────────

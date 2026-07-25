@@ -170,32 +170,27 @@ export default function QRScannerScreen() {
 
       setShowConfirm(false);
       setPaying(false);
+      setScanned(false);
 
       // Debit local cache immediately so WalletScreen shows the correct balance
       await debitLocalBalance(paidCurrency, paidAmount);
 
-      const sentDisplay = formatCurrency(paidAmount, paidCurrency);
-      const receivedDisplay = tx?.receivedAmount != null
-        ? formatCurrency(tx.receivedAmount, tx.receivedCurrency ?? paidCurrency)
-        : null;
-
-      Alert.alert(
-        t('qrScan.paymentSentTitle'),
-        receivedDisplay && tx?.wasConverted
-          ? t('qrScan.paymentSentFxMsg')
-              .replace('{sent}', sentDisplay)
-              .replace('{received}', receivedDisplay)
-          : t('qrScan.paymentSentMsg'),
-        [
-          {
-            text: t('common.done'),
-            onPress: () => {
-              setScanned(false);
-              navigation.goBack();
-            },
-          },
-        ],
-      );
+      // Real, server-issued transaction ID only — never a fabricated
+      // reference. If the server response is missing it for any reason,
+      // ReceiptScreen shows "Reference unavailable" rather than inventing one.
+      navigation.navigate('Receipt', {
+        amount: paidAmount,
+        currency: paidCurrency,
+        senderCurrency: paidCurrency,
+        receiverCurrency: tx?.wasConverted ? tx.receivedCurrency : undefined,
+        fee: tx?.wasConverted ? tx.fxFeeAmount ?? 0 : 0,
+        feeLabel: tx?.wasConverted ? t('receipt.fxConversionFeeLabel').replace('{percent}', '1.15') : undefined,
+        recipientName: validatedQr.displayName || t('common.recipient'),
+        timestamp: tx?.timestamp ?? Date.now(),
+        transactionId: tx?.id,
+        type: 'send',
+        status: 'completed',
+      });
     } catch (err: any) {
       setPaying(false);
       Alert.alert(t('common.error'), getApiErrorMessage(err, t));

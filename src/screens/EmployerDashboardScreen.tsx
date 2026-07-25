@@ -844,7 +844,7 @@ export default function EmployerDashboardScreen() {
                   {r.status === 'success'
                     ? (
                       <Text style={styles.resultDetail}>
-                        {r.amount?.toLocaleString()} {r.currency} · TX: {r.transactionId?.substring(0, 14)}…
+                        {r.amount?.toLocaleString()} {r.currency} · TX: {r.transactionId ? `${r.transactionId.substring(0, 14)}…` : t('receipt.referenceUnavailable')}
                       </Text>
                     )
                     : <Text style={[styles.resultDetail, { color: '#FF3B30' }]}>{r.error}</Text>

@@ -44,51 +44,36 @@ module.exports = function phase11(check) {
   );
 
   // ════════════════════════════════════════════════════════════════════════════
-  // B) SendScreen — Credit card withdrawal
+  // B) SendScreen — Misleading debit/credit card withdrawals REMOVED
+  //    (EGWallet cannot push funds to an arbitrary user-entered card.
+  //     Card money returns only via Stripe refund-to-original-method.)
   // ════════════════════════════════════════════════════════════════════════════
 
   check(
-    "[Send] withdrawalMethod type union includes 'credit'",
-    SEND.includes("'bank' | 'mobile' | 'debit' | 'credit'"),
+    "[Send] withdrawalMethod type union is only 'bank' | 'mobile'",
+    SEND.includes("'bank' | 'mobile'") &&
+    !SEND.includes("'bank' | 'mobile' | 'debit' | 'credit'"),
   );
   check(
-    '[Send] Credit Card picker button present in withdrawal method selector',
-    SEND.includes("onPress={() => setWithdrawalMethod('credit')}") &&
-    SEND.includes("send.creditCard"),
+    '[Send] Credit/Debit Card picker buttons are absent from withdrawal method selector',
+    !SEND.includes("onPress={() => setWithdrawalMethod('credit')}") &&
+    !SEND.includes("onPress={() => setWithdrawalMethod('debit')}"),
   );
   check(
-    '[Send] Card form renders for both debit and credit',
-    SEND.includes("(withdrawalMethod === 'debit' || withdrawalMethod === 'credit') ? ("),
-  );
-  // Superseded by the localized send.creditCardLabel i18n key (i18n pass) —
-  // the literal 'Credit Card' string sent as bankName was replaced with
-  // t('send.creditCardLabel'), preserving the same behavior in the user's language.
-  check(
-    "[Send] onWithdrawConfirmed sends localized credit-card label as bankName for credit method",
-    SEND.includes("withdrawalMethod === 'credit' ? t('send.creditCardLabel')"),
+    '[Send] Card PAN/expiry withdrawal form is absent',
+    !SEND.includes('withdrawalCardNumber') &&
+    !SEND.includes('withdrawalCardExpiry'),
   );
   check(
-    '[Send] onWithdrawConfirmed sends last4 only for credit/debit (never full PAN)',
-    SEND.includes('const cardLast4 = withdrawalCardNumber.replace') &&
-    SEND.includes('cardLast4') &&
-    !SEND.includes('? withdrawalCardNumber'),
+    '[Send] onWithdrawConfirmed does not send cardLast4 / cardExpiry',
+    !SEND.includes('cardLast4') &&
+    !SEND.includes('cardExpiry'),
   );
   check(
-    '[Send] onWithdrawConfirmed sends cardExpiry for credit',
-    SEND.includes("(withdrawalMethod === 'debit' || withdrawalMethod === 'credit') && { cardExpiry"),
-  );
-  check(
-    '[Send] Withdrawal button disabled logic excludes credit from bank/mobile branch',
-    SEND.includes("withdrawalMethod !== 'debit' && withdrawalMethod !== 'credit' && (!bankName"),
-  );
-  check(
-    '[Send] Withdrawal button disabled logic includes credit in card branch',
-    SEND.includes("(withdrawalMethod === 'debit' || withdrawalMethod === 'credit') && (!withdrawalCardNumber"),
-  );
-  check(
-    '[Send] No CVC sent in credit card withdrawal path',
+    '[Send] No CVC collected or sent anywhere in SendScreen',
     !SEND.includes('"cvc"') && !SEND.includes("'cvc'") &&
-    !SEND.includes('"cvv"') && !SEND.includes("'cvv'"),
+    !SEND.includes('"cvv"') && !SEND.includes("'cvv'") &&
+    !SEND.includes('withdrawalCardCvc'),
   );
 
   // ════════════════════════════════════════════════════════════════════════════

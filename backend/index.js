@@ -45,6 +45,14 @@ const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const { createWithdrawal, advanceToProcessing, markWithdrawalFailed, markWithdrawalPaid } = require('./withdrawalEngine');
 const { router: adminWithdrawalsRouter } = require('./adminWithdrawals');
+const { router: adminRefundsRouter } = require('./adminRefunds');
+const refundsRouter = require('./refundsRouter');
+const { applyStripeRefundObject } = require('./refundEngine');
+const {
+  reserveStripeWebhookEvent,
+  markStripeWebhookEventProcessed,
+  commitRefundTransitionPostgres,
+} = require('./db/refundsPostgres');
 const {
   adminAuth,
   adminCsrf,
@@ -2514,6 +2522,99 @@ app.post('/webhooks/stripe',
       }
     }
 
+    // ── Refund events — deposit refund-to-original-card settlement ───────────
+    // refund.created / refund.updated / refund.failed / charge.refunded
+    // Signature already verified above. Durable event idempotency via
+    // stripe_webhook_events prevents duplicate wallet debit / hold release.
+    const STRIPE_REFUND_EVENTS = new Set([
+      'refund.created', 'refund.updated', 'refund.failed', 'charge.refunded',
+    ]);
+    if (STRIPE_REFUND_EVENTS.has(event.type)) {
+      if (NODE_ENV === 'production' && event.livemode === false) {
+        logger.warn('[webhook/stripe] Ignoring test-mode refund event in production', {
+          eventType: event.type, eventId: event.id,
+        });
+        return res.json({ received: true });
+      }
+      try {
+        let reserved = true;
+        try {
+          reserved = await reserveStripeWebhookEvent({
+            eventId: event.id, eventType: event.type,
+          });
+        } catch (reserveErr) {
+          // If the table is not yet migrated, fall through and rely on
+          // refundEngine's own status/walletDebited guards — never drop the event.
+          logger.warn('[webhook/stripe] reserveStripeWebhookEvent failed — continuing with in-process guards', {
+            error: reserveErr.message, eventId: event.id,
+          });
+          reserved = true;
+        }
+        if (!reserved) {
+          logger.info('[webhook/stripe] Duplicate refund event ignored', {
+            eventId: event.id, eventType: event.type,
+          });
+          return res.json({ received: true, duplicate: true });
+        }
+
+        await withBalanceMutex(async () => {
+          const db = loadAppState();
+          const obj = event.data.object;
+
+          if (event.type === 'charge.refunded') {
+            // charge.refunded carries the Charge; iterate nested refunds.
+            const refunds = obj.refunds?.data || [];
+            for (const stripeRefund of refunds) {
+              const applyResult = applyStripeRefundObject(db, stripeRefund, event.type);
+              if (applyResult.handled && applyResult.refundId) {
+                const refund = (db.refundRequests || []).find((r) => r.id === applyResult.refundId);
+                if (refund) {
+                  const ledgerTypes = [];
+                  if (refund.status === 'succeeded') ledgerTypes.push('deposit_refund_debit');
+                  if (refund.status === 'failed' || refund.status === 'cancelled') {
+                    ledgerTypes.push('deposit_refund_release');
+                  }
+                  await commitRefundTransitionPostgres({
+                    stateDb: db,
+                    refund,
+                    expectedStatus: null, // status may already have changed in-memory
+                    ledgerTypes,
+                  });
+                }
+              }
+            }
+          } else {
+            const applyResult = applyStripeRefundObject(db, obj, event.type);
+            if (applyResult.handled && applyResult.refundId) {
+              const refund = (db.refundRequests || []).find((r) => r.id === applyResult.refundId);
+              if (refund) {
+                const ledgerTypes = [];
+                if (refund.status === 'succeeded') ledgerTypes.push('deposit_refund_debit');
+                if (refund.status === 'failed' || refund.status === 'cancelled') {
+                  ledgerTypes.push('deposit_refund_release');
+                }
+                await commitRefundTransitionPostgres({
+                  stateDb: db,
+                  refund,
+                  expectedStatus: null,
+                  ledgerTypes,
+                });
+              }
+            }
+          }
+          saveAppState(db);
+        });
+
+        try { await markStripeWebhookEventProcessed(event.id); } catch (_) { /* best-effort */ }
+        return res.json({ received: true });
+      } catch (err) {
+        logger.error('[webhook/stripe] Refund event processing error', {
+          eventType: event.type, eventId: event.id, error: err.message,
+        });
+        return res.status(500).json({ error: 'Processing failed' });
+      }
+    }
+
     const STRIPE_PAYOUT_EVENTS = new Set(['payout.paid', 'payout.failed', 'payout.canceled']);
     if (!STRIPE_PAYOUT_EVENTS.has(event.type)) return res.json({ received: true });
 
@@ -4128,6 +4229,7 @@ app.use('/admin/stats', adminStatsRouter);
 app.use('/admin/logs', adminLogsRouter);
 app.use('/admin/settings', adminSettingsRouter);
 app.use('/admin/withdrawals', adminWithdrawalsRouter);
+app.use('/admin/refunds', adminRefundsRouter);
 app.use('/admin/kyc', adminKycRouter);
 app.use('/admin/users', adminUsersRouter);
 app.use('/admin/support/tickets', adminSupportRouter);
@@ -4154,7 +4256,22 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
   // ── Amount and method validation ──────────────────────────────────────────
   if (!Number.isInteger(amount) || amount <= 0 || amount > 1_000_000_000)
     return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
-  const ALLOWED_WITHDRAWAL_METHODS = new Set(['bank', 'mobile', 'debit', 'credit']);
+  // Debit/credit card withdrawals are permanently rejected. EGWallet has no
+  // capability to push funds to an arbitrary user-entered card number — those
+  // UI options were misleading. Real payouts go only via Kora bank/mobile-money
+  // (or Stripe Connect linked bank accounts once officially enabled). Rejecting
+  // here, before any wallet hold or debit, is the hard backstop for any stale
+  // client that still sends method=debit|credit.
+  if (method === 'debit' || method === 'credit') {
+    logger.warn('POST /withdrawals blocked — unsupported card payout method', {
+      userId: req.user.userId, method,
+    });
+    return res.status(400).json({
+      error: 'Card withdrawals are not supported. Money can only be withdrawn to a bank account or mobile money number. To return a card deposit, use Refund on the original deposit.',
+      errorCode: 'CARD_WITHDRAWAL_UNSUPPORTED',
+    });
+  }
+  const ALLOWED_WITHDRAWAL_METHODS = new Set(['bank', 'mobile']);
   if (!ALLOWED_WITHDRAWAL_METHODS.has(method))
     return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   // String field length limits — prevent oversized strings reaching the DB
@@ -4168,14 +4285,7 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: `${field} exceeds maximum allowed length` });
   }
 
-  // ── Card PAN server-side sanitization ────────────────────────────────────
-  // Clients are untrusted. When method is debit/credit, strip everything but
-  // the last 4 digits here — before the value ever reaches createWithdrawal
-  // or persisted runtime state. Full PANs must never be persisted or returned via any API.
   let sanitizedAccountNumber = accountNumber || null;
-  if ((method === 'debit' || method === 'credit') && sanitizedAccountNumber) {
-    sanitizedAccountNumber = String(sanitizedAccountNumber).replace(/\D/g, '').slice(-4) || null;
-  }
 
   // ── Resolve the ISO-2 country used for payout routing ─────────────────────
   // NEVER routes on free-text country matching. Explicit `country` input is
@@ -4692,6 +4802,9 @@ app.post('/withdrawals/:id/cancel', authMiddleware, async (req, res) => {
     }
   });
 });
+
+// Stripe refund-to-original-payment-method (never accepts a destination card)
+app.use('/refunds', authMiddleware, refundsRouter);
 
 // Rates
 app.get('/rates', (req, res) => {

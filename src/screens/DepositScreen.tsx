@@ -360,6 +360,12 @@ export default function DepositScreen() {
 
     const fb = data.feeBreakdown;
     setStripeIntent(null);
+    // Real, server-issued identifiers only — never fabricate a reference.
+    // data.transaction.id is the durable transaction UUID; stripeIntentId is
+    // only shown when it's a genuine Stripe PaymentIntent (not a demo-mode ID).
+    const serverTransactionId: string | undefined = data.transaction?.id;
+    const stripeRef: string | undefined = data.transaction?.stripeIntentId;
+    const isRealStripeRef = typeof stripeRef === 'string' && stripeRef.startsWith('pi_');
     (navigation as any).navigate('Receipt', {
       amount: netMinor,
       currency,
@@ -368,6 +374,8 @@ export default function DepositScreen() {
       feeLabel: fb?.fee > 0 ? t('receipt.topUpFeeLabel').replace('{percent}', ((fb.feeRate ?? 0) * 100).toFixed(1)) : undefined,
       recipientName: t('receipt.yourWallet'),
       timestamp: Date.now(),
+      transactionId: serverTransactionId,
+      paymentReference: isRealStripeRef ? stripeRef : undefined,
       type: 'deposit',
       status: 'completed',
     });

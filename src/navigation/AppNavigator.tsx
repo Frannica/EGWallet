@@ -32,6 +32,7 @@ import QRScannerScreen from '../screens/QRScannerScreen';
 import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
 import ResetPasswordScreen from '../screens/ResetPasswordScreen';
 import StripeConnectOnboardingScreen from '../screens/StripeConnectOnboardingScreen';
+import RefundScreen from '../screens/RefundScreen';
 import { ToastProvider } from '../utils/toast';
 import { LinkingOptions } from '@react-navigation/native';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -169,6 +170,7 @@ export default function AppNavigator() {
               <Stack.Screen name="QRScanner" component={QRScannerScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Exchange" component={ExchangeScreen} options={{ title: t('exchange.screenTitle') }} />
               <Stack.Screen name="StripeConnectOnboarding" component={StripeConnectOnboardingScreen} options={{ title: t('stripeConnect.title') }} />
+              <Stack.Screen name="Refund" component={RefundScreen} options={{ title: t('refund.screenTitle') }} />
             </>
           )}
         </Stack.Navigator>

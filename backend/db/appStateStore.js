@@ -9,7 +9,7 @@ function emptyAppState() {
     fraudAlerts: [], savedContacts: [], qrCodes: [], refreshTokens: [],
     auditLog: [], employers: [], employerEmployees: [], payrollBatches: [],
     demoIntents: [], notifications: [], passwordResetTokens: [],
-    idempotencyRecords: [], withdrawals: [], ledger: [], kycIdentityClaims: {},
+    idempotencyRecords: [], withdrawals: [], refundRequests: [], ledger: [], kycIdentityClaims: {},
     payoutLocks: [], disputes: [], announcements: [],
     rates: {
       base: 'USD',
@@ -59,6 +59,7 @@ function hydrateAppState(state) {
   if (!state.passwordResetTokens) state.passwordResetTokens = [];
   if (!state.transactions) state.transactions = [];
   if (!state.withdrawals) state.withdrawals = [];
+  if (!state.refundRequests) state.refundRequests = [];
   if (!state.ledger) state.ledger = [];
   if (!state.idempotencyRecords) state.idempotencyRecords = [];
   if (!state.kycIdentityClaims) state.kycIdentityClaims = {};

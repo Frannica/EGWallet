@@ -356,6 +356,10 @@ export default function TransactionHistory() {
           const isWithdrawal = item.type === 'withdrawal';
           const isPaymentRequest = item.type === 'payment_request';
           const isExchange = item.type === 'exchange';
+          const isStripeDeposit = item.type === 'deposit'
+            && typeof item.stripeIntentId === 'string'
+            && item.stripeIntentId.startsWith('pi_')
+            && item.status === 'completed';
           const isIn = item.direction === 'in';
           const employerName = item.payrollMetadata?.employerName || t('txHistory.employerFallback');
 
@@ -502,6 +506,20 @@ export default function TransactionHistory() {
                         >
                           <Ionicons name="alert-circle" size={16} color="#FF9500" />
                           <Text style={styles.disputeButtonText}>{t('txHistory.dispute')}</Text>
+                        </TouchableOpacity>
+                      )}
+
+                      {isStripeDeposit && (
+                        <TouchableOpacity
+                          style={styles.refundButton}
+                          onPress={() => (navigation as any).navigate('Refund', {
+                            transactionId: item.id,
+                            amount: item.amount,
+                            currency: item.currency,
+                          })}
+                        >
+                          <Ionicons name="return-down-back" size={16} color="#1565C0" />
+                          <Text style={styles.refundButtonText}>{t('refund.button')}</Text>
                         </TouchableOpacity>
                       )}
                     </View>
@@ -684,6 +702,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#FF9500',
+  },
+  refundButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#E3F2FD',
+    borderRadius: 8,
+    gap: 6,
+  },
+  refundButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1565C0',
   },
   filterBar: {
     flexDirection: 'row',

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import WithdrawalTable from './WithdrawalTable';
 import WithdrawalDetails from './WithdrawalDetails';
+import RefundTable from './RefundTable';
+import RefundDetails from './RefundDetails';
 import UsersList from './UsersList';
 import UserDetail from './UserDetail';
 import UserTimeline from './UserTimeline';
@@ -25,6 +27,7 @@ const ALL_TABS = [
   { id: 'users', label: 'Users', perm: 'users:read' },
   { id: 'kyc', label: 'KYC Review', perm: 'kyc:read' },
   { id: 'withdrawals', label: 'Withdrawals', perm: 'withdrawals:read' },
+  { id: 'refunds', label: 'Refunds', perm: 'refunds:read' },
   { id: 'support', label: 'Support', perm: 'tickets:read' },
   { id: 'disputes', label: 'Disputes', perm: 'disputes:read' },
   { id: 'fraud', label: 'Fraud', perm: 'fraud:read' },
@@ -39,6 +42,7 @@ export default function Dashboard({ onLogout }) {
   const [tab, setTab] = useState('home');
   const [admin, setAdmin] = useState(getAdminProfile());
   const [selectedWithdrawalId, setSelectedWithdrawalId] = useState(null);
+  const [selectedRefundId, setSelectedRefundId] = useState(null);
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [timelineUserId, setTimelineUserId] = useState(null);
   const [focusKycDocumentId, setFocusKycDocumentId] = useState(null);
@@ -63,6 +67,7 @@ export default function Dashboard({ onLogout }) {
   function switchTab(nextTab) {
     setTab(nextTab);
     setSelectedWithdrawalId(null);
+    setSelectedRefundId(null);
     setSelectedUserId(null);
     setTimelineUserId(null);
     setFocusKycDocumentId(null);
@@ -148,6 +153,14 @@ export default function Dashboard({ onLogout }) {
             <WithdrawalDetails id={selectedWithdrawalId} onBack={() => setSelectedWithdrawalId(null)} />
           ) : (
             <WithdrawalTable onSelect={setSelectedWithdrawalId} />
+          )
+        )}
+
+        {tab === 'refunds' && (
+          selectedRefundId ? (
+            <RefundDetails id={selectedRefundId} onBack={() => setSelectedRefundId(null)} />
+          ) : (
+            <RefundTable onSelect={setSelectedRefundId} />
           )
         )}
 
