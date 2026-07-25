@@ -29,5 +29,20 @@ keystore-backup/
 *.aab
 *.ipa
 
+# Local native/build caches (Windows paths break Linux EAS builders)
+android/app/build/
+android/build/
+android/.gradle/
+**/.cxx/
+**/build/intermediates/
+_export_audit/
+_gradle_out*.txt
+_eas_*.txt
+_eas_*.json
+_frontend_test_out.txt
+_backend_test_out.txt
+_admin_ui_out.txt
+_export_out.txt
+
 # Logs
 backend/logs/
