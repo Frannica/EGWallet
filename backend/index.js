@@ -129,6 +129,7 @@ const {
 } = require('./db/appStateStore');
 const { getDurableP2PIdempotency, commitP2PSendPostgres } = require('./db/p2pSendPostgres');
 const { commitQrPayPostgres } = require('./db/qrPayPostgres');
+const { setJsonAvailableBalance, healJsonBalancesFromPostgres } = require('./db/walletBalanceHeal');
 const {
   commitPayrollBatchPostgres,
   getDurablePayrollBatchIdempotency,
@@ -4144,9 +4145,10 @@ app.post('/transactions', authMiddleware, async (req, res) => {
     saveDurableIdempotency(db, clientKey, responseBody, req.user.userId);
   }
 
+  let p2pPgResult = null;
   if (USE_POSTGRES_RUNTIME) {
     try {
-      const pgResult = await commitP2PSendPostgres({
+      p2pPgResult = await commitP2PSendPostgres({
         fromWalletId,
         toWalletId,
         debitCurrency,
@@ -4161,17 +4163,23 @@ app.post('/transactions', authMiddleware, async (req, res) => {
         stateDb: db,
         recipientUserId: toWallet.userId,
       });
-      if (pgResult.replay && pgResult.response) {
-        idempotencyStore.set(clientKey, { userId: req.user.userId, response: pgResult.response, timestamp: Date.now() });
-        return res.status(200).json(pgResult.response);
+      if (p2pPgResult.replay && p2pPgResult.response) {
+        idempotencyStore.set(clientKey, { userId: req.user.userId, response: p2pPgResult.response, timestamp: Date.now() });
+        return res.status(200).json(p2pPgResult.response);
       }
-      if (pgResult.insufficientFunds) {
+      if (p2pPgResult.insufficientFunds) {
         // Concurrent debit won the race after optimistic in-memory checks.
         debitEntry.amount = originalFromAmount;
         if (destBalance && originalDestAmount !== null) destBalance.amount = originalDestAmount;
         else if (destBalance) toWallet.balances = toWallet.balances.filter(b => b.currency !== receivedCurrency);
         db.transactions.pop();
         return res.status(400).json({ error: t('error_insufficient_funds', lang) });
+      }
+      if (typeof p2pPgResult.debitWalletBalanceAfter === 'number') {
+        setJsonAvailableBalance(db, fromWalletId, debitCurrency, p2pPgResult.debitWalletBalanceAfter);
+      }
+      if (typeof p2pPgResult.creditWalletBalanceAfter === 'number') {
+        setJsonAvailableBalance(db, toWalletId, receivedCurrency, p2pPgResult.creditWalletBalanceAfter);
       }
     } catch (saveErr) {
       debitEntry.amount = originalFromAmount;
@@ -5187,6 +5195,12 @@ app.post('/exchange', authMiddleware, async (req, res) => {
         // Concurrent mutation won lock race after in-memory checks.
         return res.status(400).json({ error: t('error_insufficient_funds', lang) });
       }
+      if (typeof pgResult.fromWalletBalanceAfter === 'number') {
+        setJsonAvailableBalance(db, walletId, fromCurrency, pgResult.fromWalletBalanceAfter);
+      }
+      if (typeof pgResult.toWalletBalanceAfter === 'number') {
+        setJsonAvailableBalance(db, walletId, toCurrency, pgResult.toWalletBalanceAfter);
+      }
     } catch (saveErr) {
       logger.error('[/exchange] PostgreSQL commit failed', {
         error: saveErr.message,
@@ -5537,6 +5551,7 @@ app.post('/deposits/confirm', authMiddleware,
         }
         if (typeof pgResult.newBalance === 'number') {
           responseNewBalance = pgResult.newBalance;
+          setJsonAvailableBalance(db, walletId, currency, pgResult.newBalance);
         }
       } catch (persistErr) {
         logger.error('[/deposits/confirm] PostgreSQL commit failed', {
@@ -6545,6 +6560,12 @@ app.post('/payment-requests/:id/pay', authMiddleware, async (req, res) => {
       if (pgResult.insufficientFunds) {
         return res.status(400).json({ error: t('error_insufficient_funds', req.lang || 'en') });
       }
+      if (typeof pgResult.payerWalletBalanceAfter === 'number') {
+        setJsonAvailableBalance(db, fromWalletId, debitCurrency, pgResult.payerWalletBalanceAfter);
+      }
+      if (typeof pgResult.payeeWalletBalanceAfter === 'number') {
+        setJsonAvailableBalance(db, request.walletId, reqCurrency, pgResult.payeeWalletBalanceAfter);
+      }
     } catch (saveErr) {
       logger.error('[/payment-requests/pay] PostgreSQL commit failed', { error: saveErr.message, requestId: request.id });
       return res.status(500).json({ error: t('error_transaction_persist', req.lang || 'en') });
@@ -7223,6 +7244,22 @@ app.post('/qr/pay', authMiddleware, async (req, res) => {
         // request was already paid (or cancelled) by a concurrent request.
         db.transactions.pop();
         return res.status(400).json({ error: t('error_qr_used', req.lang || 'en') });
+      }
+      // Heal display cache from authoritative PG post-commit amounts, then persist.
+      if (typeof pgResult.debitWalletBalanceAfter === 'number') {
+        setJsonAvailableBalance(db, fromWalletId, paymentCurrency, pgResult.debitWalletBalanceAfter);
+      }
+      if (typeof pgResult.creditWalletBalanceAfter === 'number') {
+        setJsonAvailableBalance(db, targetWalletId, paymentCurrency, pgResult.creditWalletBalanceAfter);
+      }
+      try {
+        saveAppState(db);
+      } catch (saveErr) {
+        // PG money commit already succeeded — do not roll back balances (would re-desync).
+        logger.error('[/qr/pay] saveAppState failed after successful PG commit — JSON cache may drift until heal', {
+          error: saveErr?.message,
+          transactionId: tx.id,
+        });
       }
     } catch (saveErr) {
       debitEntry.amount = originalQrFromAmount;

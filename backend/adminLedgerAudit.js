@@ -127,4 +127,36 @@ router.get('/mismatches', adminAuth, requirePermission('audit:read'), async (req
   });
 });
 
+// POST /admin/ledger/heal-balances
+// Overwrite JSON display cache FROM Postgres for all wallets (or optional walletIds[]).
+// Never moves money. Requires users:write (mutating app_state).
+router.post('/heal-balances', adminAuth, requirePermission('users:write'), async (req, res) => {
+  const { healJsonBalancesFromPostgres } = require('./db/walletBalanceHeal');
+  const walletIds = Array.isArray(req.body?.walletIds) ? req.body.walletIds.map(String) : null;
+  const dryRun = req.body?.dryRun === true;
+
+  const poolCheck = await tryQuery('SELECT 1');
+  if (poolCheck.error) {
+    return res.status(503).json({ error: 'Postgres ledger unavailable — cannot heal balances' });
+  }
+
+  const db = loadAppState();
+  const result = await healJsonBalancesFromPostgres(db, { walletIds: walletIds || undefined });
+  if (!dryRun && result.changed > 0) {
+    require('./db/appStateStore').saveAppState(db);
+  }
+
+  res.json({
+    ok: true,
+    dryRun,
+    moneyMoved: false,
+    authoritative: 'postgres',
+    changed: result.changed,
+    scannedBalances: result.scannedBalances,
+    scannedHolds: result.scannedHolds,
+    healed: result.details.filter((d) => d.healed).slice(0, 100),
+    saved: !dryRun && result.changed > 0,
+  });
+});
+
 module.exports = router;
