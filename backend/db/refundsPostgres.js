@@ -118,6 +118,9 @@ function deltaForRefundLedgerType(type, amount) {
     case 'deposit_refund_debit':
       // Hold released; available already reduced at hold time.
       return { balanceDelta: 0, holdDelta: -amt };
+    case 'deposit_refund_redebit':
+      // Recovery after false release: available was restored; permanently re-debit.
+      return { balanceDelta: -amt, holdDelta: 0 };
     case 'deposit_refund_release':
       return { balanceDelta: amt, holdDelta: -amt };
     default:
@@ -282,7 +285,7 @@ async function commitRefundTransitionPostgres({
     const pgReleased = lock.rows[0].hold_released;
 
     for (const type of ledgerTypes) {
-      if (type === 'deposit_refund_debit' && pgDebited) continue;
+      if ((type === 'deposit_refund_debit' || type === 'deposit_refund_redebit') && pgDebited) continue;
       if (type === 'deposit_refund_release' && pgReleased) continue;
       const entry = (stateDb.ledger || [])
         .filter((l) => l.refundRequestId === refund.id && l.type === type)

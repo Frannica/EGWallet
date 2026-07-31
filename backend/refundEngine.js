@@ -11,8 +11,12 @@
  *  - Never accept a user-supplied destination card.
  *  - Atomic wallet hold BEFORE calling Stripe.
  *  - Finalize wallet debit only after verified Stripe success.
- *  - Release hold (restore balance) on failure / cancellation.
+ *  - Release hold (restore balance) on failure / cancellation ONLY after
+ *    Stripe has been re-queried and confirmed no refund exists
+ *    (see refundStripeSafety.js). HTTP 502 / timeout / idempotency noise
+ *    must NEVER restore funds when Stripe already succeeded.
  *  - All transitions are auditable via statusHistory and retry-safe.
+ *  - Webhook + API retry must be idempotent (no double debit / credit).
  */
 
 const { v4: uuidv4 } = require('uuid');
@@ -24,8 +28,10 @@ const VALID_TRANSITIONS = {
   pending:         ['succeeded', 'failed', 'requires_action', 'cancelled'],
   requires_action: ['pending', 'succeeded', 'failed', 'cancelled'],
   succeeded:       [],
-  failed:          [],
-  cancelled:       [],
+  // failed/cancelled → succeeded only when Stripe confirms a refund already
+  // exists after a false local failure (recovery / webhook / admin reconcile).
+  failed:          ['succeeded'],
+  cancelled:       ['succeeded'],
 };
 
 /** Statuses that still consume refundable capacity on a deposit. */
@@ -291,9 +297,29 @@ function _getWalletBalance(db, refund) {
  */
 function markRefundSubmitted(db, refundId, { stripeRefundId, stripeStatus, by = 'system' }) {
   const refund = _findRefund(db, refundId);
-  if (refund.status === 'succeeded' || refund.status === 'failed' || refund.status === 'cancelled') {
-    return refund; // terminal — idempotent no-op
+  const normalized = String(stripeStatus || 'pending').toLowerCase();
+
+  // Already fully settled — idempotent.
+  if (refund.status === 'succeeded' && refund.walletDebited) {
+    if (stripeRefundId) refund.stripeRefundId = refund.stripeRefundId || stripeRefundId;
+    return refund;
   }
+
+  // Stripe confirms success after a false local failure/cancel — recover.
+  if (
+    (refund.status === 'failed' || refund.status === 'cancelled')
+    && normalized === 'succeeded'
+  ) {
+    return markRefundSucceeded(db, refundId, { stripeRefundId, by });
+  }
+
+  // Other terminal local states: do not regress on ambiguous Stripe status.
+  if (refund.status === 'failed' || refund.status === 'cancelled') {
+    if (stripeRefundId) refund.stripeRefundId = refund.stripeRefundId || stripeRefundId;
+    refund.stripeStatus = stripeStatus || refund.stripeStatus;
+    return refund;
+  }
+
   if (refund.stripeRefundId && stripeRefundId && refund.stripeRefundId !== stripeRefundId) {
     throw Object.assign(new Error('Stripe refund ID conflict'), { status: 409, errorCode: 'STRIPE_REFUND_ID_CONFLICT' });
   }
@@ -301,7 +327,6 @@ function markRefundSubmitted(db, refundId, { stripeRefundId, stripeStatus, by = 
   refund.stripeRefundId = stripeRefundId || refund.stripeRefundId;
   refund.stripeStatus = stripeStatus || refund.stripeStatus;
 
-  const normalized = String(stripeStatus || 'pending').toLowerCase();
   let next;
   if (normalized === 'succeeded') next = 'succeeded';
   else if (normalized === 'failed' || normalized === 'canceled' || normalized === 'cancelled') next = 'failed';
@@ -314,12 +339,38 @@ function markRefundSubmitted(db, refundId, { stripeRefundId, stripeStatus, by = 
   }
 
   if (next === 'succeeded') {
-    _finalizeDebit(db, refund, by);
+    _settleWalletForStripeSuccess(db, refund, by);
   } else if (next === 'failed') {
     _releaseHoldRestore(db, refund, by, `Stripe status: ${normalized}`);
   }
 
   return refund;
+}
+
+function _ensureDepositRefundTransaction(db, refund) {
+  if (!Array.isArray(db.transactions)) db.transactions = [];
+  const already = db.transactions.find(
+    (t) => t.type === 'deposit_refund' && t.refundRequestId === refund.id
+  );
+  if (already) return already;
+  const tx = {
+    id: uuidv4(),
+    type: 'deposit_refund',
+    fromWalletId: refund.walletId,
+    toWalletId: null,
+    amount: refund.amount,
+    currency: refund.currency,
+    status: 'completed',
+    direction: 'out',
+    memo: 'Refund to original payment method',
+    stripeIntentId: refund.stripePaymentIntentId,
+    stripeRefundId: refund.stripeRefundId,
+    refundRequestId: refund.id,
+    depositTransactionId: refund.depositTransactionId,
+    timestamp: Date.now(),
+  };
+  db.transactions.push(tx);
+  return tx;
 }
 
 /**
@@ -340,6 +391,7 @@ function _finalizeDebit(db, refund, by) {
   refund.walletDebited = true;
   refund.completedAt = Date.now();
   refund.updatedAt = Date.now();
+  refund.failureReason = null;
 
   appendLedger(db, {
     type: 'deposit_refund_debit',
@@ -355,28 +407,82 @@ function _finalizeDebit(db, refund, by) {
     note: `refund_debit:${refund.id}:pi:${refund.stripePaymentIntentId}`,
   });
 
-  // Record a user-visible transaction row for history/receipt.
-  if (!Array.isArray(db.transactions)) db.transactions = [];
-  const already = db.transactions.find(
-    (t) => t.type === 'deposit_refund' && t.refundRequestId === refund.id
+  _ensureDepositRefundTransaction(db, refund);
+}
+
+/**
+ * Recovery after a false hold-release: available was restored locally but Stripe
+ * already succeeded. Permanently re-debit available. Idempotent via walletDebited.
+ */
+function _redebitAfterFalseRelease(db, refund, by) {
+  if (refund.walletDebited) return;
+  if (!refund.holdPlaced) return;
+
+  const { wallet, balance } = _getWalletBalance(db, refund);
+  const balanceBefore = Number(balance.amount || 0);
+  if (balanceBefore < Number(refund.amount)) {
+    refund.reconciliationResult = {
+      conflict: 'insufficient_for_redebit',
+      at: Date.now(),
+      balanceBefore,
+      required: refund.amount,
+    };
+    throw Object.assign(
+      new Error(`Insufficient balance to re-debit refund ${refund.id}`),
+      { status: 409, errorCode: 'INSUFFICIENT_FOR_REDEBIT' }
+    );
+  }
+
+  balance.amount = balanceBefore - Number(refund.amount);
+  if (!wallet.holdBalance) wallet.holdBalance = {};
+  // Hold should already be zero after a false release; clear any residue.
+  wallet.holdBalance[refund.currency] = Math.max(
+    0,
+    (wallet.holdBalance[refund.currency] || 0) - Number(refund.amount)
   );
-  if (!already) {
-    db.transactions.push({
-      id: uuidv4(),
-      type: 'deposit_refund',
-      fromWalletId: refund.walletId,
-      toWalletId: null,
-      amount: refund.amount,
-      currency: refund.currency,
-      status: 'completed',
-      direction: 'out',
-      memo: 'Refund to original payment method',
-      stripeIntentId: refund.stripePaymentIntentId,
-      stripeRefundId: refund.stripeRefundId,
-      refundRequestId: refund.id,
-      depositTransactionId: refund.depositTransactionId,
-      timestamp: Date.now(),
-    });
+  refund.holdReleased = true;
+  refund.walletDebited = true;
+  refund.completedAt = Date.now();
+  refund.updatedAt = Date.now();
+  refund.failureReason = null;
+  refund.reconciliationResult = {
+    ...(refund.reconciliationResult || {}),
+    outcome: 'redebit_after_false_release',
+    at: Date.now(),
+    by,
+  };
+
+  appendLedger(db, {
+    type: 'deposit_refund_redebit',
+    refundRequestId: refund.id,
+    userId: refund.userId,
+    walletId: refund.walletId,
+    currency: refund.currency,
+    amount: refund.amount,
+    balanceBefore,
+    balanceAfter: balance.amount,
+    at: Date.now(),
+    by,
+    note: `refund_redebit:${refund.id}:stripe:${refund.stripeRefundId || 'unknown'}:false_release_recovery`,
+  });
+
+  _ensureDepositRefundTransaction(db, refund);
+}
+
+/**
+ * Settle wallet for Stripe success — normal finalize, or redebit if a prior
+ * false failure already restored available funds.
+ */
+function _settleWalletForStripeSuccess(db, refund, by) {
+  if (refund.walletDebited) return;
+  const { wallet } = _getWalletBalance(db, refund);
+  if (!wallet.holdBalance) wallet.holdBalance = {};
+  const holdAmt = Number(wallet.holdBalance[refund.currency] || 0);
+  const holdStillEscrowed = !refund.holdReleased && holdAmt >= Number(refund.amount);
+  if (holdStillEscrowed) {
+    _finalizeDebit(db, refund, by);
+  } else {
+    _redebitAfterFalseRelease(db, refund, by);
   }
 }
 
@@ -424,19 +530,20 @@ function markRefundSucceeded(db, refundId, { stripeRefundId, by = 'stripe_webhoo
   if (stripeRefundId) refund.stripeRefundId = refund.stripeRefundId || stripeRefundId;
   refund.stripeStatus = 'succeeded';
   if (refund.status !== 'succeeded') {
-    if (refund.status === 'failed' || refund.status === 'cancelled') {
-      // Out-of-order: Stripe succeeded after we already restored. Do NOT
-      // re-debit automatically — flag for admin reconciliation.
-      refund.reconciliationResult = {
-        conflict: 'succeeded_after_terminal_failure',
-        at: Date.now(),
-      };
-      return refund;
-    }
-    assertTransition(refund.status, 'succeeded');
-    recordStatusChange(refund, 'succeeded', by);
+    const prior = refund.status;
+    // Recovery: Stripe confirmed success after a false local failure/cancel
+    // that restored available funds — transition and re-debit.
+    assertTransition(prior, 'succeeded');
+    recordStatusChange(
+      refund,
+      'succeeded',
+      by,
+      (prior === 'failed' || prior === 'cancelled' || refund.holdReleased)
+        ? 'stripe_confirmed_success_after_local_failure'
+        : undefined
+    );
   }
-  _finalizeDebit(db, refund, by);
+  _settleWalletForStripeSuccess(db, refund, by);
   return refund;
 }
 
@@ -571,4 +678,7 @@ module.exports = {
   markRefundCancelled,
   applyStripeRefundObject,
   sanitizeRefundForResponse,
+  // Exported for focused unit tests of recovery paths.
+  _settleWalletForStripeSuccess,
+  _redebitAfterFalseRelease,
 };

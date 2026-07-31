@@ -377,40 +377,82 @@ router.post('/', async (req, res) => {
       { idempotencyKey: `egw-refund-${refundId}` }
     );
   } catch (stripeErr) {
-    logger.error?.('[POST /refunds] Stripe refunds.create failed', {
+    logger.error?.('[POST /refunds] Stripe refunds.create error — re-querying before any hold release', {
       refundId, error: stripeErr.message, code: stripeErr.code,
     });
-    // Release hold
-    await withBalanceMutex(async () => {
-      const db = loadAppState();
-      const expectedStatus = 'requested';
-      const { markRefundFailed } = require('./refundEngine');
-      markRefundFailed(db, refundId, stripeErr.message || 'Stripe refund create failed', {
-        by: 'system',
-        stripeStatus: 'failed',
-      });
-      const refund = (db.refundRequests || []).find((r) => r.id === refundId);
-      await commitRefundTransitionPostgres({
-        stateDb: db,
-        refund,
-        expectedStatus,
-        ledgerTypes: ['deposit_refund_release'],
-      });
-      saveAppState(db);
-      responseBody = {
-        refund: sanitizeRefundForResponse(refund),
-        error: 'Stripe could not process the refund. Your balance has been restored.',
-        errorCode: 'STRIPE_REFUND_FAILED',
-        destinationPolicy: 'original_payment_method_only',
-      };
+    const { resolveStripeRefundAfterCreateError } = require('./refundStripeSafety');
+    const resolution = await resolveStripeRefundAfterCreateError(stripeClient, {
+      refundId,
+      paymentIntentId: paymentIntent,
+      stripeAmount,
+      error: stripeErr,
     });
-    return res.status(502).json(responseBody);
+
+    if (resolution.stripeRefund) {
+      // Stripe already has the refund (timeout / 502 / idempotency after success).
+      // Settle as success — NEVER restore wallet funds.
+      stripeRefund = resolution.stripeRefund;
+      logger.warn?.('[POST /refunds] Stripe refund found on re-query after create error; settling', {
+        refundId, stripeRefundId: stripeRefund.id, status: stripeRefund.status,
+      });
+    } else if (resolution.safeToReleaseHold) {
+      await withBalanceMutex(async () => {
+        const db = loadAppState();
+        const expectedStatus = 'requested';
+        const { markRefundFailed } = require('./refundEngine');
+        markRefundFailed(db, refundId, stripeErr.message || 'Stripe refund create failed', {
+          by: 'system',
+          stripeStatus: 'failed',
+        });
+        const refund = (db.refundRequests || []).find((r) => r.id === refundId);
+        await commitRefundTransitionPostgres({
+          stateDb: db,
+          refund,
+          expectedStatus,
+          ledgerTypes: ['deposit_refund_release'],
+        });
+        saveAppState(db);
+        responseBody = {
+          refund: sanitizeRefundForResponse(refund),
+          error: 'Stripe could not process the refund. Your balance has been restored.',
+          errorCode: 'STRIPE_REFUND_FAILED',
+          destinationPolicy: 'original_payment_method_only',
+          stripeRequery: { reason: resolution.reason },
+        };
+      });
+      return res.status(502).json(responseBody);
+    } else {
+      // Uncertain (lookup failed). Keep hold — do not restore.
+      await withBalanceMutex(async () => {
+        const db = loadAppState();
+        const refund = (db.refundRequests || []).find((r) => r.id === refundId);
+        if (refund) {
+          refund.reconciliationResult = {
+            at: Date.now(),
+            outcome: 'hold_retained_pending_stripe_verify',
+            reason: resolution.reason,
+            createError: resolution.errorMessage,
+            lookupError: resolution.lookupError || null,
+          };
+          saveAppState(db);
+        }
+        responseBody = {
+          refund: sanitizeRefundForResponse(refund),
+          error: 'Refund submitted to Stripe but confirmation is pending. Your funds remain on hold until verified.',
+          errorCode: 'REFUND_PENDING_STRIPE_VERIFY',
+          destinationPolicy: 'original_payment_method_only',
+          stripeRequery: { reason: resolution.reason, safeToReleaseHold: false },
+        };
+      });
+      return res.status(202).json(responseBody);
+    }
   }
 
-  // Apply Stripe result
+  // Apply Stripe result (create success OR re-query found existing refund)
   await withBalanceMutex(async () => {
     const db = loadAppState();
-    const expectedStatus = 'requested';
+    const prior = (db.refundRequests || []).find((r) => r.id === refundId);
+    const expectedStatus = prior?.status || 'requested';
     markRefundSubmitted(db, refundId, {
       stripeRefundId: stripeRefund.id,
       stripeStatus: stripeRefund.status,
@@ -418,7 +460,12 @@ router.post('/', async (req, res) => {
     });
     const refund = (db.refundRequests || []).find((r) => r.id === refundId);
     const ledgerTypes = [];
-    if (refund.status === 'succeeded') ledgerTypes.push('deposit_refund_debit');
+    if (refund.status === 'succeeded') {
+      const hasRedebit = (db.ledger || []).some(
+        (l) => l.refundRequestId === refundId && l.type === 'deposit_refund_redebit'
+      );
+      ledgerTypes.push(hasRedebit ? 'deposit_refund_redebit' : 'deposit_refund_debit');
+    }
     if (refund.status === 'failed') ledgerTypes.push('deposit_refund_release');
     await commitRefundTransitionPostgres({
       stateDb: db,

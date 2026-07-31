@@ -58,6 +58,7 @@ export default function RefundDetails({ id, onBack }) {
 
   const refund = data?.refund || {};
   const ledger = data?.ledger || [];
+  const ledgerNarrative = data?.ledgerNarrative || [];
   const deposit = data?.deposit;
 
   return (
@@ -105,25 +106,34 @@ export default function RefundDetails({ id, onBack }) {
       </div>
 
       <div style={{ marginTop: 20 }}>
-        <h3>Ledger</h3>
+        <h3>Ledger (immutable)</h3>
         {ledger.length === 0 ? <p className="muted">No ledger entries.</p> : (
           <table className="data-table">
             <thead>
-              <tr><th>Type</th><th>Amount</th><th>Before</th><th>After</th><th>At</th></tr>
+              <tr><th>Type</th><th>Meaning</th><th>Amount</th><th>Before</th><th>After</th><th>At</th></tr>
             </thead>
             <tbody>
-              {ledger.map((l) => (
-                <tr key={l.id}>
+              {(ledgerNarrative.length ? ledgerNarrative : ledger.map((l) => ({
+                ...l,
+                meaning: l.type,
+                balanceBefore: l.balanceBefore,
+                balanceAfter: l.balanceAfter,
+              }))).map((l) => (
+                <tr key={l.id || `${l.type}-${l.at}`}>
                   <td>{l.type}</td>
+                  <td style={{ maxWidth: 320 }}>{l.meaning || '—'}</td>
                   <td>{formatAmount(l.amount, l.currency || refund.currency)}</td>
-                  <td>{l.balanceBefore}</td>
-                  <td>{l.balanceAfter}</td>
+                  <td>{l.balanceBefore ?? l.balance_before}</td>
+                  <td>{l.balanceAfter ?? l.balance_after}</td>
                   <td>{formatDate(l.at)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
+        <p className="muted" style={{ marginTop: 8 }}>
+          Hold → temporary restoration (release) → final debit/redebit must all remain visible for incident reconciliation.
+        </p>
       </div>
 
       <div style={{ marginTop: 20, display: 'flex', gap: 8, alignItems: 'center' }}>

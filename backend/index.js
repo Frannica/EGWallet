@@ -2562,6 +2562,20 @@ app.post('/webhooks/stripe',
           const db = loadAppState();
           const obj = event.data.object;
 
+          const ledgerTypesForRefund = (refund) => {
+            const types = [];
+            if (refund.status === 'succeeded') {
+              const hasRedebit = (db.ledger || []).some(
+                (l) => l.refundRequestId === refund.id && l.type === 'deposit_refund_redebit'
+              );
+              types.push(hasRedebit ? 'deposit_refund_redebit' : 'deposit_refund_debit');
+            }
+            if (refund.status === 'failed' || refund.status === 'cancelled') {
+              types.push('deposit_refund_release');
+            }
+            return types;
+          };
+
           if (event.type === 'charge.refunded') {
             // charge.refunded carries the Charge; iterate nested refunds.
             const refunds = obj.refunds?.data || [];
@@ -2570,16 +2584,11 @@ app.post('/webhooks/stripe',
               if (applyResult.handled && applyResult.refundId) {
                 const refund = (db.refundRequests || []).find((r) => r.id === applyResult.refundId);
                 if (refund) {
-                  const ledgerTypes = [];
-                  if (refund.status === 'succeeded') ledgerTypes.push('deposit_refund_debit');
-                  if (refund.status === 'failed' || refund.status === 'cancelled') {
-                    ledgerTypes.push('deposit_refund_release');
-                  }
                   await commitRefundTransitionPostgres({
                     stateDb: db,
                     refund,
                     expectedStatus: null, // status may already have changed in-memory
-                    ledgerTypes,
+                    ledgerTypes: ledgerTypesForRefund(refund),
                   });
                 }
               }
@@ -2589,16 +2598,11 @@ app.post('/webhooks/stripe',
             if (applyResult.handled && applyResult.refundId) {
               const refund = (db.refundRequests || []).find((r) => r.id === applyResult.refundId);
               if (refund) {
-                const ledgerTypes = [];
-                if (refund.status === 'succeeded') ledgerTypes.push('deposit_refund_debit');
-                if (refund.status === 'failed' || refund.status === 'cancelled') {
-                  ledgerTypes.push('deposit_refund_release');
-                }
                 await commitRefundTransitionPostgres({
                   stateDb: db,
                   refund,
                   expectedStatus: null,
-                  ledgerTypes,
+                  ledgerTypes: ledgerTypesForRefund(refund),
                 });
               }
             }

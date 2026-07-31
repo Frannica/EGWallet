@@ -19,6 +19,10 @@ const {
   applyStripeRefundObject,
 } = require('./refundEngine');
 const { commitRefundTransitionPostgres, getRefundById } = require('./db/refundsPostgres');
+const {
+  buildRefundLedgerNarrative,
+  findStripeRefundForRequest,
+} = require('./refundStripeSafety');
 const { loadAppState, saveAppState } = require('./db/appStateStore');
 const { logAdminAction } = require('./adminAudit');
 
@@ -69,9 +73,11 @@ router.get('/:id', adminAuth, requirePermission('refunds:read'), async (req, res
     refundId: refund.id, userId: refund.userId, status: refund.status,
   });
 
+  const ledgerNarrative = buildRefundLedgerNarrative(ledger);
   res.json({
     refund: sanitizeRefundForResponse(refund),
     ledger,
+    ledgerNarrative,
     deposit: deposit ? {
       id: deposit.id,
       amount: deposit.amount,
@@ -114,14 +120,12 @@ router.post('/:id/reconcile', adminAuth, adminCsrf, requirePermission('refunds:w
       if (refund.stripeRefundId) {
         stripeRefund = await stripeClient.refunds.retrieve(refund.stripeRefundId);
       } else if (refund.stripePaymentIntentId) {
-        // Look up refunds on the PI and match by metadata.
-        const list = await stripeClient.refunds.list({
-          payment_intent: refund.stripePaymentIntentId,
-          limit: 100,
+        // Always re-query Stripe before deciding to leave failed/released.
+        stripeRefund = await findStripeRefundForRequest(stripeClient, {
+          refundId: refund.id,
+          paymentIntentId: refund.stripePaymentIntentId,
+          stripeAmount: refund.stripeRefundAmount || refund.amount,
         });
-        stripeRefund = (list.data || []).find(
-          (r) => r.metadata?.refundRequestId === refund.id || r.metadata?.egwalletRefundId === refund.id
-        ) || null;
       }
 
       if (!stripeRefund) {
@@ -136,6 +140,9 @@ router.post('/:id/reconcile', adminAuth, adminCsrf, requirePermission('refunds:w
           body: {
             refund: sanitizeRefundForResponse(refund),
             reconciliation: refund.reconciliationResult,
+            ledgerNarrative: buildRefundLedgerNarrative(
+              (db.ledger || []).filter((l) => l.refundRequestId === refund.id)
+            ),
           },
         };
         return;
@@ -151,8 +158,15 @@ router.post('/:id/reconcile', adminAuth, adminCsrf, requirePermission('refunds:w
       };
 
       const ledgerTypes = [];
-      if (refund.status === 'succeeded') ledgerTypes.push('deposit_refund_debit');
-      if (refund.status === 'failed' || refund.status === 'cancelled') ledgerTypes.push('deposit_refund_release');
+      if (refund.status === 'succeeded') {
+        const hasRedebit = (db.ledger || []).some(
+          (l) => l.refundRequestId === refund.id && l.type === 'deposit_refund_redebit'
+        );
+        ledgerTypes.push(hasRedebit ? 'deposit_refund_redebit' : 'deposit_refund_debit');
+      }
+      if (refund.status === 'failed' || refund.status === 'cancelled') {
+        ledgerTypes.push('deposit_refund_release');
+      }
 
       await commitRefundTransitionPostgres({
         stateDb: db,
@@ -167,6 +181,9 @@ router.post('/:id/reconcile', adminAuth, adminCsrf, requirePermission('refunds:w
         body: {
           refund: sanitizeRefundForResponse(refund),
           reconciliation: refund.reconciliationResult,
+          ledgerNarrative: buildRefundLedgerNarrative(
+            (db.ledger || []).filter((l) => l.refundRequestId === refund.id)
+          ),
           destinationPolicy: 'original_payment_method_only',
         },
       };

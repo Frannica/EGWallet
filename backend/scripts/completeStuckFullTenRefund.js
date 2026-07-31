@@ -65,46 +65,76 @@ async function main() {
     // Stripe already fully refunded — find matching refund object
     const list = await stripe.refunds.list({ payment_intent: INTENT, limit: 10 });
     stripeRefund = list.data.find((r) => Number(r.amount) === AMOUNT) || list.data[0];
-  } else if (refund.status === 'requested' || refund.status === 'pending') {
+  } else if (refund.status === 'requested' || refund.status === 'pending' || refund.status === 'failed') {
     const stripeAmount = Number(refund.stripeRefundAmount || AMOUNT);
-    try {
-      stripeRefund = await stripe.refunds.create(
-        {
-          payment_intent: INTENT,
-          amount: stripeAmount,
-          reason: 'requested_by_customer',
-          metadata: {
-            refundRequestId: REFUND_ID,
-            egwalletRefundId: REFUND_ID,
-            depositTransactionId: refund.depositTransactionId,
-            userId: refund.userId,
-            completion: 'stuck_502_recovery',
+    const { resolveStripeRefundAfterCreateError, findStripeRefundForRequest } = require('../refundStripeSafety');
+    // Always re-query before create/release.
+    stripeRefund = await findStripeRefundForRequest(stripe, {
+      refundId: REFUND_ID,
+      paymentIntentId: INTENT,
+      stripeAmount,
+    });
+    if (!stripeRefund && (refund.status === 'requested' || refund.status === 'pending')) {
+      try {
+        stripeRefund = await stripe.refunds.create(
+          {
+            payment_intent: INTENT,
+            amount: stripeAmount,
+            reason: 'requested_by_customer',
+            metadata: {
+              refundRequestId: REFUND_ID,
+              egwalletRefundId: REFUND_ID,
+              depositTransactionId: refund.depositTransactionId,
+              userId: refund.userId,
+              completion: 'stuck_502_recovery',
+            },
           },
-        },
-        { idempotencyKey: `egw-refund-${REFUND_ID}` }
-      );
-    } catch (stripeErr) {
-      // Release hold on hard failure
-      const expectedStatus = refund.status;
-      markRefundFailed(db, REFUND_ID, stripeErr.message || 'Stripe refund create failed', {
-        by: 'system',
-        stripeStatus: 'failed',
-      });
-      const failed = (db.refundRequests || []).find((r) => r.id === REFUND_ID);
-      await commitRefundTransitionPostgres({
-        stateDb: db,
-        refund: failed,
-        expectedStatus,
-        ledgerTypes: ['deposit_refund_release'],
-      });
-      saveAppState(db);
-      console.log(JSON.stringify({
-        ok: false,
-        error: 'STRIPE_CREATE_FAILED_HOLD_RELEASED',
-        message: stripeErr.message,
-        code: stripeErr.code,
-      }, null, 2));
-      process.exit(4);
+          { idempotencyKey: `egw-refund-${REFUND_ID}` }
+        );
+      } catch (stripeErr) {
+        const resolution = await resolveStripeRefundAfterCreateError(stripe, {
+          refundId: REFUND_ID,
+          paymentIntentId: INTENT,
+          stripeAmount,
+          error: stripeErr,
+        });
+        if (resolution.stripeRefund) {
+          stripeRefund = resolution.stripeRefund;
+        } else if (resolution.safeToReleaseHold) {
+          const expectedStatus = refund.status;
+          markRefundFailed(db, REFUND_ID, stripeErr.message || 'Stripe refund create failed', {
+            by: 'system',
+            stripeStatus: 'failed',
+          });
+          const failed = (db.refundRequests || []).find((r) => r.id === REFUND_ID);
+          await commitRefundTransitionPostgres({
+            stateDb: db,
+            refund: failed,
+            expectedStatus,
+            ledgerTypes: ['deposit_refund_release'],
+          });
+          saveAppState(db);
+          console.log(JSON.stringify({
+            ok: false,
+            error: 'STRIPE_CREATE_FAILED_HOLD_RELEASED',
+            message: stripeErr.message,
+            code: stripeErr.code,
+          }, null, 2));
+          process.exit(4);
+        } else {
+          console.log(JSON.stringify({
+            ok: false,
+            error: 'REFUND_PENDING_STRIPE_VERIFY',
+            reason: resolution.reason,
+            holdRetained: true,
+          }, null, 2));
+          process.exit(6);
+        }
+      }
+    }
+    if (!stripeRefund) {
+      console.log(JSON.stringify({ ok: false, error: 'NO_STRIPE_REFUND_TO_SETTLE', status: refund.status }, null, 2));
+      process.exit(3);
     }
   } else {
     console.error(JSON.stringify({
@@ -124,7 +154,12 @@ async function main() {
   });
   const updated = (db.refundRequests || []).find((r) => r.id === REFUND_ID);
   const ledgerTypes = [];
-  if (updated.status === 'succeeded') ledgerTypes.push('deposit_refund_debit');
+  if (updated.status === 'succeeded') {
+    const hasRedebit = (db.ledger || []).some(
+      (l) => l.refundRequestId === REFUND_ID && l.type === 'deposit_refund_redebit'
+    );
+    ledgerTypes.push(hasRedebit ? 'deposit_refund_redebit' : 'deposit_refund_debit');
+  }
   if (updated.status === 'failed') ledgerTypes.push('deposit_refund_release');
   await commitRefundTransitionPostgres({
     stateDb: db,
