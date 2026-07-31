@@ -31,6 +31,7 @@ function createPushRouter({ authMiddleware }) {
         token,
         platform,
         appVersion,
+        email: req.user.email || null,
       });
       // Mirror preference onto JSON user if present
       try {
@@ -50,9 +51,16 @@ function createPushRouter({ authMiddleware }) {
         tokenSuffix: String(token).slice(-12),
       });
     } catch (e) {
-      const code = e.code || 'PUSH_REGISTER_FAILED';
-      const status = code === 'DEVICE_ID_INVALID' || code === 'TOKEN_INVALID' ? 400 : 500;
-      return res.status(status).json({ error: e.message || 'register failed', errorCode: code });
+      let code = e.code || 'PUSH_REGISTER_FAILED';
+      // Never leak raw SQL to clients; map known Postgres codes.
+      if (code === '23503') code = 'PUSH_USER_NOT_READY';
+      if (code === '23505') code = 'PUSH_TOKEN_CONFLICT';
+      const status = (code === 'DEVICE_ID_INVALID' || code === 'TOKEN_INVALID') ? 400 : 500;
+      const safeMessage =
+        code === 'PUSH_USER_NOT_READY' ? 'Unable to bind push token to account'
+        : code === 'DEVICE_ID_INVALID' || code === 'TOKEN_INVALID' ? (e.message || 'invalid request')
+        : 'register failed';
+      return res.status(status).json({ error: safeMessage, errorCode: code, stage: 'storage' });
     }
   });
 

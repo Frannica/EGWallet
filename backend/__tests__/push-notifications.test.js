@@ -123,6 +123,29 @@ test('register binds token to authenticated user only; reassign steals from prev
   }
 });
 
+test('register creates placeholder Postgres user when JSON-only account has no users row', async () => {
+  requireDb();
+  await ensureSchema();
+  const u = uuidv4();
+  const token = `ExponentPushToken[${uuidv4().replace(/-/g, '').slice(0, 22)}]`;
+  try {
+    // Intentionally do NOT seed users row — mimics production JSON-first auth.
+    const row = await registerPushToken({
+      userId: u,
+      deviceId: 'device-json-only-1',
+      token,
+      platform: 'android',
+      email: `${u}@jsononly.test`,
+    });
+    assert.ok(row.id);
+    const pg = await pool.query('SELECT email FROM users WHERE id=$1', [u]);
+    assert.equal(pg.rowCount, 1);
+    assert.equal((await listEnabledTokensForUser(u)).length, 1);
+  } finally {
+    await cleanup([u]);
+  }
+});
+
 test('opt-out and logout unregister disable delivery', async () => {
   requireDb();
   await ensureSchema();

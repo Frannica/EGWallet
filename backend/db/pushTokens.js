@@ -16,11 +16,24 @@ function isValidExpoPushToken(token) {
 }
 
 /**
+ * Auth users often exist in JSON app_state before their first Postgres money touch.
+ * push_tokens.user_id FK requires a users row — create a placeholder if missing.
+ */
+async function ensureUserRowForPush(client, userId, email) {
+  await client.query(
+    `INSERT INTO users (id, email, password_hash, region, role, push_enabled, created_at)
+     VALUES ($1, $2, 'push-placeholder', 'US', 'individual', TRUE, NOW())
+     ON CONFLICT (id) DO NOTHING`,
+    [userId, email || `push-user-${userId}@egwallet.internal`]
+  );
+}
+
+/**
  * Upsert a push token for the authenticated user only.
  * If the same token was previously owned by another user, steal it
  * (device changed accounts) so the previous user stops receiving pushes.
  */
-async function registerPushToken({ userId, deviceId, token, platform, appVersion }) {
+async function registerPushToken({ userId, deviceId, token, platform, appVersion, email }) {
   if (!userId) throw Object.assign(new Error('userId required'), { code: 'USER_REQUIRED' });
   if (!deviceId || typeof deviceId !== 'string' || deviceId.length < 8 || deviceId.length > 128) {
     throw Object.assign(new Error('deviceId invalid'), { code: 'DEVICE_ID_INVALID' });
@@ -35,6 +48,7 @@ async function registerPushToken({ userId, deviceId, token, platform, appVersion
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    await ensureUserRowForPush(client, userId, email);
     // Free UNIQUE(token): remove other owners / other device rows for this token.
     await client.query(
       `DELETE FROM push_tokens WHERE token = $1 AND (user_id <> $2 OR device_id <> $3)`,
@@ -104,7 +118,13 @@ async function unregisterPushToken({ userId, deviceId, token }) {
   return { disabled: r.rowCount };
 }
 
-async function setUserPushEnabled(userId, enabled) {
+async function setUserPushEnabled(userId, enabled, email) {
+  const client = await pool.connect();
+  try {
+    await ensureUserRowForPush(client, userId, email);
+  } finally {
+    client.release();
+  }
   await pool.query(
     `UPDATE users SET push_enabled = $2 WHERE id = $1`,
     [userId, !!enabled]
