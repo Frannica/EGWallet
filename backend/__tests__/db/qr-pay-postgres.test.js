@@ -36,7 +36,30 @@ async function seedWallet(client, { userId, walletId, currency, amount }) {
 async function seedPendingPaymentRequest(client, { requestId, requesterId, walletId, amount, currency }) {
   await client.query(
     `INSERT INTO payment_requests (id, requester_id, wallet_id, amount, currency, status, type, created_at)
-     VALUES ($1, $2, $3, $4, $5, 'pending', 'personal_request', NOW())
+     VALUES ($1, $2, $3, $4, $5, 'pending', 'qr_dynamic', NOW())
+     ON CONFLICT (id) DO NOTHING`,
+    [requestId, requesterId, walletId, amount, currency]
+  );
+  // Dynamic QR redemption now locks qr_codes FOR UPDATE — seed a pending row.
+  await client.query(`
+    ALTER TABLE qr_codes
+      ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending',
+      ADD COLUMN IF NOT EXISTS wallet_id TEXT,
+      ADD COLUMN IF NOT EXISTS amount BIGINT,
+      ADD COLUMN IF NOT EXISTS currency TEXT,
+      ADD COLUMN IF NOT EXISTS hmac_signature TEXT,
+      ADD COLUMN IF NOT EXISTS nonce TEXT,
+      ADD COLUMN IF NOT EXISTS used_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS used_by UUID,
+      ADD COLUMN IF NOT EXISTS transaction_id UUID
+  `).catch(() => {});
+  await client.query(
+    `INSERT INTO qr_codes (
+       id, user_id, wallet_id, amount, currency, payload, hmac_signature, nonce,
+       status, created_at, expires_at
+     ) VALUES (
+       $1,$2,$3,$4,$5,'{}'::jsonb,'test','nonce','pending',NOW(), NOW() + INTERVAL '15 minutes'
+     )
      ON CONFLICT (id) DO NOTHING`,
     [requestId, requesterId, walletId, amount, currency]
   );
@@ -63,6 +86,12 @@ async function cleanup(client, ids) {
   await client.query('DELETE FROM idempotency_records WHERE user_id = ANY($1::uuid[])', [ids.users]);
   await client.query('DELETE FROM ledger WHERE wallet_id = ANY($1::text[])', [ids.wallets]);
   if (ids.requests?.length) {
+    await client.query(
+      `UPDATE payment_requests SET transaction_id = NULL, settled_by_transaction_id = NULL
+        WHERE id = ANY($1::uuid[])`,
+      [ids.requests]
+    );
+    await client.query('DELETE FROM qr_codes WHERE id = ANY($1::uuid[])', [ids.requests]);
     await client.query('DELETE FROM payment_requests WHERE id = ANY($1::uuid[])', [ids.requests]);
   }
   await client.query('DELETE FROM transactions WHERE id = ANY($1::uuid[])', [ids.transactions]);

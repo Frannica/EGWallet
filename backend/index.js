@@ -128,7 +128,11 @@ const {
   isDatabaseConnected,
 } = require('./db/appStateStore');
 const { getDurableP2PIdempotency, commitP2PSendPostgres } = require('./db/p2pSendPostgres');
-const { commitQrPayPostgres } = require('./db/qrPayPostgres');
+const { commitQrPayPostgres, getDurableQrPayIdempotency } = require('./db/qrPayPostgres');
+const {
+  createDynamicQrPostgres,
+  validateDynamicQrString,
+} = require('./db/dynamicQrPostgres');
 const { setJsonAvailableBalance } = require('./db/walletBalanceHeal');
 const {
   commitPayrollBatchPostgres,
@@ -6802,10 +6806,10 @@ app.get('/qr/static', authMiddleware, (req, res) => {
 });
 
 // Generate dynamic QR (payment request with amount - expires)
-app.post('/qr/dynamic', authMiddleware, (req, res) => {
+app.post('/qr/dynamic', authMiddleware, async (req, res) => {
   const db = loadAppState();
   const { amount, currency, memo, expiryMinutes } = req.body;
-  
+
   if (!amount || !currency) {
     return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
   }
@@ -6815,187 +6819,107 @@ app.post('/qr/dynamic', authMiddleware, (req, res) => {
 
   const user = db.users.find(u => u.id === req.user.userId);
   if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
-  
+  if (!enforceMoneyOperationPolicy(user, db, req.lang || 'en', res)) return;
+
   const userWallets = db.wallets.filter(w => w.userId === req.user.userId);
   if (userWallets.length === 0) return res.status(404).json({ error: t('error_wallet_not_found', req.lang || 'en') });
-  
-  // Create dynamic QR with expiry
-  const qrId = uuidv4();
-  const expiry = Date.now() + ((expiryMinutes || 15) * 60 * 1000); // Default 15 min
-  const nonce = crypto.randomBytes(16).toString('hex');
-  
-  // Create payment request object
-  const request = {
-    id: qrId,
-    requesterId: req.user.userId,
-    walletId: userWallets[0].id,
-    amount,
-    currency,
-    memo: memo || '',
-    status: 'pending',
-    type: 'qr_dynamic',
-    createdAt: Date.now(),
-    expiry,
-    nonce,
-    paidAt: null,
-    paidBy: null,
-    transactionId: null
-  };
-  
-  if (!db.paymentRequests) db.paymentRequests = [];
-  db.paymentRequests.push(request);
-  
-  // QR payload with signature
-  const qrPayload = {
-    v: '1',
-    type: 'dynamic',
-    requestId: qrId,
-    userId: req.user.userId,
-    amount,
-    currency,
-    memo: memo || '',
-    expiry,
-    nonce
-  };
-  
-  // Sign payload (simplified - in production use HMAC)
-  const payloadString = JSON.stringify(qrPayload);
-  const signature = crypto
-    .createHmac('sha256', JWT_SECRET)
-    .update(payloadString)
-    .digest('hex');
-  
-  qrPayload.signature = signature;
-  
-  if (!db.qrCodes) db.qrCodes = [];
-  db.qrCodes.push({
-    id: qrId,
-    userId: req.user.userId,
-    type: 'dynamic',
-    payload: qrPayload,
-    createdAt: Date.now(),
-    expiry,
-    used: false
-  });
-  
-  saveAppState(db);
-  
-  const qrString = `egwallet://pay?r=${qrId}&a=${amount}&c=${currency}&s=${signature.substring(0, 16)}`;
-  
-  res.json({
-    qrCode: qrString,
-    requestId: qrId,
-    payload: qrPayload,
-    expiresAt: expiry,
-    displayText: `${amount} ${currency}${memo ? ` - ${memo}` : ''}`
-  });
+  const wallet = userWallets[0];
+
+  try {
+    // Authoritative create in Postgres (cross-replica). JSON mirror is display-only.
+    const created = await createDynamicQrPostgres({
+      user,
+      wallet,
+      amount,
+      currency: String(currency).toUpperCase(),
+      memo: memo || '',
+      expiryMinutes,
+      hmacSecret: JWT_SECRET,
+    });
+
+    if (!db.paymentRequests) db.paymentRequests = [];
+    if (!db.qrCodes) db.qrCodes = [];
+    db.paymentRequests.push(created.jsonMirror.request);
+    db.qrCodes.push(created.jsonMirror.qrCode);
+    try {
+      saveAppState(db);
+    } catch (saveErr) {
+      // PG row already exists — do not fail the create; other replicas read PG.
+      logger.warn('[/qr/dynamic] JSON mirror save failed after Postgres create', { error: saveErr?.message, requestId: created.requestId });
+    }
+
+    return res.json({
+      qrCode: created.qrString,
+      requestId: created.requestId,
+      payload: created.payload,
+      expiresAt: created.expiresAt,
+      displayText: created.displayText,
+      durable: true,
+    });
+  } catch (err) {
+    logger.error('[/qr/dynamic] Postgres create failed', { error: err.message, userId: req.user.userId });
+    return res.status(500).json({ error: t('error_internal', req.lang || 'en') });
+  }
 });
 
 // Validate QR code
-app.post('/qr/validate', authMiddleware, (req, res) => {
+app.post('/qr/validate', authMiddleware, async (req, res) => {
   const db = loadAppState();
   const { qrString } = req.body;
-  
+
   if (!qrString) {
-    return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en') });
+    return res.status(400).json({ error: t('error_missing_fields', req.lang || 'en'), valid: false });
   }
-  
-  // Parse QR string
+
   if (qrString.startsWith('egwallet://pay/')) {
-    // Static QR
-    const userId = qrString.replace('egwallet://pay/', '');
+    const sepIdx = qrString.indexOf('?');
+    const userId = qrString.slice('egwallet://pay/'.length, sepIdx === -1 ? undefined : sepIdx);
     const user = db.users.find(u => u.id === userId);
-    
     if (!user) {
       return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en'), valid: false });
     }
-    
     const userWallet = db.wallets.find(w => w.userId === userId);
-    
     return res.json({
       valid: true,
       type: 'static',
-      userId: userId,
+      userId,
       walletId: userWallet?.id,
       displayName: user.email.split('@')[0],
-      requiresAmount: true
+      requiresAmount: true,
     });
   }
-  
-  // Dynamic QR
-  const url = new URL(qrString);
-  const requestId = url.searchParams.get('r');
-  
-  if (!requestId) {
-    return res.status(400).json({ error: t('error_invalid_qr_format', req.lang || 'en'), valid: false });
-  }
-  
-  const qrCode = db.qrCodes?.find(qr => qr.id === requestId);
-  const request = db.paymentRequests?.find(r => r.id === requestId);
-  
-  if (!qrCode || !request) {
-    return res.status(404).json({ error: t('error_qr_not_found', req.lang || 'en'), valid: false });
-  }
-  
-  // Check expiry
-  if (Date.now() > qrCode.expiry) {
+
+  try {
+    const verified = await validateDynamicQrString(qrString, JWT_SECRET);
+    if (!verified.ok) {
+      const status = verified.code === 'NOT_FOUND' ? 404 : 200;
+      return res.status(status).json({
+        valid: false,
+        error: verified.error,
+        code: verified.code,
+        expiredAt: verified.expiredAt || undefined,
+      });
+    }
+    const requester = db.users.find(u => u.id === verified.qr.requesterId || u.id === verified.qr.userId);
     return res.json({
-      valid: false,
-      error: t('error_qr_expired', req.lang || 'en'),
-      expiredAt: qrCode.expiry
+      valid: true,
+      type: 'dynamic',
+      requestId: verified.qr.id,
+      amount: verified.qr.amount,
+      currency: verified.qr.currency,
+      memo: verified.qr.memo,
+      requester: {
+        userId: verified.qr.userId,
+        displayName: requester ? requester.email.split('@')[0] : 'user',
+      },
+      expiresAt: verified.qr.expiresAt,
+      requiresAmount: false,
+      durable: true,
     });
+  } catch (err) {
+    logger.error('[/qr/validate] dynamic QR validate failed', { error: err.message });
+    return res.status(500).json({ valid: false, error: t('error_internal', req.lang || 'en') });
   }
-  
-  // Check if already used
-  if (qrCode.used || request.status !== 'pending') {
-    return res.json({
-      valid: false,
-      error: t('error_qr_used', req.lang || 'en'),
-      status: request.status
-    });
-  }
-  
-  // Verify signature
-  const payloadString = JSON.stringify({
-    v: qrCode.payload.v,
-    type: qrCode.payload.type,
-    requestId: qrCode.payload.requestId,
-    userId: qrCode.payload.userId,
-    amount: qrCode.payload.amount,
-    currency: qrCode.payload.currency,
-    memo: qrCode.payload.memo,
-    expiry: qrCode.payload.expiry,
-    nonce: qrCode.payload.nonce
-  });
-  
-  const expectedSignature = crypto
-    .createHmac('sha256', JWT_SECRET)
-    .update(payloadString)
-    .digest('hex');
-  
-  if (qrCode.payload.signature !== expectedSignature) {
-    return res.json({
-      valid: false,
-      error: t('error_qr_fraud', req.lang || 'en')
-    });
-  }
-  
-  const requester = db.users.find(u => u.id === request.requesterId);
-  
-  res.json({
-    valid: true,
-    type: 'dynamic',
-    requestId: request.id,
-    amount: request.amount,
-    currency: request.currency,
-    memo: request.memo,
-    requester: {
-      userId: requester.id,
-      displayName: requester.email.split('@')[0]
-    },
-    expiresAt: qrCode.expiry,
-    requiresAmount: false
-  });
 });
 
 // Pay via QR code
@@ -7019,9 +6943,11 @@ app.post('/qr/pay', authMiddleware, async (req, res) => {
   return withBalanceMutex(async () => {
   const db = loadAppState();
 
-  // Durable idempotency — survives restart
+  // Durable idempotency — survives restart (Postgres for QR when runtime enabled)
   if (clientKey) {
-    const durableHit = checkDurableIdempotency(db, clientKey, req.user.userId);
+    const durableHit = USE_POSTGRES_RUNTIME
+      ? await getDurableQrPayIdempotency(clientKey, req.user.userId)
+      : checkDurableIdempotency(db, clientKey, req.user.userId);
     if (durableHit) {
       idempotencyStore.set(clientKey, { userId: req.user.userId, response: durableHit, timestamp: Date.now() });
       return res.status(200).json(durableHit);
@@ -7068,31 +6994,30 @@ app.post('/qr/pay', authMiddleware, async (req, res) => {
     memo = 'QR Payment';
 
   } else {
-    // Dynamic QR - amount embedded
-    const url = new URL(qrString);
-    requestId = url.searchParams.get('r');
-    
-    const request = db.paymentRequests?.find(r => r.id === requestId);
-    if (!request) return res.status(404).json({ error: t('error_request_not_found', req.lang || 'en') });
-    
-    if (request.status !== 'pending') {
-      return res.status(400).json({ error: t('error_request_processed', req.lang || 'en') });
+    // Dynamic QR — authoritative Postgres + full HMAC (cross-replica safe)
+    const verified = await validateDynamicQrString(qrString, JWT_SECRET);
+    if (!verified.ok) {
+      if (verified.code === 'NOT_FOUND') {
+        return res.status(404).json({ error: t('error_qr_not_found', req.lang || 'en'), code: verified.code });
+      }
+      if (verified.code === 'EXPIRED') {
+        return res.status(400).json({ error: t('error_qr_expired', req.lang || 'en'), code: verified.code });
+      }
+      if (verified.code === 'USED') {
+        return res.status(400).json({ error: t('error_qr_used', req.lang || 'en'), code: verified.code });
+      }
+      if (verified.code === 'TAMPERED') {
+        return res.status(400).json({ error: t('error_qr_fraud', req.lang || 'en'), code: verified.code });
+      }
+      return res.status(400).json({ error: verified.error, code: verified.code });
     }
-    
-    const qrCode = db.qrCodes?.find(qr => qr.id === requestId);
-    if (!qrCode) return res.status(404).json({ error: t('error_qr_not_found', req.lang || 'en') });
-    
-    if (Date.now() > qrCode.expiry) {
-      return res.status(400).json({ error: t('error_qr_expired', req.lang || 'en') });
-    }
-    
-    targetUserId = request.requesterId;
-    targetWalletId = request.walletId;
-    paymentAmount = request.amount;
-    paymentCurrency = request.currency;
-    memo = request.memo || 'QR Payment';
+    requestId = verified.qr.id;
+    targetUserId = verified.qr.userId;
+    targetWalletId = verified.qr.walletId;
+    paymentAmount = verified.qr.amount;
+    paymentCurrency = verified.qr.currency;
+    memo = verified.qr.memo || 'QR Payment';
   }
-  
   // Verify payer wallet
   const fromWallet = db.wallets.find(w => w.id === fromWalletId && w.userId === req.user.userId);
   if (!fromWallet) return res.status(404).json({ error: t('error_source_wallet_not_found', req.lang || 'en') });
@@ -7242,6 +7167,10 @@ app.post('/qr/pay', authMiddleware, async (req, res) => {
       if (pgResult.requestNotFound) {
         db.transactions.pop();
         return res.status(404).json({ error: t('error_qr_not_found', req.lang || 'en') });
+      }
+      if (pgResult.expired) {
+        db.transactions.pop();
+        return res.status(400).json({ error: t('error_qr_expired', req.lang || 'en'), code: 'EXPIRED' });
       }
       if (pgResult.alreadyProcessed) {
         // Duplicate-scan protection: this single-use dynamic QR / payment

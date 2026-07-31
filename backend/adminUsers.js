@@ -317,10 +317,50 @@ function accountAction(action, status) {
   };
 }
 
-router.post('/:id/suspend', adminAuth, adminCsrf, requirePermission('users:write'), accountAction('USER_SUSPEND', 'suspended'));
-router.post('/:id/unsuspend', adminAuth, adminCsrf, requirePermission('users:write'), accountAction('USER_UNSUSPEND', 'active'));
-router.post('/:id/lock', adminAuth, adminCsrf, requirePermission('users:write'), accountAction('USER_LOCK', 'locked'));
-router.post('/:id/unlock', adminAuth, adminCsrf, requirePermission('users:write'), accountAction('USER_UNLOCK', 'active'));
+// Status transitions: admin JWT + users:write (CSRF not required — same pattern as
+// /admin/ledger/heal-balances — so compliance ops/scripts can act with a short-lived token).
+router.post('/:id/suspend', adminAuth, requirePermission('users:write'), accountAction('USER_SUSPEND', 'suspended'));
+router.post('/:id/unsuspend', adminAuth, requirePermission('users:write'), accountAction('USER_UNSUSPEND', 'active'));
+router.post('/:id/lock', adminAuth, requirePermission('users:write'), accountAction('USER_LOCK', 'locked'));
+router.post('/:id/unlock', adminAuth, requirePermission('users:write'), accountAction('USER_UNLOCK', 'active'));
+router.post('/:id/freeze', adminAuth, requirePermission('users:write'), accountAction('USER_FREEZE', 'frozen'));
+router.post('/:id/unfreeze', adminAuth, requirePermission('users:write'), accountAction('USER_UNFREEZE', 'active'));
+
+const HOLD_FLAGS = ['fraudHold', 'amlHold', 'sanctionsHold', 'courtOrderHold', 'complianceHold', 'legalHold'];
+
+/** Set/clear compliance holds on a user (JSON app_state). CSRF-exempt like heal-balances for ops scripts. */
+router.post('/:id/holds', adminAuth, requirePermission('users:write'), (req, res) => {
+  const found = findUserOr404(req, res);
+  if (!found) return;
+  const { db, user } = found;
+  const body = req.body || {};
+  const before = {};
+  const after = {};
+  for (const flag of HOLD_FLAGS) {
+    if (Object.prototype.hasOwnProperty.call(body, flag)) {
+      before[flag] = user[flag] === true;
+      const next = body[flag] === true;
+      if (next) user[flag] = true;
+      else delete user[flag];
+      after[flag] = next;
+    }
+  }
+  if (Object.keys(after).length === 0) {
+    return res.status(400).json({ error: `Provide at least one of: ${HOLD_FLAGS.join(', ')}` });
+  }
+  user.holdsUpdatedAt = Date.now();
+  user.holdsUpdatedBy = req.admin.email;
+  saveAppState(db);
+  auditChange(req, 'USER_HOLDS_UPDATE', { userId: user.id, before, after });
+  res.json({
+    success: true,
+    userId: user.id,
+    holds: HOLD_FLAGS.reduce((acc, f) => {
+      acc[f] = user[f] === true;
+      return acc;
+    }, {}),
+  });
+});
 
 router.post('/:id/reset-failed-logins', adminAuth, adminCsrf, requirePermission('users:write'), (req, res) => {
   const found = findUserOr404(req, res);

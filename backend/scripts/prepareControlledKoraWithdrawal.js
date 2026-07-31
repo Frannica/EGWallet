@@ -43,6 +43,35 @@ async function main() {
 
   await client.end();
 
+  // Live misc/mobile-money mins probed 2026-07-31 (see probeKoraCorridorMinsReadOnly.js).
+  // Smallest published operator min among live corridors: GH mobile money GHS 1.
+  // XAF/XOF also require multiples of 5 → effective min 5 despite operator min 2.
+  const smallestValid = {
+    country: 'GH',
+    currency: 'GHS',
+    method: 'mobile',
+    amountMajor: 1,
+    amountMinor: 100,
+    operatorSlug: 'mtn-gh',
+    operatorAlternates: ['airtel-gh', 'tigo-gh', 'vodafone-gh'],
+    beneficiaryFields: {
+      country: 'GH',
+      currency: 'GHS',
+      method: 'mobile',
+      bankCode: 'mtn-gh',
+      accountNumber: '233XXXXXXXXX',
+      accountHolderName: '<legal name on MM wallet>',
+      phoneFormat: '233 + 9 digits, no leading + or 0 after country code',
+      examplePhone: '233241234567',
+    },
+    notes: [
+      'Amount is Kora live operator minimum (major units) from GET /misc/mobile-money?countryCode=GH',
+      'EG EGP 1 mobile money is equally small; GH preferred for GHS funding clarity',
+      'Bank corridors have no per-bank min from List Banks; NGN bulk docs cite 1000 NGN — not used for smallest test',
+      'Do not execute until exact approval text includes amount, currency, method, country, email, beneficiary',
+    ],
+  };
+
   const plan = {
     readOnly: true,
     noKoraDisbursement: true,
@@ -53,6 +82,7 @@ async function main() {
       stripeConnectEnabled: health.stripeConnectEnabled,
     },
     supportedCorridors: corridors,
+    smallestValidPrepared: smallestValid,
     notSupported: {
       GQ: 'Equatorial Guinea — no cash-out corridor',
       US_UK_EU: 'Unavailable while Stripe Connect disabled',
@@ -61,7 +91,7 @@ async function main() {
     },
     recentWithdrawals: recent.rows,
     authorizationRequiredExactTemplate:
-      'APPROVE KORA WITHDRAWAL $<amount> <CURRENCY> to <METHOD> <COUNTRY> for <email> beneficiary <details>',
+      'APPROVE KORA WITHDRAWAL 1 GHS to mobile GH for <email> beneficiary mtn-gh <233XXXXXXXXX> <accountHolderName>',
     stop: 'NO MONEY MOVED. Provide exact amount, currency, country, method, beneficiary, and user email before any live Kora payout.',
     proofsRequiredAfterApproval: [
       'balance before/after',

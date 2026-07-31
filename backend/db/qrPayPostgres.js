@@ -115,10 +115,32 @@ async function commitQrPayPostgres({
       }
     }
 
-    // Dynamic QR — lock the linked payment_request/qr_codes row FIRST so a
-    // concurrent duplicate scan of the same single-use QR is rejected before
-    // any money moves, not after.
+    // Dynamic QR — lock qr_codes + payment_requests FIRST so a concurrent
+    // duplicate scan of the same single-use QR is rejected before any money moves.
     if (requestId) {
+      const qrRow = await client.query(
+        `SELECT id, status, expires_at, used_at, hmac_signature
+           FROM qr_codes WHERE id = $1 FOR UPDATE`,
+        [requestId]
+      );
+      if (qrRow.rowCount === 0) {
+        await client.query('ROLLBACK');
+        return { requestNotFound: true };
+      }
+      const qr = qrRow.rows[0];
+      if (qr.status === 'used' || qr.used_at) {
+        await client.query('ROLLBACK');
+        return { alreadyProcessed: true };
+      }
+      if (qr.expires_at && new Date(qr.expires_at).getTime() <= Date.now()) {
+        await client.query('ROLLBACK');
+        return { expired: true };
+      }
+      if (qr.status !== 'pending') {
+        await client.query('ROLLBACK');
+        return { alreadyProcessed: true };
+      }
+
       const reqRow = await client.query(
         'SELECT id, status FROM payment_requests WHERE id = $1 FOR UPDATE',
         [requestId]
@@ -197,14 +219,25 @@ async function commitQrPayPostgres({
       await client.query(
         `UPDATE payment_requests
          SET status = 'paid', paid_at = NOW(), paid_by = $1, transaction_id = $2
-         WHERE id = $3`,
+         WHERE id = $3 AND status = 'pending'`,
         [userId, txRow.id, requestId]
       );
-      // Mark the qr_codes row used (if the caller registered one for this dynamic QR).
-      await client.query(
-        `UPDATE qr_codes SET payload = payload || '{"used": true}'::jsonb WHERE id = $1`,
-        [requestId]
-      ).catch(() => {}); // qr_codes row is best-effort/legacy — payment_requests.status is authoritative.
+      const markQr = await client.query(
+        `UPDATE qr_codes
+            SET status = 'used',
+                used_at = NOW(),
+                used_by = $1,
+                transaction_id = $2,
+                payload = COALESCE(payload, '{}'::jsonb) || '{"used": true}'::jsonb
+          WHERE id = $3 AND status = 'pending'
+          RETURNING id`,
+        [userId, txRow.id, requestId]
+      );
+      if (markQr.rowCount === 0) {
+        // Lost a race after locks were released somehow — abort money movement.
+        await client.query('ROLLBACK');
+        return { alreadyProcessed: true };
+      }
     }
 
     if (clientKey) {
