@@ -116,6 +116,16 @@ function createPushRouter({ authMiddleware }) {
           errorCode: 'PUSH_TEST_CONFIRM_REQUIRED',
         });
       }
+      const { listEnabledTokensForUser } = require('./db/pushTokens');
+      const tokens = await listEnabledTokensForUser(req.user.userId);
+      if (!tokens.length) {
+        return res.status(400).json({
+          error: 'No enabled push token registered for this account on the server.',
+          errorCode: 'NO_PUSH_TOKENS',
+          tokenCount: 0,
+          stage: 'storage',
+        });
+      }
       const notificationId = uuidv4();
       const title = 'EGWallet test push';
       const body = 'Push delivery works on this device.';
@@ -142,9 +152,15 @@ function createPushRouter({ authMiddleware }) {
         body,
         metadata: { test: true },
       });
-      return res.json({ ok: true, notificationId, queued: true });
+      return res.json({
+        ok: true,
+        notificationId,
+        queued: true,
+        tokenCount: tokens.length,
+        stage: 'delivery',
+      });
     } catch (e) {
-      return res.status(500).json({ error: 'test push failed' });
+      return res.status(500).json({ error: 'test push failed', errorCode: 'PUSH_TEST_FAILED' });
     }
   });
 

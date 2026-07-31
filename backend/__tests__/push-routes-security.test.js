@@ -122,6 +122,14 @@ test('POST /push/register rejects foreign userId and invalid tokens', async () =
     assert.equal(ready.status, 200);
     assert.equal(ready.json.provider, 'expo');
     assert.equal(JSON.stringify(ready.json).includes('Bearer'), false);
+
+    await pool.query('DELETE FROM push_tokens WHERE user_id = $1', [userId]);
+    const noTokens = await request(app, 'POST', '/push/test-self', {
+      confirm: 'SEND_TEST_PUSH_TO_ME',
+    });
+    assert.equal(noTokens.status, 400);
+    assert.equal(noTokens.json.errorCode, 'NO_PUSH_TOKENS');
+    assert.equal(noTokens.json.tokenCount, 0);
   } finally {
     await pool.query('DELETE FROM push_tokens WHERE user_id = $1', [userId]);
     await pool.query('DELETE FROM users WHERE id = $1', [userId]);

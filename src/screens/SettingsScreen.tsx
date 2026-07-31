@@ -22,6 +22,8 @@ import {
   registerPushTokenWithBackend,
   unregisterPushTokenFromBackend,
   sendTestPushNotification,
+  openAndroidNotificationSettings,
+  type PushResult,
 } from '../notifications/pushRegistration';
 
 // Full list ordered: popular first, then alphabetical by code
@@ -86,13 +88,45 @@ export default function SettingsScreen() {
     }).catch(() => {});
   }, [auth.token]);
 
+  const pushErrorMessage = (result: PushResult): string => {
+    if (result.reason === 'opt_out') return t('settings.pushTestDisabled');
+    if (result.reason === 'permission_denied') return t('settings.pushTestPermissionDenied');
+    if (result.reason === 'auth_expired') return t('settings.pushTestAuthExpired');
+    if (result.reason === 'not_physical_device') return t('settings.pushTestNoToken');
+    if (result.reason === 'missing_project_id' || result.reason === 'token_generation_failed' || result.reason === 'token_empty') {
+      return t('settings.pushTestTokenFailed');
+    }
+    if (result.reason === 'NO_PUSH_TOKENS') return t('settings.pushTestNoServerToken');
+    if (result.reason === 'network') return t('settings.pushTestNetwork');
+    // Safe real detail from server/client — never tokens/secrets
+    if (result.detail) return result.detail;
+    return t('settings.pushTestFailed');
+  };
+
+  const showPushFailureAlert = (result: PushResult) => {
+    const msg = pushErrorMessage(result);
+    if (result.reason === 'permission_denied' && Platform.OS === 'android') {
+      Alert.alert(t('common.error'), msg, [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('settings.pushOpenAndroidSettings'),
+          onPress: () => { openAndroidNotificationSettings(); },
+        },
+      ]);
+      return;
+    }
+    Alert.alert(t('common.error'), msg);
+  };
+
   const handleTogglePush = async (enabled: boolean) => {
     setPushEnabled(enabled);
     await setLocalPushOptOut(!enabled);
     if (!auth.token) return;
     await setPushPreferenceOnBackend(auth.token, enabled);
     if (enabled) {
-      await registerPushTokenWithBackend(auth.token);
+      // Automatic registration retry when Push is turned ON
+      const reg = await registerPushTokenWithBackend(auth.token, { retries: 3 });
+      if (!reg.ok) showPushFailureAlert(reg);
     } else {
       await unregisterPushTokenFromBackend(auth.token);
     }
@@ -109,12 +143,8 @@ export default function SettingsScreen() {
       const result = await sendTestPushNotification(auth.token);
       if (result.ok) {
         Alert.alert(t('settings.pushTestSent'), t('settings.pushTestSentMsg'));
-      } else if (result.reason === 'opt_out') {
-        Alert.alert(t('common.error'), t('settings.pushTestDisabled'));
-      } else if (result.reason === 'no_device_token') {
-        Alert.alert(t('common.error'), t('settings.pushTestNoToken'));
       } else {
-        Alert.alert(t('common.error'), t('settings.pushTestFailed'));
+        showPushFailureAlert(result);
       }
     } finally {
       setPushTestBusy(false);

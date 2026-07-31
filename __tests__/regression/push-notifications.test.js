@@ -18,9 +18,16 @@ module.exports = function pushNotificationsSuite(check) {
   check('[Push] Settings has push opt-out toggle', settings.includes('handleTogglePush') && settings.includes('settings.pushNotifications'));
   check('[Push] Settings has Send Test Notification button', settings.includes('handleSendTestPush') && settings.includes('settings.pushTestSend'));
   check('[Push] client test helper calls POST /push/test-self', pushReg.includes('/push/test-self') && pushReg.includes('SEND_TEST_PUSH_TO_ME'));
+  check('[Push] client uses fetchWithTokenRefresh for push APIs', pushReg.includes('fetchWithTokenRefresh'));
+  check('[Push] client returns auth_expired on 401', pushReg.includes("reason: 'auth_expired'"));
+  check('[Push] client opens Android settings on permission denial', settings.includes('openAndroidNotificationSettings') && settings.includes('pushOpenAndroidSettings'));
+  check('[Push] toggle ON retries registration', settings.includes('retries: 3'));
   check('[Push] backend send uses Expo Push API URL', backendPush.includes('exp.host/--/api/v2/push/send'));
   check('[Push] backend never awaits push in money path (setImmediate)', backendPush.includes('setImmediate'));
   check('[Push] register rejects foreign userId', routes.includes('PUSH_USER_MISMATCH'));
+  check('[Push] test-self reports NO_PUSH_TOKENS', routes.includes('NO_PUSH_TOKENS'));
   check('[Push] ready endpoint does not return Authorization header secrets', !routes.includes('EXPO_ACCESS_TOKEN }') && routes.includes('getPushProviderReadiness'));
   check('[Push] invalid token pattern enforced', pushReg.includes('ExpoPushToken') || pushReg.includes('getExpoPushTokenAsync'));
+  const manifest = fs.readFileSync(path.join(root, 'android', 'app', 'src', 'main', 'AndroidManifest.xml'), 'utf8');
+  check('[Push] AndroidManifest declares POST_NOTIFICATIONS', manifest.includes('POST_NOTIFICATIONS'));
 };

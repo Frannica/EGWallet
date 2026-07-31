@@ -1,13 +1,32 @@
-import { Platform } from 'react-native';
+import { Platform, Linking } from 'react-native';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { API_BASE } from '../api/client';
 import { getDeviceId } from '../utils/deviceInfo';
+import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 
 const LOCAL_PUSH_OPT_OUT_KEY = '@egwallet:push_opt_out';
 const LAST_REGISTERED_TOKEN_KEY = 'egwallet_expo_push_token';
+
+export type PushStage =
+  | 'permission'
+  | 'token_generation'
+  | 'register'
+  | 'storage'
+  | 'delivery'
+  | 'auth'
+  | 'opt_out'
+  | 'network';
+
+export type PushResult = {
+  ok: boolean;
+  reason?: string;
+  stage?: PushStage;
+  /** Safe detail for UI — never includes tokens or secrets */
+  detail?: string;
+};
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -45,49 +64,124 @@ export async function setLocalPushOptOut(optOut: boolean): Promise<void> {
   }
 }
 
-export async function getExpoPushTokenSafe(): Promise<string | null> {
+export async function openAndroidNotificationSettings(): Promise<void> {
+  try {
+    await Linking.openSettings();
+  } catch {
+    // ignore
+  }
+}
+
+export async function getNotificationPermissionStatus(): Promise<string> {
+  try {
+    const { status } = await Notifications.getPermissionsAsync();
+    return status;
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
+ * Obtain an Expo push token with a precise stage/reason (no secrets).
+ */
+export async function getExpoPushTokenDetailed(): Promise<PushResult & { token?: string }> {
   if (!Device.isDevice) {
-    if (__DEV__) console.warn('[push] Physical device required for Expo push token');
-    return null;
+    return {
+      ok: false,
+      stage: 'permission',
+      reason: 'not_physical_device',
+      detail: 'Push requires a physical device.',
+    };
   }
 
-  const { status: existing } = await Notifications.getPermissionsAsync();
-  let finalStatus = existing;
-  if (existing !== 'granted') {
-    const { status } = await Notifications.requestPermissionsAsync();
-    finalStatus = status;
+  let permStatus = 'undetermined';
+  try {
+    const existing = await Notifications.getPermissionsAsync();
+    permStatus = existing.status;
+    if (existing.status !== 'granted') {
+      const requested = await Notifications.requestPermissionsAsync();
+      permStatus = requested.status;
+    }
+  } catch (e: any) {
+    return {
+      ok: false,
+      stage: 'permission',
+      reason: 'permission_check_failed',
+      detail: String(e?.message || 'permission_check_failed').slice(0, 120),
+    };
   }
-  if (finalStatus !== 'granted') return null;
+
+  if (permStatus !== 'granted') {
+    return {
+      ok: false,
+      stage: 'permission',
+      reason: 'permission_denied',
+      detail: `Notification permission is ${permStatus}.`,
+    };
+  }
 
   if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('default', {
-      name: 'default',
-      importance: Notifications.AndroidImportance.DEFAULT,
-    });
+    try {
+      await Notifications.setNotificationChannelAsync('default', {
+        name: 'default',
+        importance: Notifications.AndroidImportance.DEFAULT,
+      });
+    } catch {
+      // non-fatal
+    }
   }
 
   const pid = projectId();
   if (!pid) {
-    if (__DEV__) console.warn('[push] Missing EAS projectId');
-    return null;
+    return {
+      ok: false,
+      stage: 'token_generation',
+      reason: 'missing_project_id',
+      detail: 'EAS projectId is missing from the app config.',
+    };
   }
 
   try {
     const tokenRes = await Notifications.getExpoPushTokenAsync({ projectId: pid });
     const token = tokenRes?.data;
-    if (token && typeof token === 'string') return token;
-  } catch (e) {
-    if (__DEV__) console.warn('[push] getExpoPushTokenAsync failed', e);
+    if (token && typeof token === 'string') {
+      return { ok: true, token };
+    }
+    return {
+      ok: false,
+      stage: 'token_generation',
+      reason: 'token_empty',
+      detail: 'Expo returned an empty push token.',
+    };
+  } catch (e: any) {
+    return {
+      ok: false,
+      stage: 'token_generation',
+      reason: 'token_generation_failed',
+      detail: String(e?.message || 'getExpoPushTokenAsync failed').slice(0, 160),
+    };
   }
-  return null;
 }
 
-export async function registerPushTokenWithBackend(accessToken: string): Promise<{ ok: boolean; reason?: string }> {
-  if (!accessToken) return { ok: false, reason: 'no_auth' };
-  if (await isPushOptedOutLocally()) return { ok: false, reason: 'opt_out' };
+export async function getExpoPushTokenSafe(): Promise<string | null> {
+  const r = await getExpoPushTokenDetailed();
+  return r.ok && r.token ? r.token : null;
+}
 
-  const expoToken = await getExpoPushTokenSafe();
-  if (!expoToken) return { ok: false, reason: 'no_device_token' };
+async function registerOnce(accessTokenHint?: string | null): Promise<PushResult> {
+  if (await isPushOptedOutLocally()) {
+    return { ok: false, stage: 'opt_out', reason: 'opt_out', detail: 'Push is turned off.' };
+  }
+
+  const tokenResult = await getExpoPushTokenDetailed();
+  if (!tokenResult.ok || !tokenResult.token) {
+    return {
+      ok: false,
+      stage: tokenResult.stage || 'token_generation',
+      reason: tokenResult.reason || 'no_device_token',
+      detail: tokenResult.detail,
+    };
+  }
 
   const deviceId = await getDeviceId();
   const appVersion =
@@ -96,35 +190,82 @@ export async function registerPushTokenWithBackend(accessToken: string): Promise
     || undefined;
 
   try {
-    const res = await fetch(`${API_BASE}/push/register`, {
+    // Prefer SecureStore + auto-refresh — do not rely on a possibly stale React auth.token.
+    const res = await fetchWithTokenRefresh(`${API_BASE}/push/register`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
+        ...(accessTokenHint ? { Authorization: `Bearer ${accessTokenHint}` } : {}),
       },
       body: JSON.stringify({
-        token: expoToken,
+        token: tokenResult.token,
         deviceId,
         platform: Platform.OS,
         appVersion,
       }),
     });
+    if (res.status === 401 || res.status === 403) {
+      return {
+        ok: false,
+        stage: 'auth',
+        reason: 'auth_expired',
+        detail: 'Session expired. Sign out and sign in again, then retry.',
+      };
+    }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      return { ok: false, reason: body.errorCode || `http_${res.status}` };
+      return {
+        ok: false,
+        stage: 'register',
+        reason: body.errorCode || `http_${res.status}`,
+        detail: String(body.error || `Register failed (${res.status})`).slice(0, 160),
+      };
     }
     try {
-      await SecureStore.setItemAsync(LAST_REGISTERED_TOKEN_KEY, expoToken);
+      await SecureStore.setItemAsync(LAST_REGISTERED_TOKEN_KEY, tokenResult.token);
     } catch {
-      // ignore
+      // ignore local cache write
     }
-    return { ok: true };
+    return { ok: true, stage: 'storage', reason: 'registered' };
   } catch (e: any) {
-    return { ok: false, reason: e?.message || 'network' };
+    return {
+      ok: false,
+      stage: 'network',
+      reason: 'network',
+      detail: String(e?.message || 'network').slice(0, 160),
+    };
   }
 }
 
-export async function unregisterPushTokenFromBackend(accessToken: string | null): Promise<void> {
+/**
+ * Register with automatic retries (used when Push is turned ON and before test send).
+ */
+export async function registerPushTokenWithBackend(
+  accessToken?: string | null,
+  opts?: { retries?: number }
+): Promise<PushResult> {
+  const retries = Math.max(0, opts?.retries ?? 2);
+  let last: PushResult = { ok: false, reason: 'unknown' };
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    last = await registerOnce(accessToken);
+    if (last.ok) return last;
+    // Do not spin on hard permission / opt-out failures
+    if (
+      last.reason === 'permission_denied'
+      || last.reason === 'opt_out'
+      || last.reason === 'not_physical_device'
+      || last.reason === 'missing_project_id'
+    ) {
+      return last;
+    }
+    if (attempt < retries) {
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+  return last;
+}
+
+export async function unregisterPushTokenFromBackend(_accessToken?: string | null): Promise<void> {
   const deviceId = await getDeviceId().catch(() => null);
   let token: string | null = null;
   try {
@@ -133,19 +274,14 @@ export async function unregisterPushTokenFromBackend(accessToken: string | null)
     token = null;
   }
 
-  if (accessToken) {
-    try {
-      await fetch(`${API_BASE}/push/unregister`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ deviceId, token }),
-      });
-    } catch {
-      // best-effort
-    }
+  try {
+    await fetchWithTokenRefresh(`${API_BASE}/push/unregister`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId, token }),
+    });
+  } catch {
+    // best-effort
   }
 
   try {
@@ -155,14 +291,14 @@ export async function unregisterPushTokenFromBackend(accessToken: string | null)
   }
 }
 
-export async function setPushPreferenceOnBackend(accessToken: string, pushEnabled: boolean): Promise<boolean> {
+export async function setPushPreferenceOnBackend(
+  _accessToken: string | null | undefined,
+  pushEnabled: boolean
+): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/push/preferences`, {
+    const res = await fetchWithTokenRefresh(`${API_BASE}/push/preferences`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pushEnabled }),
     });
     return res.ok;
@@ -172,41 +308,67 @@ export async function setPushPreferenceOnBackend(accessToken: string, pushEnable
 }
 
 /** Fire-and-forget registration after login / session restore. */
-export function schedulePushRegistration(accessToken: string): void {
+export function schedulePushRegistration(accessToken?: string | null): void {
   setTimeout(() => {
-    registerPushTokenWithBackend(accessToken).catch(() => {});
+    registerPushTokenWithBackend(accessToken, { retries: 2 }).catch(() => {});
   }, 0);
 }
 
 /**
- * Controlled self-test via authenticated session.
- * Calls POST /push/test-self — does not move money.
+ * Controlled self-test via authenticated session + token refresh.
+ * Fails with a precise stage if registration did not succeed.
  */
-export async function sendTestPushNotification(accessToken: string): Promise<{ ok: boolean; reason?: string }> {
-  if (!accessToken) return { ok: false, reason: 'no_auth' };
-  // Ensure this device token is registered before asking the server to push.
-  const reg = await registerPushTokenWithBackend(accessToken);
-  if (!reg.ok && reg.reason !== 'opt_out') {
-    // Still attempt test-self — server may have another registered device.
-  }
+export async function sendTestPushNotification(accessToken?: string | null): Promise<PushResult> {
   if (await isPushOptedOutLocally()) {
-    return { ok: false, reason: 'opt_out' };
+    return { ok: false, stage: 'opt_out', reason: 'opt_out', detail: 'Push is turned off.' };
   }
+
+  const reg = await registerPushTokenWithBackend(accessToken, { retries: 2 });
+  if (!reg.ok) return reg;
+
   try {
-    const res = await fetch(`${API_BASE}/push/test-self`, {
+    const res = await fetchWithTokenRefresh(`${API_BASE}/push/test-self`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ confirm: 'SEND_TEST_PUSH_TO_ME' }),
     });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      return { ok: false, reason: body.errorCode || body.error || `http_${res.status}` };
+    if (res.status === 401 || res.status === 403) {
+      return {
+        ok: false,
+        stage: 'auth',
+        reason: 'auth_expired',
+        detail: 'Session expired. Sign out and sign in again, then retry.',
+      };
     }
-    return { ok: true };
+    if (!res.ok) {
+      return {
+        ok: false,
+        stage: 'delivery',
+        reason: body.errorCode || `http_${res.status}`,
+        detail: String(body.error || `Test push failed (${res.status})`).slice(0, 160),
+      };
+    }
+    if (typeof body.tokenCount === 'number' && body.tokenCount < 1) {
+      return {
+        ok: false,
+        stage: 'storage',
+        reason: 'NO_PUSH_TOKENS',
+        detail: 'Server has no enabled push token for this account.',
+      };
+    }
+    return {
+      ok: true,
+      stage: 'delivery',
+      reason: 'queued',
+      detail: body.tokenCount != null ? `Queued to ${body.tokenCount} device(s).` : 'Queued.',
+    };
   } catch (e: any) {
-    return { ok: false, reason: e?.message || 'network' };
+    return {
+      ok: false,
+      stage: 'network',
+      reason: 'network',
+      detail: String(e?.message || 'network').slice(0, 160),
+    };
   }
 }
