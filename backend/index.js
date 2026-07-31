@@ -129,7 +129,7 @@ const {
 } = require('./db/appStateStore');
 const { getDurableP2PIdempotency, commitP2PSendPostgres } = require('./db/p2pSendPostgres');
 const { commitQrPayPostgres } = require('./db/qrPayPostgres');
-const { setJsonAvailableBalance, healJsonBalancesFromPostgres } = require('./db/walletBalanceHeal');
+const { setJsonAvailableBalance } = require('./db/walletBalanceHeal');
 const {
   commitPayrollBatchPostgres,
   getDurablePayrollBatchIdempotency,
@@ -10891,6 +10891,27 @@ if (fs.existsSync(adminDashboardDist)) {
   app.get('/admin/dashboard/*', (_req, res) => {
     res.sendFile(path.join(adminDashboardDist, 'index.html'));
   });
+}
+
+// Public legal pages (Terms / Privacy) — Vite copies public/ → dist/ on build.
+// Prefer dist (deployed artifact); fall back to public/ for local/dev.
+const legalPublicRoot = fs.existsSync(path.join(adminDashboardDist, 'terms', 'index.html'))
+  ? adminDashboardDist
+  : path.join(__dirname, 'admin-dashboard', 'public');
+const termsIndex = path.join(legalPublicRoot, 'terms', 'index.html');
+const privacyIndex = path.join(legalPublicRoot, 'privacy-policy', 'index.html');
+if (fs.existsSync(termsIndex)) {
+  app.use('/terms', express.static(path.join(legalPublicRoot, 'terms'), { index: 'index.html' }));
+  app.get(['/terms', '/terms/'], (_req, res) => res.sendFile(termsIndex));
+}
+if (fs.existsSync(privacyIndex)) {
+  app.use('/privacy-policy', express.static(path.join(legalPublicRoot, 'privacy-policy'), { index: 'index.html' }));
+  app.get(['/privacy-policy', '/privacy-policy/', '/privacy'], (_req, res) => res.sendFile(privacyIndex));
+}
+// Canonical markdown (repo legal/) for auditors / ops.
+const legalMdRoot = path.join(__dirname, '..', 'legal');
+if (fs.existsSync(legalMdRoot)) {
+  app.use('/legal', express.static(legalMdRoot, { index: false, extensions: ['md'] }));
 }
 
 // 404 handler

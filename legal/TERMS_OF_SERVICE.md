@@ -2,7 +2,7 @@
 
 **EGWallet**
 **Effective Date:** July 23, 2026
-**Last Updated:** July 23, 2026
+**Last Updated:** July 31, 2026
 
 ---
 
@@ -103,11 +103,24 @@ When using EGWallet, you agree **not** to:
 
 ## 7. Deposits
 
-- You may add funds to your wallet ("Deposit") using a supported payment method (currently: debit/credit card via our card-processing partner).
+- You may add funds to your wallet ("Deposit") using a supported payment method (currently: debit/credit card via our card-processing partner, Stripe).
 - Deposits are credited to your wallet only after the payment method issuer confirms successful settlement. Declined, reversed, or charged-back payments will not be credited, and any amount already credited due to a subsequently reversed payment may be debited back from your wallet.
 - The first six (6) card deposits on an account are fee-free. Subsequent deposits are subject to a 0.5% processing fee, disclosed before you confirm.
 - Deposits are subject to minimum and maximum amounts, which may vary by currency and are displayed in the App before you confirm.
 - Accounts that are frozen, suspended, or subject to an active compliance hold (see Section 9) may not deposit funds until the hold is resolved.
+
+### 7.1 Deposit eligibility and fund recovery
+
+- EGWallet will not accept a deposit into a wallet unless there is a **clearly disclosed and functioning method to recover those funds**.
+- For Stripe card deposits, the disclosed recovery method for deposited card funds is **refund-to-original-card** (see Section 7.2): a reversal of that specific deposit back to the original payment method. This is **not** a general withdrawal method and does not pay out to a bank account or mobile money wallet of your choice.
+- Cash withdrawal to a bank account or mobile money account is available **only** in the countries and methods listed in Section 10.2. If your country is not listed there (including Equatorial Guinea, and the United States, United Kingdom, and Europe while Stripe Connect is disabled), you **cannot** cash out via bank or mobile money; recovery of a Stripe card deposit is limited to refund-to-original-card where Stripe and the card issuer still allow it.
+- Holding a multi-currency wallet balance (including XAF or XOF) does **not** by itself create a cash-withdrawal right.
+
+### 7.2 Refund-to-original-card (deposit reversal)
+
+- A refund-to-original-card returns all or part of a prior Stripe card deposit **only** to the same payment method that funded that deposit. You cannot choose a different card, bank account, or mobile money destination.
+- Refund-to-original-card is a **deposit reversal**, not a withdrawal product. It is separate from Kora (or any other) cash-out corridors in Section 10.
+- Refund availability, timing, and final credit to your card statement are subject to Stripe and your card issuer. EGWallet places a wallet hold for the refund amount before requesting the Stripe refund and restores the hold if the refund fails.
 
 ---
 
@@ -155,13 +168,33 @@ When using EGWallet, you agree **not** to:
 - Ordinary withdrawals that pass automated fraud, AML, and sanctions screening are processed automatically, without manual approval, and are not counted against your Wallet Transfer send limits.
 - Withdrawals flagged for fraud, AML, sanctions, a legal hold, or an account freeze are routed to manual compliance review before any funds are released or returned.
 
-### 10.2 Supported Countries and Methods
+### 10.2 Supported Countries and Methods (current)
 
-- Withdrawal availability, supported payout methods (bank transfer and/or mobile money), and required beneficiary information vary by country and are determined by EGWallet's payout providers' current, officially supported corridors.
-- The App will only present withdrawal methods that are actually supported for your selected country and currency, and will display bank or mobile-money-operator lists sourced directly from our payout provider rather than requiring you to enter a bank code manually.
-- If your country or the combination of country, currency, and method you select is not currently supported for withdrawal, the App will clearly tell you so **before any funds are debited or held** — it will never silently attempt an unsupported withdrawal or route it to the wrong provider.
-- EGWallet's supported withdrawal corridors change over time as our payout providers add or remove country/method support. The current list of supported countries and methods is displayed to you in the App at the time you attempt a withdrawal, and is available on request from support@egwalletfinance.com.
-- Maintaining a wallet balance in a currency (for example, to receive transfers or hold funds) does not by itself guarantee that cash withdrawal is available for that currency or country — cash-out availability depends on active payout-provider support for that specific corridor.
+Live cash withdrawals are processed through **Kora** and are limited to the following countries and methods. This list is the current supported coverage as of the Last Updated date above:
+
+| Country | ISO | Currency | Supported cash-out methods |
+|---------|-----|----------|----------------------------|
+| Nigeria | NG | NGN | Bank transfer |
+| Kenya | KE | KES | Bank transfer **and** mobile money |
+| South Africa | ZA | ZAR | Bank transfer |
+| Ghana | GH | GHS | Mobile money |
+| Ivory Coast (Côte d'Ivoire) | CI | XOF | Mobile money |
+| Cameroon | CM | XAF | Mobile money |
+| Egypt | EG | EGP | Mobile money |
+| Tanzania | TZ | TZS | Mobile money |
+
+**Explicitly not supported for cash withdrawal (current):**
+
+- **Equatorial Guinea (GQ)** is **not** currently supported for cash withdrawal. EGWallet may still be used there for in-app wallet balances, peer-to-peer transfers, and other in-app features where available, but there is no bank or mobile-money cash-out corridor for GQ.
+- Sharing a currency zone (**XAF** or **XOF**) with a supported country does **not** establish payout support. For example, XAF balances do not enable cash-out outside Cameroon; XOF balances do not enable cash-out outside Ivory Coast.
+- **United States, United Kingdom, and European** cash withdrawals are **unavailable** while Stripe Connect is disabled for EGWallet. There is no US/UK/EU bank payout rail enabled in production at this time.
+- Any country or method not listed in the table above is unsupported for cash withdrawal.
+
+**How the App enforces this:**
+
+- The App will only present withdrawal methods that are actually supported for your selected country and currency, and will display bank or mobile-money-operator lists sourced from our payout provider rather than requiring you to invent unsupported bank codes.
+- If your country or the combination of country, currency, and method you select is not supported, the App will tell you so **before any funds are debited or held** — it will never silently attempt an unsupported withdrawal or route it to the wrong provider.
+- Maintaining a wallet balance in a currency does not by itself guarantee cash withdrawal for that currency or country.
 
 ### 10.3 Fees
 
@@ -200,7 +233,12 @@ When using EGWallet, you agree **not** to:
 
 ## 13. Third-Party Payment and Payout Providers
 
-EGWallet relies on third-party, independently licensed providers to move real money on your behalf, including (as applicable to your transaction and location) card payment processors for Deposits and licensed payout/disbursement providers for Withdrawals and Payroll. Your use of these features is also subject to those providers' terms to the extent disclosed to you. EGWallet is responsible for how it integrates with these providers but is not itself the issuer of your payment card, the operator of your bank account, or a licensed money transmitter, except where separately and expressly stated.
+EGWallet relies on third-party, independently licensed providers to move real money on your behalf, including (as applicable to your transaction and location):
+
+- **Stripe** — card deposits and refund-to-original-card deposit reversals. Stripe Connect payouts for US/UK/EU withdrawals are **not** enabled for EGWallet at this time.
+- **Kora** — live cash withdrawals (bank transfer and/or mobile money) only in the African corridors listed in Section 10.2.
+
+Your use of these features is also subject to those providers' terms to the extent disclosed to you. EGWallet is responsible for how it integrates with these providers but is not itself the issuer of your payment card, the operator of your bank account, or a licensed money transmitter, except where separately and expressly stated.
 
 ---
 
