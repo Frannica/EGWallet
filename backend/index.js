@@ -10908,9 +10908,13 @@ if (fs.existsSync(privacyIndex)) {
   app.use('/privacy-policy', express.static(path.join(legalPublicRoot, 'privacy-policy'), { index: 'index.html' }));
   app.get(['/privacy-policy', '/privacy-policy/', '/privacy'], (_req, res) => res.sendFile(privacyIndex));
 }
-// Canonical markdown (repo legal/) for auditors / ops.
-const legalMdRoot = path.join(__dirname, '..', 'legal');
-if (fs.existsSync(legalMdRoot)) {
+// Canonical markdown for auditors / ops.
+// Prefer backend/legal (present when Railway root is backend/), then repo legal/.
+const legalMdRoot = [
+  path.join(__dirname, 'legal'),
+  path.join(__dirname, '..', 'legal'),
+].find((p) => fs.existsSync(p));
+if (legalMdRoot) {
   app.use('/legal', express.static(legalMdRoot, { index: false, extensions: ['md'] }));
 }
 

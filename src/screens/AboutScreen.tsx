@@ -19,7 +19,7 @@ export default function AboutScreen() {
   const apiUrl = config.API_BASE_URL;
 
   const handlePrivacyPolicy = async () => {
-    const url = 'https://www.egwalletfinance.com/privacy';
+    const url = 'https://egwalletsimple-production.up.railway.app/privacy-policy';
     const supported = await Linking.canOpenURL(url);
     if (supported) {
       await Linking.openURL(url);
@@ -29,7 +29,7 @@ export default function AboutScreen() {
   };
 
   const handleTerms = async () => {
-    const url = 'https://www.egwalletfinance.com/terms';
+    const url = 'https://egwalletsimple-production.up.railway.app/terms';
     const supported = await Linking.canOpenURL(url);
     if (supported) {
       await Linking.openURL(url);
