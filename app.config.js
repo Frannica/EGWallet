@@ -23,7 +23,10 @@ export default ({ config }) => ({
     },
     edgeToEdgeEnabled: true,
     package: "com.francisco1953.egwalletmobile",
-    versionCode: 86
+    versionCode: 87,
+    // Required for Expo push token generation on Android (FCM client registration).
+    // Local file is gitignored; EAS can inject via GOOGLE_SERVICES_JSON file env.
+    googleServicesFile: process.env.GOOGLE_SERVICES_JSON || "./google-services.json"
   },
   web: {
     favicon: "./assets/favicon.png"

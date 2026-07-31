@@ -24,7 +24,8 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.francisco1953.egwalletmobile",
-      "versionCode": 86
+      "versionCode": 87,
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png"

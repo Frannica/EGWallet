@@ -30,4 +30,6 @@ module.exports = function pushNotificationsSuite(check) {
   check('[Push] invalid token pattern enforced', pushReg.includes('ExpoPushToken') || pushReg.includes('getExpoPushTokenAsync'));
   const manifest = fs.readFileSync(path.join(root, 'android', 'app', 'src', 'main', 'AndroidManifest.xml'), 'utf8');
   check('[Push] AndroidManifest declares POST_NOTIFICATIONS', manifest.includes('POST_NOTIFICATIONS'));
+  const appConfig = fs.readFileSync(path.join(__dirname, '../../app.config.js'), 'utf8');
+  check('[Push] app.config wires googleServicesFile for FCM', appConfig.includes('googleServicesFile'));
 };

@@ -94,6 +94,8 @@ export default function SettingsScreen() {
     if (result.reason === 'auth_expired') return t('settings.pushTestAuthExpired');
     if (result.reason === 'not_physical_device') return t('settings.pushTestNoToken');
     if (result.reason === 'missing_project_id' || result.reason === 'token_generation_failed' || result.reason === 'token_empty') {
+      // Prefer the safe device/SDK detail so we never hide the real failure stage.
+      if (result.detail) return `${t('settings.pushTestTokenFailed')} ${result.detail}`;
       return t('settings.pushTestTokenFailed');
     }
     if (result.reason === 'NO_PUSH_TOKENS') return t('settings.pushTestNoServerToken');
