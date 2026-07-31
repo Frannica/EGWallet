@@ -16,6 +16,8 @@ module.exports = function pushNotificationsSuite(check) {
   check('[Push] client unregisters on logout path', auth.includes('unregisterPushTokenFromBackend'));
   check('[Push] client schedules registration after login/restore', auth.includes('schedulePushRegistration'));
   check('[Push] Settings has push opt-out toggle', settings.includes('handleTogglePush') && settings.includes('settings.pushNotifications'));
+  check('[Push] Settings has Send Test Notification button', settings.includes('handleSendTestPush') && settings.includes('settings.pushTestSend'));
+  check('[Push] client test helper calls POST /push/test-self', pushReg.includes('/push/test-self') && pushReg.includes('SEND_TEST_PUSH_TO_ME'));
   check('[Push] backend send uses Expo Push API URL', backendPush.includes('exp.host/--/api/v2/push/send'));
   check('[Push] backend never awaits push in money path (setImmediate)', backendPush.includes('setImmediate'));
   check('[Push] register rejects foreign userId', routes.includes('PUSH_USER_MISMATCH'));

@@ -177,3 +177,36 @@ export function schedulePushRegistration(accessToken: string): void {
     registerPushTokenWithBackend(accessToken).catch(() => {});
   }, 0);
 }
+
+/**
+ * Controlled self-test via authenticated session.
+ * Calls POST /push/test-self — does not move money.
+ */
+export async function sendTestPushNotification(accessToken: string): Promise<{ ok: boolean; reason?: string }> {
+  if (!accessToken) return { ok: false, reason: 'no_auth' };
+  // Ensure this device token is registered before asking the server to push.
+  const reg = await registerPushTokenWithBackend(accessToken);
+  if (!reg.ok && reg.reason !== 'opt_out') {
+    // Still attempt test-self — server may have another registered device.
+  }
+  if (await isPushOptedOutLocally()) {
+    return { ok: false, reason: 'opt_out' };
+  }
+  try {
+    const res = await fetch(`${API_BASE}/push/test-self`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ confirm: 'SEND_TEST_PUSH_TO_ME' }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, reason: body.errorCode || body.error || `http_${res.status}` };
+    }
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, reason: e?.message || 'network' };
+  }
+}

@@ -21,6 +21,7 @@ import {
   setPushPreferenceOnBackend,
   registerPushTokenWithBackend,
   unregisterPushTokenFromBackend,
+  sendTestPushNotification,
 } from '../notifications/pushRegistration';
 
 // Full list ordered: popular first, then alphabetical by code
@@ -69,6 +70,7 @@ export default function SettingsScreen() {
   // any error fetching eligibility keeps the menu item hidden.
   const [stripeConnectEligible, setStripeConnectEligible] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(true);
+  const [pushTestBusy, setPushTestBusy] = useState(false);
 
   useEffect(() => {
     if (!auth.token) return;
@@ -93,6 +95,29 @@ export default function SettingsScreen() {
       await registerPushTokenWithBackend(auth.token);
     } else {
       await unregisterPushTokenFromBackend(auth.token);
+    }
+  };
+
+  const handleSendTestPush = async () => {
+    if (!auth.token || pushTestBusy) return;
+    if (!pushEnabled) {
+      Alert.alert(t('common.error'), t('settings.pushTestDisabled'));
+      return;
+    }
+    setPushTestBusy(true);
+    try {
+      const result = await sendTestPushNotification(auth.token);
+      if (result.ok) {
+        Alert.alert(t('settings.pushTestSent'), t('settings.pushTestSentMsg'));
+      } else if (result.reason === 'opt_out') {
+        Alert.alert(t('common.error'), t('settings.pushTestDisabled'));
+      } else if (result.reason === 'no_device_token') {
+        Alert.alert(t('common.error'), t('settings.pushTestNoToken'));
+      } else {
+        Alert.alert(t('common.error'), t('settings.pushTestFailed'));
+      }
+    } finally {
+      setPushTestBusy(false);
     }
   };
 
@@ -493,6 +518,20 @@ export default function SettingsScreen() {
               thumbColor="#FFFFFF"
             />
           </View>
+
+          <View style={styles.divider} />
+
+          <TouchableOpacity
+            style={[styles.supportButton, (!pushEnabled || pushTestBusy) && { opacity: 0.5 }]}
+            onPress={handleSendTestPush}
+            disabled={!pushEnabled || pushTestBusy}
+          >
+            <Ionicons name="paper-plane" size={20} color="#007AFF" />
+            <Text style={styles.supportButtonText}>
+              {pushTestBusy ? t('settings.pushTestSending') : t('settings.pushTestSend')}
+            </Text>
+            <Ionicons name="chevron-forward" size={20} color="#007AFF" />
+          </TouchableOpacity>
 
           <View style={styles.divider} />
           
