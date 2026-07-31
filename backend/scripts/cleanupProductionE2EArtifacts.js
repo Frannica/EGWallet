@@ -7,7 +7,6 @@
  *   CONFIRM_E2E_CLEANUP=YES railway run --service EGWalletSimple -- node backend/scripts/cleanupProductionE2EArtifacts.js
  */
 const { Client } = require('pg');
-const { loadAppState, saveAppState } = require('../db/appStateStore');
 
 async function main() {
   if (process.env.CONFIRM_E2E_CLEANUP !== 'YES') {
@@ -106,44 +105,55 @@ async function main() {
     }
   }
 
-  // JSON app_state cleanup (best-effort on API host via railway run may not share volume;
-  // also attempt when loadAppState works against same DB blob).
+  // JSON app_state cleanup via public DB URL (loadAppState sync worker needs railway.internal).
   try {
-    const db = loadAppState();
-    let notifRemoved = 0;
-    let prRemoved = 0;
-    const e2eSet = new Set(e2eIds);
-    if (Array.isArray(db.notifications)) {
-      const before = db.notifications.length;
-      db.notifications = db.notifications.filter((n) => !e2eSet.has(n.userId));
-      notifRemoved = before - db.notifications.length;
-    }
-    if (Array.isArray(db.paymentRequests)) {
-      for (const pr of db.paymentRequests) {
-        if (e2eSet.has(pr.requesterId) && pr.status === 'pending') {
-          pr.status = 'cancelled';
-          pr.cancelReason = 'e2e_cleanup';
-          prRemoved += 1;
+    await client.query('BEGIN');
+    const row = await client.query(`SELECT value FROM app_metadata WHERE key = 'app_state' FOR UPDATE`);
+    if (row.rowCount === 0) {
+      await client.query('ROLLBACK');
+      report.actions.push({ jsonCleanup: 'skipped', reason: 'no_app_state' });
+    } else {
+      const db = row.rows[0].value;
+      let notifRemoved = 0;
+      let prRemoved = 0;
+      const e2eSet = new Set(e2eIds);
+      if (Array.isArray(db.notifications)) {
+        const before = db.notifications.length;
+        db.notifications = db.notifications.filter((n) => !e2eSet.has(n.userId));
+        notifRemoved = before - db.notifications.length;
+      }
+      if (Array.isArray(db.paymentRequests)) {
+        for (const pr of db.paymentRequests) {
+          if (e2eSet.has(pr.requesterId) && pr.status === 'pending') {
+            pr.status = 'cancelled';
+            pr.cancelReason = 'e2e_cleanup';
+            prRemoved += 1;
+          }
         }
       }
-    }
-    for (const u of db.users || []) {
-      if (e2eSet.has(u.id) || (u.email && String(u.email).endsWith('@egwallet.e2e.test'))) {
-        u.status = 'deleted';
-        u.accountStatus = 'suspended';
-        u.email = `deleted-e2e-${u.id}@egwallet.deleted`;
-        u.tokenVersion = (u.tokenVersion || 0) + 1;
+      for (const u of db.users || []) {
+        if (e2eSet.has(u.id) || (u.email && String(u.email).endsWith('@egwallet.e2e.test'))) {
+          u.status = 'deleted';
+          u.accountStatus = 'suspended';
+          u.email = `deleted-e2e-${u.id}@egwallet.deleted`;
+          u.tokenVersion = (u.tokenVersion || 0) + 1;
+        }
       }
-    }
-    for (const w of db.wallets || []) {
-      if (e2eSet.has(w.userId) && Array.isArray(w.balances)) {
-        for (const b of w.balances) b.amount = 0;
-        if (w.holdBalance) w.holdBalance = {};
+      for (const w of db.wallets || []) {
+        if (e2eSet.has(w.userId) && Array.isArray(w.balances)) {
+          for (const b of w.balances) b.amount = 0;
+          if (w.holdBalance) w.holdBalance = {};
+        }
       }
+      await client.query(
+        `UPDATE app_metadata SET value = $1::jsonb, updated_at = NOW() WHERE key = 'app_state'`,
+        [JSON.stringify(db)]
+      );
+      await client.query('COMMIT');
+      report.actions.push({ jsonNotificationsRemoved: notifRemoved, jsonPrCancelled: prRemoved, jsonSaved: true });
     }
-    saveAppState(db);
-    report.actions.push({ jsonNotificationsRemoved: notifRemoved, jsonPrCancelled: prRemoved, jsonSaved: true });
   } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
     report.actions.push({ jsonCleanup: 'skipped', reason: e.message });
   }
 

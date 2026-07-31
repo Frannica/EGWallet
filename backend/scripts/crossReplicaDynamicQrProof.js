@@ -43,17 +43,48 @@ async function main() {
     `SELECT u.id, u.email, COALESCE(u.token_version,0) AS token_version, w.id AS wallet_id
        FROM users u JOIN wallets w ON w.user_id = u.id
       WHERE u.email LIKE '%@egwallet.e2e.test'
+        AND COALESCE(u.status,'active') NOT IN ('deleted','suspended')
         AND (w.type IS NULL OR w.type IN ('personal',''))
       ORDER BY u.created_at DESC LIMIT 20`
   );
   const by = new Map();
   for (const r of rows.rows) if (!by.has(r.email)) by.set(r.email, r);
-  const picked = [...by.values()].slice(0, 2);
+  let picked = [...by.values()].slice(0, 2);
+
+  // After cleanup, bootstrap two disposable accounts via register (JSON+PG).
   if (picked.length < 2) {
-    check('accounts', false, 'need e2e accounts');
-    await client.end();
-    process.exit(3);
+    const stamp = Date.now().toString(36);
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const regs = [];
+    for (const label of ['p', 'r']) {
+      const email = `e2e.${label}.${stamp}@egwallet.e2e.test`;
+      const reg = await api('POST', '/auth/register', {
+        headers: { 'x-device-id': `xr-${label}-${stamp}` },
+        body: {
+          email,
+          password: `E2e!${stamp}${label}Aa1`,
+          region: 'US',
+          username: `e2e${stamp}${label}`.slice(0, 20).replace(/[^a-z0-9_]/g, ''),
+        },
+      });
+      if (!(reg.status === 200 && reg.json.token && reg.json.user?.id && reg.json.walletId)) {
+        check('accounts', false, { status: reg.status, err: reg.json.error, email });
+        await client.end();
+        process.exit(3);
+      }
+      regs.push({
+        id: reg.json.user.id,
+        email,
+        token_version: Number(reg.json.user.tokenVersion || 0),
+        wallet_id: reg.json.walletId,
+        token: reg.json.token,
+      });
+      await sleep(1200);
+    }
+    picked = regs;
+    check('accounts_bootstrapped', true, { emails: regs.map((r) => r.email) });
   }
+
   const payer = picked[0];
   const recv = picked[1];
   const mint = (u) => jwt.sign(
@@ -61,8 +92,22 @@ async function main() {
     process.env.JWT_SECRET,
     { expiresIn: '20m' }
   );
-  const tokenP = mint(payer);
-  const tokenR = mint(recv);
+  const tokenP = payer.token || mint(payer);
+  const tokenR = recv.token || mint(recv);
+
+  // Ensure PG rows exist for register-created accounts
+  for (const u of [payer, recv]) {
+    await client.query(
+      `INSERT INTO users (id, email, password_hash, region, role, created_at)
+       VALUES ($1,$2,'e2e','US','individual',NOW()) ON CONFLICT (id) DO NOTHING`,
+      [u.id, u.email]
+    );
+    await client.query(
+      `INSERT INTO wallets (id, user_id, type, max_limit_usd, created_at)
+       VALUES ($1,$2,'personal',250000,NOW()) ON CONFLICT (id) DO NOTHING`,
+      [u.wallet_id, u.id]
+    );
+  }
 
   await client.query(
     `INSERT INTO wallet_balances(wallet_id,currency,amount) VALUES ($1,'USD',800)
