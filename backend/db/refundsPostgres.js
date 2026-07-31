@@ -302,11 +302,20 @@ async function commitRefundTransitionPostgres({
       (t) => t.type === 'deposit_refund' && t.refundRequestId === refund.id
     );
     if (tx) {
+      // transactions_stripe_intent_idx is UNIQUE for any non-null stripe_intent_id.
+      // The deposit row already owns the PaymentIntent id — deposit_refund must
+      // leave stripe_intent_id NULL (PI/refund ids live on refund_requests + memo).
+      const memo = [
+        tx.memo || 'Refund to original payment method',
+        tx.stripeIntentId ? `pi=${tx.stripeIntentId}` : null,
+        tx.stripeRefundId ? `re=${tx.stripeRefundId}` : null,
+        tx.refundRequestId ? `refund=${tx.refundRequestId}` : null,
+      ].filter(Boolean).join('; ');
       await client.query(
         `INSERT INTO transactions (
           id, from_wallet_id, to_wallet_id, amount, currency, type, status, memo,
           direction, stripe_intent_id, timestamp
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NULL,$10)
         ON CONFLICT (id) DO NOTHING`,
         [
           tx.id,
@@ -316,9 +325,8 @@ async function commitRefundTransitionPostgres({
           tx.currency,
           tx.type,
           tx.status,
-          tx.memo || null,
+          memo,
           tx.direction || 'out',
-          tx.stripeIntentId || null,
           msToDate(tx.timestamp || Date.now()),
         ]
       );
