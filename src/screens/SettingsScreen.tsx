@@ -15,6 +15,13 @@ import { useLanguage, SupportedLanguage } from '../i18n/LanguageContext';
 import { getApiErrorMessage } from '../utils/apiErrorMessage';
 import { fetchWithTokenRefresh } from '../utils/tokenRefresh';
 import { getStripeConnectCountries } from '../api/stripeConnect';
+import {
+  isPushOptedOutLocally,
+  setLocalPushOptOut,
+  setPushPreferenceOnBackend,
+  registerPushTokenWithBackend,
+  unregisterPushTokenFromBackend,
+} from '../notifications/pushRegistration';
 
 // Full list ordered: popular first, then alphabetical by code
 const CURRENCIES = Object.keys(CURRENCY_INFO).sort((a, b) => {
@@ -61,14 +68,33 @@ export default function SettingsScreen() {
   // backend has explicitly enabled it for the user's country. Fails closed:
   // any error fetching eligibility keeps the menu item hidden.
   const [stripeConnectEligible, setStripeConnectEligible] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(true);
 
   useEffect(() => {
     if (!auth.token) return;
     fetchWithTokenRefresh(`${API_BASE}/auth/me`, { headers: { Authorization: `Bearer ${auth.token}` } })
       .then(r => r.json())
-      .then(d => { if (d.username) setUsername(d.username); })
+      .then(d => {
+        if (d.username) setUsername(d.username);
+        if (typeof d.pushEnabled === 'boolean') setPushEnabled(d.pushEnabled);
+      })
       .catch(() => {});
+    isPushOptedOutLocally().then((optOut) => {
+      if (optOut) setPushEnabled(false);
+    }).catch(() => {});
   }, [auth.token]);
+
+  const handleTogglePush = async (enabled: boolean) => {
+    setPushEnabled(enabled);
+    await setLocalPushOptOut(!enabled);
+    if (!auth.token) return;
+    await setPushPreferenceOnBackend(auth.token, enabled);
+    if (enabled) {
+      await registerPushTokenWithBackend(auth.token);
+    } else {
+      await unregisterPushTokenFromBackend(auth.token);
+    }
+  };
 
   useEffect(() => {
     if (!auth.token) return;
@@ -450,6 +476,24 @@ export default function SettingsScreen() {
             </View>
           )}
           
+          <View style={styles.divider} />
+
+          <View style={styles.settingRow}>
+            <View style={styles.settingLeft}>
+              <Ionicons name="notifications" size={20} color="#007AFF" />
+              <View style={styles.settingTextContainer}>
+                <Text style={styles.settingTitle}>{t('settings.pushNotifications')}</Text>
+                <Text style={styles.settingSubtitle}>{t('settings.pushNotificationsSubtitle')}</Text>
+              </View>
+            </View>
+            <Switch
+              value={pushEnabled}
+              onValueChange={handleTogglePush}
+              trackColor={{ false: '#E1E8ED', true: '#007AFF' }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+
           <View style={styles.divider} />
           
           <TouchableOpacity

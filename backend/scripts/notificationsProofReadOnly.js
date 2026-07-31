@@ -1,8 +1,6 @@
 'use strict';
 /**
- * Separate in-app notification proof from Firebase push-delivery proof.
- *   railway run --service EGWalletSimple -- node backend/scripts/notificationsProofReadOnly.js
- *   (or: node backend/scripts/notificationsProofReadOnly.js)
+ * Separate in-app notification proof from Firebase/Expo push-delivery proof.
  */
 const BASE = process.env.PUBLIC_API_BASE || 'https://egwalletsimple-production.up.railway.app';
 const fs = require('fs');
@@ -25,53 +23,32 @@ async function fetchJson(url, ms = 8000) {
 }
 
 function codeHasPushSend() {
-  const roots = [
-    path.join(__dirname, '..', 'index.js'),
-    path.join(__dirname, '..', 'notifications.js'),
-    path.join(__dirname, '..', 'firebase.js'),
-  ];
-  const needles = ['messaging().send', 'admin.messaging', 'expo-server-sdk', 'ExpoPush', 'sendPushNotification'];
-  for (const file of roots) {
-    if (!fs.existsSync(file)) continue;
-    const src = fs.readFileSync(file, 'utf8');
-    if (needles.some((n) => src.includes(n))) return true;
-  }
-  // Broader scan of backend/*.js (non-recursive heavy dirs skipped)
-  const backendDir = path.join(__dirname, '..');
-  for (const name of fs.readdirSync(backendDir)) {
-    if (!name.endsWith('.js')) continue;
-    const src = fs.readFileSync(path.join(backendDir, name), 'utf8');
-    if (needles.some((n) => src.includes(n))) return true;
-  }
-  return false;
+  const file = path.join(__dirname, '..', 'pushNotifications.js');
+  if (!fs.existsSync(file)) return false;
+  const src = fs.readFileSync(file, 'utf8');
+  return src.includes('exp.host/--/api/v2/push/send') || src.includes('schedulePushForNotification');
 }
 
 (async () => {
   const health = await fetchJson(`${BASE}/health`);
-  const firebase = await fetchJson(`${BASE}/firebase/health`);
-  const pushPathExists = codeHasPushSend();
-
+  const pushReady = await fetchJson(`${BASE}/push/ready`);
   const report = {
     inAppNotifications: {
       status: 'IMPLEMENTED',
       evidence: [
         'GET /notifications',
         'PATCH /notifications/:id/read',
-        'createNotification() on QR/P2P/payroll writes notification records',
-        'production E2E previously observed notification counts > 0 after money ops',
+        'createNotification() on money ops',
       ],
-      proof: 'API + store — proven by authenticated GET /notifications after money movement',
+      proof: 'API + store — authenticated GET /notifications after money movement',
     },
-    firebasePushDelivery: {
-      status: pushPathExists ? 'CODE_PRESENT_UNPROVEN' : 'NOT_IMPLEMENTED',
-      firebaseHealth: firebase,
-      firebaseAdminLikely: !!(firebase && firebase.status === 200),
-      fcmOrExpoSendPathInBackend: pushPathExists,
-      reason: pushPathExists
-        ? 'Send path exists in code but physical-device delivery was not exercised in this run'
-        : 'Backend initializes firebase-admin for Auth/Firestore only; no messaging().send / Expo push send path found',
+    expoPushDelivery: {
+      status: codeHasPushSend() ? 'IMPLEMENTED_AWAITING_DEVICE_PROOF' : 'NOT_IMPLEMENTED',
+      codePathPresent: codeHasPushSend(),
+      pushReady,
+      healthPush: health.body?.push || null,
       exactActionRequiredFromOperator:
-        'Register a physical device Expo push token in the app, wire backend FCM/Expo send on createNotification (if still missing), then approve a controlled push test to that token. Until then, real push delivery cannot be proven.',
+        'On a physical phone running a build that includes the new pushRegistration JS: sign in, grant notification permission, confirm Settings > Push Notifications is ON, then POST /push/test-self with body {"confirm":"SEND_TEST_PUSH_TO_ME"} using your access token. Expect a system notification titled "EGWallet test push".',
     },
     gitCommit: health.body?.gitCommit || null,
     healthOk: health.status === 200,

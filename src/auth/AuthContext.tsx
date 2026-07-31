@@ -9,6 +9,10 @@ import { clearLocalUserData } from '../utils/localBalance';
 import { refreshAccessToken } from '../utils/tokenRefresh';
 import { detectCountryCode, autoDetectRegion } from '../config/regional';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  schedulePushRegistration,
+  unregisterPushTokenFromBackend,
+} from '../notifications/pushRegistration';
 
 const CURRENCY_DETECTED_KEY = '@egwallet:currency_detected';
 const LANGUAGE_STORAGE_KEY = '@egwallet:language';
@@ -69,6 +73,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const profile = await apiMe(newToken);
         setUser(profile);
+        schedulePushRegistration(newToken);
       } catch {
         // Profile unavailable but token is valid — not critical
       }
@@ -88,6 +93,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const profile = await apiMe(t);
             setUser(profile);
             syncLanguageToBackend(t);
+            schedulePushRegistration(t);
           } catch (apiError) {
             // Access token invalid — try refresh token before signing out
             if (__DEV__) console.warn('Token restore failed, trying refresh...', apiError);
@@ -207,10 +213,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         setUser(profile);
         syncLanguageToBackend(t);
+        schedulePushRegistration(t);
       } catch (profileError) {
         // Token saved but profile fetch failed - still allow login
         if (__DEV__) console.warn('Profile fetch failed after login', profileError);
         setUser({ id: res.userId || 'unknown', email });
+        schedulePushRegistration(t);
       }
     } catch (error: any) {
       // Clear any partial state
@@ -258,10 +266,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const profile = await apiMe(t);
         setUser(profile);
+        schedulePushRegistration(t);
       } catch (profileError) {
         // Token saved but profile fetch failed - still allow signup
         if (__DEV__) console.warn('Profile fetch failed after signup', profileError);
         setUser({ id: res.userId || 'unknown', email });
+        schedulePushRegistration(t);
       }
     } catch (error: any) {
       // Clear any partial state
@@ -272,6 +282,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }
 
   async function signOut() {
+    // Unregister push for this device before clearing credentials.
+    try {
+      await unregisterPushTokenFromBackend(token);
+    } catch (e) {
+      if (__DEV__) console.warn('Push unregister failed:', e);
+    }
+
     // Revoke refresh token on backend.
     // Send the refresh token even when the access token is expired — the server
     // verifies the refresh JWT itself and does not require an Authorization header.

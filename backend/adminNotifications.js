@@ -5,6 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const { adminAuth, requirePermission, adminCsrf } = require('./adminAuth');
 const { loadAppState, saveAppState } = require('./db/appStateStore');
 const { logAdminAction } = require('./adminAudit');
+const { schedulePushForNotification } = require('./pushNotifications');
 
 const router = express.Router();
 
@@ -13,7 +14,7 @@ const VALID_AUDIENCES = ['user_ids', 'all', 'country', 'kyc_tier', 'account_stat
 
 function writeUserNotification(db, userId, type, title, body, metadata = {}) {
   if (!db.notifications) db.notifications = [];
-  db.notifications.unshift({
+  const notification = {
     id: uuidv4(),
     userId,
     type,
@@ -22,7 +23,19 @@ function writeUserNotification(db, userId, type, title, body, metadata = {}) {
     read: false,
     metadata,
     createdAt: Date.now(),
-  });
+  };
+  db.notifications.unshift(notification);
+  try {
+    schedulePushForNotification({
+      userId,
+      notificationId: notification.id,
+      type,
+      title,
+      body,
+      metadata,
+    });
+  } catch (_) {}
+  return notification;
 }
 
 function resolveTargetUserIds(db, criteria) {

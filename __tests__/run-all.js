@@ -35,6 +35,7 @@ const SUITES = [
   ['Virtual card display — safe masking across API shapes', require('./virtual-card-display.node.test.js')],
   ['Receipt reference integrity — no fabricated references, real IDs only', require('./receipt-reference-integrity.node.test.js')],
   ['Card withdrawal removed + Stripe refund UI wired', require('./card-withdrawal-and-refund-ui.node.test.js')],
+  ['Push notifications — Expo token register + non-blocking delivery wiring', require('./regression/push-notifications.test.js')],
 ];
 
 // ── Runner ────────────────────────────────────────────────────────────────────

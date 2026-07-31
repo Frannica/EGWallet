@@ -69,6 +69,8 @@ const adminUsersRouter = require('./adminUsers');
 const adminSupportRouter = require('./adminSupport');
 const adminDisputesRouter = require('./adminDisputes');
 const adminNotificationsRouter = require('./adminNotifications');
+const { createPushRouter } = require('./pushRoutes');
+const { schedulePushForNotification, getPushProviderReadiness, setPushLogger } = require('./pushNotifications');
 const adminFraudRouter = require('./adminFraud');
 const adminLedgerAuditRouter = require('./adminLedgerAudit');
 const adminStatsRouter = require('./adminStats');
@@ -444,6 +446,7 @@ logger.add(new winston.transports.Console({
     })
   )
 }));
+setPushLogger(logger);
 
 // Global crash handlers — catch anything that could silently kill the process
 process.on('uncaughtException', (err) => {
@@ -3012,6 +3015,7 @@ app.get('/health', (req, res) => {
     // until Stripe explicitly approves EGWallet's business model for Connect.
     stripeConnectEnabled: isStripeConnectEnabled(),
     stripeConnectWebhookConfigured: !!process.env.STRIPE_CONNECT_WEBHOOK_SECRET,
+    push: getPushProviderReadiness(),
   };
   res.status(200).json(healthStatus);
 });
@@ -3443,11 +3447,26 @@ app.post('/auth/login',
   });
 });
 
-app.get('/auth/me', authMiddleware, (req, res) => {
+app.get('/auth/me', authMiddleware, async (req, res) => {
   const db = loadAppState();
   const user = db.users.find(u => u.id === req.user.userId);
   if (!user) return res.status(404).json({ error: t('error_user_not_found', req.lang || 'en') });
-  res.json({ id: user.id, email: user.email, username: user.username || null, preferredCurrency: user.preferredCurrency || 'USD', autoConvertIncoming: user.autoConvertIncoming !== false, kycTier: user.kycTier || 0, kycStatus: user.kycStatus || 'pending', tierLimits: getTierLimitsForUser(user) });
+  let pushEnabled = user.pushEnabled !== false;
+  try {
+    const { isUserPushEnabled } = require('./db/pushTokens');
+    pushEnabled = await isUserPushEnabled(req.user.userId);
+  } catch (_) {}
+  res.json({
+    id: user.id,
+    email: user.email,
+    username: user.username || null,
+    preferredCurrency: user.preferredCurrency || 'USD',
+    autoConvertIncoming: user.autoConvertIncoming !== false,
+    kycTier: user.kycTier || 0,
+    kycStatus: user.kycStatus || 'pending',
+    tierLimits: getTierLimitsForUser(user),
+    pushEnabled,
+  });
 });
 
 // Set or update @username — persists to database, enforces uniqueness
@@ -4833,10 +4852,11 @@ app.get('/rates', (req, res) => {
 /**
  * Internal helper — write a notification record into db.notifications.
  * Called by deposit/withdrawal/send endpoints after successful operations.
+ * Schedules Expo push asynchronously — never awaits, never throws into money paths.
  */
 function createNotification(db, userId, type, title, body, metadata = {}) {
   if (!db.notifications) db.notifications = [];
-  db.notifications.unshift({
+  const notification = {
     id: uuidv4(),
     userId,
     type,      // 'money_received' | 'money_sent' | 'deposit' | 'withdrawal' | 'failed'
@@ -4845,10 +4865,24 @@ function createNotification(db, userId, type, title, body, metadata = {}) {
     read: false,
     metadata,
     createdAt: Date.now(),
-  });
+  };
+  db.notifications.unshift(notification);
   // Keep at most 100 notifications per user in the flat-file store
   db.notifications = db.notifications.filter(n => n.userId === userId).slice(0, 100)
     .concat(db.notifications.filter(n => n.userId !== userId));
+  try {
+    schedulePushForNotification({
+      userId,
+      notificationId: notification.id,
+      type,
+      title,
+      body,
+      metadata,
+    });
+  } catch (_) {
+    // Push must never break financial notification persistence
+  }
+  return notification;
 }
 
 // GET /notifications — list all for authenticated user (newest first)
@@ -4878,6 +4912,9 @@ app.patch('/notifications/:id/read', authMiddleware, (req, res) => {
   saveAppState(db);
   res.json({ ok: true });
 });
+
+// Expo / FCM push token registration + preferences (authenticated)
+app.use('/push', createPushRouter({ authMiddleware }));
 
 // FX Quote — preview a cross-currency conversion before sending
 // GET /fx-quote?from=XAF&to=NGN&amount=500000  (amount in minor units of 'from')
