@@ -120,7 +120,11 @@ function buildRefundLedgerNarrative(ledgerEntries = []) {
     } else if (type === 'deposit_refund_release') {
       meaning = 'Hold released — available balance temporarily restored (failure / cancel path)';
     } else if (type === 'deposit_refund_debit') {
-      meaning = 'Final debit — hold cleared without restoring available (Stripe success, normal path)';
+      if (/reconcile|false_release|redebit/i.test(String(l.note || ''))) {
+        meaning = 'Final recovery debit — available corrected after temporary restoration; Stripe had already succeeded';
+      } else {
+        meaning = 'Final debit — hold cleared without restoring available (Stripe success, normal path)';
+      }
     } else if (type === 'deposit_refund_redebit') {
       meaning = 'Recovery debit — available re-debited after a false restoration; Stripe had already succeeded';
     }
