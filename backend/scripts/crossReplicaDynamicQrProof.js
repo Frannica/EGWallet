@@ -156,6 +156,75 @@ async function main() {
     check('pg_qr_marked_used', row.rowCount === 1 && row.rows[0].status === 'used' && row.rows[0].used === true, row.rows[0]);
   }
 
+  // Failure restoration: insufficient funds must not mark QR used and must leave payee balance unchanged
+  const failQr = await api('POST', '/qr/dynamic', {
+    token: tokenR,
+    body: { amount: 999999, currency: 'USD', memo: 'fail-restore', expiryMinutes: 10 },
+  });
+  const beforePayee = await client.query(
+    `SELECT amount FROM wallet_balances WHERE wallet_id=$1 AND currency='USD'`,
+    [recv.wallet_id]
+  );
+  const beforeAmt = Number(beforePayee.rows[0]?.amount || 0);
+  const failPay = await api('POST', '/qr/pay', {
+    token: tokenP,
+    headers: { 'Idempotency-Key': `xr-fail-${randomUUID()}` },
+    body: { qrString: failQr.json.qrCode, fromWalletId: payer.wallet_id, idempotencyKey: `xr-fail-${randomUUID()}` },
+  });
+  const afterPayee = await client.query(
+    `SELECT amount FROM wallet_balances WHERE wallet_id=$1 AND currency='USD'`,
+    [recv.wallet_id]
+  );
+  const failQrRow = failQr.json.requestId
+    ? (await client.query(`SELECT status, used_at FROM qr_codes WHERE id=$1`, [failQr.json.requestId])).rows[0]
+    : null;
+  const failOk = failPay.status >= 400
+    && Number(afterPayee.rows[0]?.amount || 0) === beforeAmt
+    && failQrRow
+    && failQrRow.status === 'pending'
+    && !failQrRow.used_at;
+  check('failure_restoration_no_debit', failOk, {
+    status: failPay.status, code: failPay.json.code, err: failPay.json.error,
+    payeeBefore: beforeAmt, payeeAfter: Number(afterPayee.rows[0]?.amount || 0),
+    qrStatus: failQrRow?.status, usedAt: failQrRow?.used_at || null,
+  });
+
+  // Simultaneous scans of one fresh QR — exactly one debit
+  const raceQr = await api('POST', '/qr/dynamic', {
+    token: tokenR,
+    body: { amount: 15, currency: 'USD', memo: 'race', expiryMinutes: 10 },
+  });
+  const balBeforeRace = await client.query(
+    `SELECT amount FROM wallet_balances WHERE wallet_id=$1 AND currency='USD'`,
+    [payer.wallet_id]
+  );
+  const payerBefore = Number(balBeforeRace.rows[0]?.amount || 0);
+  const [raceA, raceB] = await Promise.all([
+    api('POST', '/qr/pay', {
+      token: tokenP,
+      headers: { 'Idempotency-Key': `xr-race-a-${randomUUID()}` },
+      body: { qrString: raceQr.json.qrCode, fromWalletId: payer.wallet_id, idempotencyKey: `xr-race-a-${randomUUID()}` },
+    }),
+    api('POST', '/qr/pay', {
+      token: tokenP,
+      headers: { 'Idempotency-Key': `xr-race-b-${randomUUID()}` },
+      body: { qrString: raceQr.json.qrCode, fromWalletId: payer.wallet_id, idempotencyKey: `xr-race-b-${randomUUID()}` },
+    }),
+  ]);
+  const successes = [raceA, raceB].filter((r) => r.status === 200 && r.json.success === true).length;
+  const blocked = [raceA, raceB].filter((r) =>
+    r.status >= 400 && (r.json.code === 'USED' || /used|already/i.test(String(r.json.error || '')))
+  ).length;
+  const balAfterRace = await client.query(
+    `SELECT amount FROM wallet_balances WHERE wallet_id=$1 AND currency='USD'`,
+    [payer.wallet_id]
+  );
+  const payerAfter = Number(balAfterRace.rows[0]?.amount || 0);
+  const debit = payerBefore - payerAfter;
+  check('simultaneous_scan_one_debit', successes === 1 && blocked === 1 && debit === 15, {
+    successes, blocked, debit, a: { status: raceA.status, code: raceA.json.code }, b: { status: raceB.status, code: raceB.json.code },
+  });
+
   await client.end();
   const summary = {
     pass: checks.filter((c) => c.result === 'PASS').length,
