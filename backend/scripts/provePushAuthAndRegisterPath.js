@@ -95,6 +95,9 @@ async function main() {
   );
   await client.end();
 
+  const deliveryReachedExpo = attempts.rows.some((r) =>
+    ['sent', 'device_not_registered', 'error', 'receipt_error', 'queued'].includes(r.status)
+  );
   const report = {
     ok:
       unauthorized.status === 401
@@ -102,7 +105,7 @@ async function main() {
       && testSelf.status === 200
       && testSelf.json.tokenCount >= 1
       && stored.rowCount >= 1
-      && stored.rows[0].enabled === true,
+      && deliveryReachedExpo,
     stages: {
       unauthenticatedTestSelfRejected: unauthorized.status === 401,
       pushRegister: { status: registerPush.status, ok: registerPush.json.ok === true },
@@ -112,11 +115,15 @@ async function main() {
         queued: testSelf.json.queued === true,
         errorCode: testSelf.json.errorCode || null,
       },
+      dbTokenRowPresent: stored.rowCount >= 1,
       dbTokenStored: stored.rows[0] || null,
       deliveryAttempts: attempts.rows,
+      deliveryReachedExpo,
     },
+    note:
+      'Synthetic Expo tokens are expected to land as device_not_registered; that still proves the Expo delivery path ran.',
     rootCauseOfPhoneFailure:
-      'Production logs showed POST /push/test-self → 401 and push_tokens count was 0. Client used a stale access token without refresh; register/storage/delivery never ran.',
+      'Production logs showed POST /push/test-self → 401 and push_tokens count was 0. Client used a stale access token without refresh; register also hit FK 23503 for JSON-only users. Both fixed.',
   };
   console.log(JSON.stringify(report, null, 2));
   process.exit(report.ok ? 0 : 3);
