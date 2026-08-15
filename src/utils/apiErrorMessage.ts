@@ -35,6 +35,9 @@ const ERROR_CODE_TO_I18N: Record<string, string> = {
   // usable cache) — the backend FAILS CLOSED and rejects before any wallet
   // hold. This is safely retryable: no funds moved, just try again shortly.
   PROVIDER_VALIDATION_UNAVAILABLE: 'send.corridorValidationUnavailable',
+  GRID_ONBOARDING_REQUIRED: 'send.gridOnboardingRequired',
+  GRID_BANK_ONLY: 'send.gridBankOnly',
+  GRID_BANK_DETAILS_REQUIRED: 'send.gridBankDetailsRequired',
 };
 
 /** Normalize backend error text for legacy responses without errorCode. */

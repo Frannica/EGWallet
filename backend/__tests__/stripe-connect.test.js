@@ -32,11 +32,24 @@ const payoutProviders = require('../payoutProviders');
 const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
 
 function snapshotEnv() {
-  return {
+  const snap = {
     STRIPE_CONNECT_ENABLED: process.env.STRIPE_CONNECT_ENABLED,
     STRIPE_CONNECT_APPROVED_COUNTRIES: process.env.STRIPE_CONNECT_APPROVED_COUNTRIES,
     STRIPE_CONNECT_WEBHOOK_SECRET: process.env.STRIPE_CONNECT_WEBHOOK_SECRET,
+    GRID_CLIENT_ID: process.env.GRID_CLIENT_ID,
+    GRID_CLIENT_SECRET: process.env.GRID_CLIENT_SECRET,
+    GRID_ENVIRONMENT: process.env.GRID_ENVIRONMENT,
+    GRID_API_BASE_URL: process.env.GRID_API_BASE_URL,
+    GRID_SANDBOX_COUNTRIES: process.env.GRID_SANDBOX_COUNTRIES,
   };
+  // These routing tests isolate Stripe Connect. Grid sandbox routing is
+  // covered in grid-sandbox.test.js.
+  delete process.env.GRID_CLIENT_ID;
+  delete process.env.GRID_CLIENT_SECRET;
+  delete process.env.GRID_ENVIRONMENT;
+  delete process.env.GRID_API_BASE_URL;
+  delete process.env.GRID_SANDBOX_COUNTRIES;
+  return snap;
 }
 function restoreEnv(snap) {
   for (const [k, v] of Object.entries(snap)) {

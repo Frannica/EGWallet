@@ -42,6 +42,10 @@ function mapWithdrawalRow(w) {
     payout_error: w.payoutError || null,
     processed_by: w.processedBy || null,
     internal_note: w.internalNote || null,
+    grid_customer_id: w.gridCustomerId || null,
+    grid_external_account_id: w.gridExternalAccountId || null,
+    grid_quote_id: w.gridQuoteId || null,
+    grid_transaction_id: w.gridTransactionId || null,
     created_at: msToDate(w.createdAt) || new Date(),
     approved_at: msToDate(w.approvedAt),
     paid_at: msToDate(w.paidAt),
@@ -58,10 +62,11 @@ async function upsertWithdrawal(client, w) {
       method, is_international, country, bank_code, branch_code, bank_name, account_number,
       account_holder_name, iban, swift_bic, account_mask, bank_name_display, status, status_history,
       hold_released, refund_issued, payout_attempts, payout_provider, payout_reference, payout_dispatch_ref,
-      payout_error, processed_by, internal_note, created_at, approved_at, paid_at, failed_at, reversed_at
+      payout_error, processed_by, internal_note, created_at, approved_at, paid_at, failed_at, reversed_at,
+      grid_customer_id, grid_external_account_id, grid_quote_id, grid_transaction_id
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23::jsonb,
-      $24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37
+      $24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41
     )
     ON CONFLICT (id) DO UPDATE SET
       status = EXCLUDED.status,
@@ -78,7 +83,11 @@ async function upsertWithdrawal(client, w) {
       approved_at = EXCLUDED.approved_at,
       paid_at = EXCLUDED.paid_at,
       failed_at = EXCLUDED.failed_at,
-      reversed_at = EXCLUDED.reversed_at`,
+      reversed_at = EXCLUDED.reversed_at,
+      grid_customer_id = COALESCE(EXCLUDED.grid_customer_id, withdrawals.grid_customer_id),
+      grid_external_account_id = COALESCE(EXCLUDED.grid_external_account_id, withdrawals.grid_external_account_id),
+      grid_quote_id = COALESCE(EXCLUDED.grid_quote_id, withdrawals.grid_quote_id),
+      grid_transaction_id = COALESCE(EXCLUDED.grid_transaction_id, withdrawals.grid_transaction_id)`,
     [
       row.id,
       row.idempotency_key,
@@ -117,6 +126,10 @@ async function upsertWithdrawal(client, w) {
       row.paid_at,
       row.failed_at,
       row.reversed_at,
+      row.grid_customer_id,
+      row.grid_external_account_id,
+      row.grid_quote_id,
+      row.grid_transaction_id,
     ]
   );
 }

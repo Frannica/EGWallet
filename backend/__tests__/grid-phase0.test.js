@@ -18,7 +18,7 @@ const {
   assertGridEnvOrExit,
 } = require('../grid/gridEnv');
 const {
-  PHASE0_ALLOWED_GET_PATHS,
+  isAllowedPath,
   checkGridConnectivity,
   probeGridConnectivity,
   getGridHealthFlags,
@@ -68,7 +68,8 @@ const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf
 test('official Grid constants match Lightspark docs (2025-10-13 sandbox URL)', () => {
   assert.equal(OFFICIAL_GRID_API_BASE_URL, 'https://api.lightspark.com/grid/2025-10-13');
   assert.equal(ALLOWED_GRID_ENVIRONMENT, 'sandbox');
-  assert.deepEqual([...PHASE0_ALLOWED_GET_PATHS], ['/config']);
+  assert.equal(isAllowedPath('GET', '/config'), true);
+  assert.equal(isAllowedPath('POST', '/transfer-in'), false);
 });
 
 test('missing Grid credentials: not configured when no GRID_* vars are set', () => {
@@ -219,13 +220,12 @@ test('invalid Grid credentials: GET /config 401 is unauthorized and not ok', asy
     clearGridEnv();
     setValidSandboxEnv();
     const result = await checkGridConnectivity({
-      axiosImpl: {
-        async get(url, config) {
-          assert.equal(url, `${OFFICIAL_GRID_API_BASE_URL}/config`);
-          assert.equal(config.auth.username, 'test-grid-client-id');
-          assert.equal(config.auth.password, SECRET_CANARY);
-          return { status: 401, data: { message: 'nope' } };
-        },
+      axiosImpl: async (config) => {
+        assert.equal(config.url, `${OFFICIAL_GRID_API_BASE_URL}/config`);
+        assert.equal(config.method, 'GET');
+        assert.equal(config.auth.username, 'test-grid-client-id');
+        assert.equal(config.auth.password, SECRET_CANARY);
+        return { status: 401, data: { message: 'nope' } };
       },
     });
     assert.equal(result.ok, false);
@@ -248,10 +248,8 @@ test('valid sandbox credentials: GET /config 200 marks connectivity ok (no body 
     clearGridEnv();
     setValidSandboxEnv();
     const result = await probeGridConnectivity({
-      axiosImpl: {
-        async get() {
-          return { status: 200, data: { webhookUrl: 'https://example.invalid', apiSecret: SECRET_CANARY } };
-        },
+      axiosImpl: async () => {
+        return { status: 200, data: { webhookUrl: 'https://example.invalid', apiSecret: SECRET_CANARY } };
       },
     });
     assert.equal(result.ok, true);
@@ -260,7 +258,12 @@ test('valid sandbox credentials: GET /config 200 marks connectivity ok (no body 
     const flags = getGridHealthFlags();
     assert.equal(flags.gridSandboxConfigured, true);
     assert.equal(flags.gridConnectivityOk, true);
-    assert.deepEqual(Object.keys(flags).sort(), ['gridConnectivityOk', 'gridSandboxConfigured']);
+    assert.equal(flags.gridWebhookPublicKeyConfigured, false);
+    assert.deepEqual(Object.keys(flags).sort(), [
+      'gridConnectivityOk',
+      'gridSandboxConfigured',
+      'gridWebhookPublicKeyConfigured',
+    ]);
     assert.doesNotMatch(JSON.stringify(result), new RegExp(SECRET_CANARY));
     assert.doesNotMatch(JSON.stringify(flags), new RegExp(SECRET_CANARY));
   } finally {
@@ -275,11 +278,9 @@ test('connectivity check does not run when Grid is not configured', async () => 
   try {
     clearGridEnv();
     const result = await checkGridConnectivity({
-      axiosImpl: {
-        async get() {
-          called = true;
-          return { status: 200, data: {} };
-        },
+      axiosImpl: async () => {
+        called = true;
+        return { status: 200, data: {} };
       },
     });
     assert.equal(called, false);
@@ -290,41 +291,48 @@ test('connectivity check does not run when Grid is not configured', async () => 
   }
 });
 
-test('Phase 0 Grid client is GET /config only — no payment or customer paths in source', () => {
-  assert.doesNotMatch(gridClientSource, /\.post\s*\(/);
-  assert.doesNotMatch(gridClientSource, /method:\s*['"]POST['"]/);
-  assert.doesNotMatch(gridClientSource, /\/customers/);
-  assert.doesNotMatch(gridClientSource, /\/quotes/);
-  assert.doesNotMatch(gridClientSource, /\/transfer-out/);
+test('Grid client allowlists official 2025-10-13 paths and rejects invented ones', () => {
+  assert.equal(isAllowedPath('GET', '/config'), true);
+  assert.equal(isAllowedPath('POST', '/customers'), true);
+  assert.equal(isAllowedPath('POST', '/customers/external-accounts'), true);
+  assert.equal(isAllowedPath('POST', '/quotes'), true);
+  assert.equal(isAllowedPath('POST', '/transfer-out'), true);
+  assert.equal(isAllowedPath('POST', '/transfer-in'), false);
+  assert.equal(isAllowedPath('DELETE', '/customers'), false);
   assert.doesNotMatch(gridClientSource, /\/transfer-in/);
-  assert.doesNotMatch(gridEnvSource, /BEGIN PUBLIC KEY/);
-  assert.doesNotMatch(gridEnvSource, /GRID_WEBHOOK_PUBLIC_KEY/);
-  assert.doesNotMatch(gridClientSource, /GRID_WEBHOOK_PUBLIC_KEY/);
+  assert.match(gridEnvSource, /GRID_WEBHOOK_PUBLIC_KEY/);
 });
 
-test('payoutRouter is unchanged: Kora eight countries, US/UK/EU still null', () => {
-  for (const country of ['NG', 'KE', 'ZA', 'GH', 'CI', 'CM', 'EG', 'TZ']) {
-    assert.equal(payoutRouter(country), 'kora', `${country} must stay on Kora`);
-  }
-  assert.equal(payoutRouter('US'), null);
-  assert.equal(payoutRouter('GB'), null);
-  assert.equal(payoutRouter('DE'), null);
-  assert.equal(payoutRouter('lightspark'), null);
-  assert.notEqual(payoutRouter('NG'), 'lightspark');
-});
-
-test('isPayoutProviderReady is unchanged for Kora and unsupported countries', () => {
-  const snap = {
-    KORA_LIVE_SECRET_KEY: process.env.KORA_LIVE_SECRET_KEY,
-  };
+test('payoutRouter keeps Kora eight countries and leaves US/UK/EU null when Grid is unset', () => {
+  const snap = snapshotGridEnv();
   try {
+    clearGridEnv();
+    for (const country of ['NG', 'KE', 'ZA', 'GH', 'CI', 'CM', 'EG', 'TZ']) {
+      assert.equal(payoutRouter(country), 'kora', `${country} must stay on Kora`);
+    }
+    assert.equal(payoutRouter('US'), null);
+    assert.equal(payoutRouter('GB'), null);
+    assert.equal(payoutRouter('DE'), null);
+    assert.equal(payoutRouter('lightspark'), null);
+    assert.notEqual(payoutRouter('NG'), 'lightspark');
+  } finally {
+    restoreGridEnv(snap);
+  }
+});
+
+test('isPayoutProviderReady is unchanged for Kora and unsupported countries when Grid is unset', () => {
+  const snap = snapshotGridEnv();
+  const koraSnap = process.env.KORA_LIVE_SECRET_KEY;
+  try {
+    clearGridEnv();
     process.env.KORA_LIVE_SECRET_KEY = 'sk_live_test';
     assert.equal(isPayoutProviderReady('NG'), true);
     assert.equal(isPayoutProviderReady('US'), false);
     assert.equal(isPayoutProviderReady('GQ'), false);
   } finally {
-    if (snap.KORA_LIVE_SECRET_KEY === undefined) delete process.env.KORA_LIVE_SECRET_KEY;
-    else process.env.KORA_LIVE_SECRET_KEY = snap.KORA_LIVE_SECRET_KEY;
+    if (koraSnap === undefined) delete process.env.KORA_LIVE_SECRET_KEY;
+    else process.env.KORA_LIVE_SECRET_KEY = koraSnap;
+    restoreGridEnv(snap);
   }
 });
 
@@ -334,10 +342,6 @@ test('dispatchToProvider is fail-closed: unknown providers never call Kora', asy
   const originalKora = require('../payoutProviders')._test.koraPayout;
   assert.equal(typeof originalKora, 'function');
 
-  await assert.rejects(
-    () => dispatchToProvider('lightspark', { id: 'wd-grid' }, logger),
-    /No payout executor for provider lightspark/
-  );
   await assert.rejects(
     () => dispatchToProvider('unknown', { id: 'wd-x' }, logger),
     /No payout executor for provider unknown/

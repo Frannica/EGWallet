@@ -13,7 +13,8 @@
     "test:admin": "node --test __tests__/admin-dashboard.test.js",
     "test:admin-platform": "node --test __tests__/admin-platform.test.js",
     "test:admin-all": "node --test __tests__/admin-dashboard.test.js __tests__/admin-platform.test.js __tests__/admin-withdrawals.test.js __tests__/withdrawals-response-shape.test.js __tests__/admin-currencies.test.js __tests__/admin-user-activity.test.js __tests__/admin-virtual-card-charges.test.js && node __tests__/admin-withdrawals-ui.test.mjs",
-    "test:payout:phaseA": "node --test __tests__/payout/*.test.js"
+    "test:payout:phaseA": "node --test __tests__/payout/*.test.js",
+    "test:grid": "node --test __tests__/grid-phase0.test.js __tests__/grid-sandbox.test.js __tests__/kora-all-countries.test.js __tests__/stripe-connect.test.js"
   },
   "dependencies": {
     "axios": "^1.6.0",

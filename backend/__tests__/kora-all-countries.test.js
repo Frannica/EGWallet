@@ -60,7 +60,20 @@ function snapshotEnv() {
     KORA_LIVE_PUBLIC_KEY: process.env.KORA_LIVE_PUBLIC_KEY,
     STRIPE_CONNECT_READY: process.env.STRIPE_CONNECT_READY,
     STRIPE_CONNECT_ACCOUNT: process.env.STRIPE_CONNECT_ACCOUNT,
+    GRID_CLIENT_ID: process.env.GRID_CLIENT_ID,
+    GRID_CLIENT_SECRET: process.env.GRID_CLIENT_SECRET,
+    GRID_ENVIRONMENT: process.env.GRID_ENVIRONMENT,
+    GRID_API_BASE_URL: process.env.GRID_API_BASE_URL,
+    GRID_SANDBOX_COUNTRIES: process.env.GRID_SANDBOX_COUNTRIES,
   };
+}
+
+function clearGridEnv() {
+  delete process.env.GRID_CLIENT_ID;
+  delete process.env.GRID_CLIENT_SECRET;
+  delete process.env.GRID_ENVIRONMENT;
+  delete process.env.GRID_API_BASE_URL;
+  delete process.env.GRID_SANDBOX_COUNTRIES;
 }
 function restoreEnv(snap) {
   for (const [k, v] of Object.entries(snap)) {
@@ -127,12 +140,18 @@ test('payoutRouter NEVER falls through to "stripe" for a Kora-unsupported Africa
 });
 
 test('payoutRouter returns null (COUNTRY_NOT_SUPPORTED) for rest-of-world / unknown countries — no legacy stripe fallback', () => {
-  assert.equal(payoutRouter('US'), null);
-  assert.equal(payoutRouter('FR'), null);
-  assert.equal(payoutRouter('GB'), null);
-  assert.equal(payoutRouter(''), null);
-  assert.equal(payoutRouter(null), null);
-  assert.equal(payoutRouter(undefined), null);
+  const snap = snapshotEnv();
+  try {
+    clearGridEnv();
+    assert.equal(payoutRouter('US'), null);
+    assert.equal(payoutRouter('FR'), null);
+    assert.equal(payoutRouter('GB'), null);
+    assert.equal(payoutRouter(''), null);
+    assert.equal(payoutRouter(null), null);
+    assert.equal(payoutRouter(undefined), null);
+  } finally {
+    restoreEnv(snap);
+  }
 });
 
 // ─── 3. isPayoutProviderReady: null-provider countries are never "ready" ──
@@ -208,8 +227,14 @@ test('resolveWithdrawalCountry: explicit country always wins over region/currenc
 });
 
 test('resolveWithdrawalCountry: unresolvable currency + no region/country returns null (never guesses)', () => {
-  assert.equal(resolveWithdrawalCountry({ country: null, userRegion: null, currency: 'USD' }), null);
-  assert.equal(resolveWithdrawalCountry({ country: null, userRegion: null, currency: 'EUR' }), null);
+  const snap = snapshotEnv();
+  try {
+    clearGridEnv();
+    assert.equal(resolveWithdrawalCountry({ country: null, userRegion: null, currency: 'USD' }), null);
+    assert.equal(resolveWithdrawalCountry({ country: null, userRegion: null, currency: 'EUR' }), null);
+  } finally {
+    restoreEnv(snap);
+  }
 });
 
 // ─── 5. Per-country method support (bank vs mobile-money) ────────────────

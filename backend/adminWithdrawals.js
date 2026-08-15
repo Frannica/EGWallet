@@ -12,7 +12,7 @@ const axios   = require('axios');
 const router  = express.Router();
 const { adminAuth, requirePermission, adminCsrf } = require('./adminAuth');
 const { adminTransition, markWithdrawalPaid, markWithdrawalFailed } = require('./withdrawalEngine');
-const { payoutRouter, getKoraSecretKey } = require('./payoutProviders');
+const { payoutRouter, getKoraSecretKey, queryLightsparkStatus } = require('./payoutProviders');
 const { commitWithdrawalStateUpdate } = require('./db/withdrawalsPostgres');
 const { loadAppState, saveAppState } = require('./db/appStateStore');
 const { logAdminAction } = require('./adminAudit');
@@ -332,9 +332,17 @@ router.post('/:id/reconcile', adminAuth, adminCsrf, requirePermission('withdrawa
         else                                                            providerStatus = 'pending';
       }
 
+    } else if (provider === 'lightspark') {
+      const gridRef = w.payoutReference || w.gridTransactionId || w.grid_transaction_id || ref;
+      const queried = await queryLightsparkStatus(gridRef);
+      providerDetail = { reference: queried.reference, status: queried.status };
+      if (queried.status === 'paid') providerStatus = 'settled';
+      else if (queried.status === 'failed') providerStatus = 'failed';
+      else providerStatus = 'pending';
+
     } else {
       return res.status(400).json({
-        error: `Provider '${provider}' is not configured — cannot query status automatically. Configure STRIPE_SECRET_KEY or KORA_LIVE_SECRET_KEY.`,
+        error: `Provider '${provider}' is not configured — cannot query status automatically. Configure STRIPE_SECRET_KEY, KORA_LIVE_SECRET_KEY, or Lightspark Grid sandbox.`,
         ref,
         provider,
       });

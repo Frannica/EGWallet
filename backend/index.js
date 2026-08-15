@@ -105,6 +105,9 @@ const {
   probeGridConnectivity,
   getGridHealthFlags,
 } = require('./grid/gridClient');
+const { createGridRouter } = require('./grid/gridRoutes');
+const { handleGridWebhook } = require('./grid/gridWebhook');
+const { getGridCustomerByUserId } = require('./db/gridPostgres');
 const {
   validateKoraWithdrawalPreHold,
   getMobileMoneyOperators: getMobileMoneyOperatorsForApp,
@@ -2804,6 +2807,38 @@ app.post('/webhooks/stripe-connect',
   }
 );
 
+// ─── POST /webhooks/grid ────────────────────────────────────────────────────
+// Lightspark Grid sandbox webhooks. Signature is X-Grid-Signature over the
+// exact raw body, verified with GRID_WEBHOOK_PUBLIC_KEY (PEM). The endpoint
+// exists before the public key is configured so the Railway URL can be
+// registered in the Lightspark dashboard first; verification then returns 503
+// until the PEM is set. Incoming payments never credit EGWallet wallets.
+app.post('/webhooks/grid',
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    let parsedBody;
+    try {
+      const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || '', 'utf8');
+      parsedBody = JSON.parse(raw.toString('utf8'));
+    } catch (_err) {
+      return res.status(400).json({ error: 'Invalid JSON' });
+    }
+    try {
+      const result = await handleGridWebhook({
+        rawBody: req.body,
+        signatureHeader: req.headers['x-grid-signature'],
+        parsedBody,
+        logger,
+        withBalanceMutex,
+      });
+      return res.status(result.status).json(result.body);
+    } catch (err) {
+      logger.error('[webhook/grid] Processing error', { error: err.message });
+      return res.status(500).json({ error: 'Processing failed' });
+    }
+  }
+);
+
 // ─── POST /webhooks/kora ────────────────────────────────────────────────────
 // Receives signed Kora disbursement events.
 //
@@ -4310,7 +4345,7 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
   const {
     fromWalletId, amount, currency, method, isInternational,
     country, bankName, accountNumber, accountHolderName,
-    bankCode, branchCode, iban, swiftBic,
+    bankCode, branchCode, iban, swiftBic, routingNumber,
   } = req.body;
 
   if (!fromWalletId || typeof amount === 'undefined' || !currency || !method)
@@ -4340,7 +4375,7 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
   // String field length limits — prevent oversized strings reaching the DB
   const WITHDRAWAL_STR_LIMITS = {
     bankName: 100, accountNumber: 50, accountHolderName: 100,
-    bankCode: 20, branchCode: 20, iban: 34, swiftBic: 11, country: 60,
+    bankCode: 20, branchCode: 20, iban: 34, swiftBic: 11, country: 60, routingNumber: 20,
   };
   for (const [field, max] of Object.entries(WITHDRAWAL_STR_LIMITS)) {
     const val = req.body[field];
@@ -4376,9 +4411,12 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
     logger.warn('POST /withdrawals blocked — country has no supported payout corridor', {
       userId: req.user.userId, country: resolvedCountry, currency,
     });
+    const gridHint = isGridSandboxConfigured()
+      ? ' US, UK, and selected EU bank withdrawals require Lightspark Grid sandbox onboarding.'
+      : '';
     return res.status(400).json({
-      error: 'Withdrawals for your country are not available yet. EGWallet currently supports withdrawals to Nigeria, Kenya, South Africa, Ghana, Ivory Coast, Cameroon, Egypt, and Tanzania. Support for more countries is coming soon.',
       errorCode: 'COUNTRY_NOT_SUPPORTED',
+      error: 'Withdrawals for your country are not available yet. EGWallet currently supports withdrawals to Nigeria, Kenya, South Africa, Ghana, Ivory Coast, Cameroon, Egypt, and Tanzania.' + gridHint + ' Support for more countries is coming soon.',
     });
   }
 
@@ -4461,6 +4499,50 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
     }
   }
 
+  // ── Lightspark Grid sandbox — require customer + bank details before hold ──
+  let gridCustomer = null;
+  if (payoutRouter(resolvedCountry) === 'lightspark') {
+    if (method !== 'bank') {
+      return res.status(400).json({
+        error: 'Lightspark withdrawals must go to a bank account.',
+        errorCode: 'GRID_BANK_ONLY',
+      });
+    }
+    const code = String(currency || '').toUpperCase();
+    const routing = String(routingNumber || bankCode || '').replace(/\D/g, '');
+    if (code === 'USD' && (!accountNumber || routing.length !== 9)) {
+      return res.status(400).json({
+        error: 'US bank withdrawals require an account number and a 9-digit routing number.',
+        errorCode: 'GRID_BANK_DETAILS_REQUIRED',
+      });
+    }
+    if (code === 'GBP' && (!accountNumber || routing.length !== 6)) {
+      return res.status(400).json({
+        error: 'UK bank withdrawals require an account number and a 6-digit sort code.',
+        errorCode: 'GRID_BANK_DETAILS_REQUIRED',
+      });
+    }
+    if (code === 'EUR' && !iban) {
+      return res.status(400).json({
+        error: 'Euro withdrawals require an IBAN.',
+        errorCode: 'GRID_BANK_DETAILS_REQUIRED',
+      });
+    }
+    if (!['USD', 'EUR', 'GBP'].includes(code)) {
+      return res.status(400).json({
+        error: `Lightspark sandbox withdrawals do not support ${code}.`,
+        errorCode: 'COUNTRY_NOT_SUPPORTED',
+      });
+    }
+    gridCustomer = await getGridCustomerByUserId(req.user.userId);
+    if (!gridCustomer) {
+      return res.status(400).json({
+        error: 'Complete Lightspark Grid customer onboarding before withdrawing to a US, UK, or EU bank account.',
+        errorCode: 'GRID_ONBOARDING_REQUIRED',
+      });
+    }
+  }
+
   // ── Client-supplied idempotency key (required) ────────────────────────────
   const clientKey = req.body.idempotencyKey || req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
   if (!clientKey) return res.status(400).json({ error: 'Idempotency-Key header is required' });
@@ -4521,7 +4603,7 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
       bankName:          bankName          || null,
       accountNumber:     sanitizedAccountNumber,
       accountHolderName: accountHolderName || null,
-      bankCode:          bankCode          || null,
+      bankCode:          bankCode || routingNumber || null,
       branchCode:        branchCode        || null,
       iban:              iban              || null,
       swiftBic:          swiftBic          || null,
@@ -4531,6 +4613,11 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
     });
   } catch (err) {
     return res.status(err.status || 500).json({ error: err.message });
+  }
+
+  withdrawal.payoutProvider = payoutRouter(resolvedCountry);
+  if (gridCustomer) {
+    withdrawal.gridCustomerId = gridCustomer.grid_customer_id;
   }
 
   // Auto-advance unless fraud/AML requires admin review (restricted accounts blocked above).
@@ -4631,6 +4718,11 @@ app.post('/withdrawals', authMiddleware, async (req, res) => {
     setImmediate(() => executePayout(_capturedWithdrawalId, logger, withBalanceMutex));
   }
 });
+
+// Lightspark Grid sandbox — customer, hosted KYC, external accounts, quotes.
+// Authenticated. Never exposes credentials. Incoming Grid payments are not
+// a deposit rail (Stripe remains deposits).
+app.use('/grid', createGridRouter(authMiddleware));
 
 // ─── Stripe Connect — onboarding for US/UK/European withdrawal corridors ─────
 // Inert (503 STRIPE_CONNECT_DISABLED) unless STRIPE_CONNECT_ENABLED=true and

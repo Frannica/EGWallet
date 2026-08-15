@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, TextInput, Alert, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, Share } from 'react-native';
+import { View, Text, TextInput, Alert, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, Share, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth/AuthContext';
 import { sendTransaction, getWalletCurrency, fetchFxQuote, FxQuote, generateId } from '../api/transactions';
@@ -14,6 +14,7 @@ import { refreshWalletFromBackend } from '../utils/walletSync';
 import { WITHDRAW_LOCAL_RATE, WITHDRAW_INTL_RATE, FX_CONVERSION_RATE } from '../config/fees';
 import { useLanguage } from '../i18n/LanguageContext';
 import { getApiErrorMessage } from '../utils/apiErrorMessage';
+import { getGridStatus, startGridOnboarding } from '../api/grid';
 import { formatStatusLabel, formatWalletIdShort } from '../utils/safeDisplay';
 
 // Sends are FREE; FX fee is applied on cross-currency conversion (backend)
@@ -87,6 +88,9 @@ export default function SendScreen() {
   const [iban, setIban] = useState<string>('');
   const [swiftBic, setSwiftBic] = useState<string>('');
   const [withdrawalCountry, setWithdrawalCountry] = useState<string>('');
+  const [routingNumber, setRoutingNumber] = useState<string>('');
+  const [gridConfigured, setGridConfigured] = useState(false);
+  const [gridHasCustomer, setGridHasCustomer] = useState(false);
   // Debit/credit card withdrawal was removed: EGWallet has no capability to push
   // funds to an arbitrary user-entered card. Only real Kora bank/mobile-money
   // payout methods (and, once officially enabled, Stripe Connect linked bank
@@ -138,6 +142,24 @@ export default function SendScreen() {
   const navigation = useNavigation();
 
   useEffect(() => { loadWallets(); }, [auth.token]);
+
+  useEffect(() => {
+    if (!auth.token || activeTab !== 'withdraw') return;
+    let cancelled = false;
+    getGridStatus()
+      .then((status) => {
+        if (cancelled) return;
+        setGridConfigured(!!status.configured);
+        setGridHasCustomer(!!status.customer?.gridCustomerId);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setGridConfigured(false);
+          setGridHasCustomer(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [auth.token, activeTab]);
 
   // Re-sync balances (only) when screen comes back into focus — e.g. returning
   // from the Receipt screen after a withdrawal. Does NOT reset currency or
@@ -269,6 +291,7 @@ export default function SendScreen() {
   // this the same way for every one of these currencies.
   const isKoraMobileMoneyWithdrawal = activeTab === 'withdraw' && withdrawalMethod === 'mobile' && !!koraMobileCountryForCurrency;
   const isKoraBankWithdrawal        = activeTab === 'withdraw' && withdrawalMethod === 'bank'   && !!koraBankCountryForCurrency;
+  const isGridBankCorridor = activeTab === 'withdraw' && gridConfigured && ['USD', 'EUR', 'GBP'].includes(currency);
   // Bank withdrawals have no Kora corridor at all for mobile-money-only
   // currencies (XAF, GHS, XOF, EGP, TZS) — disabled regardless of which
   // method is currently selected, so the option itself is never tappable.
@@ -552,6 +575,12 @@ export default function SendScreen() {
           ...(withdrawalMethod === 'bank' && isIntlWithdrawal  && !isKoraBankWithdrawal && iban.trim()       && { iban:        iban.trim().toUpperCase() }),
           ...(withdrawalMethod === 'bank' && isIntlWithdrawal  && !isKoraBankWithdrawal && swiftBic.trim()   && { swiftBic:    swiftBic.trim().toUpperCase() }),
           ...(withdrawalMethod === 'bank' && isIntlWithdrawal  && !isKoraBankWithdrawal && withdrawalCountry.trim() && { country: withdrawalCountry.trim() }),
+          ...(isGridBankCorridor && currency === 'USD' && { country: 'US', routingNumber: routingNumber.trim(), bankCode: routingNumber.trim() }),
+          ...(isGridBankCorridor && currency === 'GBP' && { country: 'GB', bankCode: (bankCode || routingNumber).trim() }),
+          ...(isGridBankCorridor && currency === 'EUR' && {
+            ...(withdrawalCountry.trim() && { country: withdrawalCountry.trim() }),
+            iban: iban.trim().toUpperCase(),
+          }),
           // Kora corridors — send the ISO-2 country explicitly ONLY when the
           // currency unambiguously identifies a single Kora-confirmed country
           // (NGN→NG, KES→KE, ZAR→ZA, GHS→GH, EGP→EG, TZS→TZ). XAF and XOF are
@@ -576,6 +605,28 @@ export default function SendScreen() {
         err.status = response.status;
         err.errorCode = error.errorCode;
         err.code = error.code;
+        if (error.errorCode === 'GRID_ONBOARDING_REQUIRED') {
+          Alert.alert(
+            t('send.gridOnboardingRequired'),
+            '',
+            [
+              { text: t('common.cancel') || 'Cancel', style: 'cancel' },
+              {
+                text: 'Continue',
+                onPress: async () => {
+                  try {
+                    const result = await startGridOnboarding(accountName || 'EGWallet Customer');
+                    if (result.kycUrl) await Linking.openURL(result.kycUrl);
+                    const status = await getGridStatus();
+                    setGridHasCustomer(!!status.customer?.gridCustomerId);
+                  } catch (onboardErr: any) {
+                    Alert.alert(t('send.gridOnboardingRequired'), onboardErr?.message || '');
+                  }
+                },
+              },
+            ]
+          );
+        }
         throw err;
       }
       
@@ -1414,6 +1465,36 @@ export default function SendScreen() {
                     )}
                     {isKoraBankWithdrawal && (
                       <Text style={styles.infoText}>{t('send.bankCodeAutomatic')}</Text>
+                    )}
+                    {isGridBankCorridor && currency === 'USD' && (
+                      <View style={styles.section}>
+                        <Text style={styles.label}>{t('send.routingNumber')}</Text>
+                        <TextInput
+                          value={routingNumber}
+                          onChangeText={v => setRoutingNumber(v.replace(/\D/g, '').slice(0, 9))}
+                          placeholder="021000021"
+                          placeholderTextColor="#AAB8C2"
+                          keyboardType="number-pad"
+                          maxLength={9}
+                          editable={!loading}
+                          style={styles.input}
+                        />
+                      </View>
+                    )}
+                    {isGridBankCorridor && currency === 'GBP' && (
+                      <View style={styles.section}>
+                        <Text style={styles.label}>{t('send.sortCode')}</Text>
+                        <TextInput
+                          value={bankCode}
+                          onChangeText={v => setBankCode(v.replace(/\D/g, '').slice(0, 6))}
+                          placeholder="123456"
+                          placeholderTextColor="#AAB8C2"
+                          keyboardType="number-pad"
+                          maxLength={6}
+                          editable={!loading}
+                          style={styles.input}
+                        />
+                      </View>
                     )}
                     {withdrawalMethod === 'bank' && isIntlWithdrawal && !isKoraBankWithdrawal && (
                       <>

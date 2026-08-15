@@ -65,6 +65,8 @@ const {
   isCountryStripeConnectApproved,
   stripeConnectPayout,
 } = require('./stripeConnect');
+const { isGridSandboxConfigured, isGridSandboxCountry } = require('./grid/gridEnv');
+const { lightsparkPayout, queryLightsparkStatus } = require('./grid/gridPayout');
 
 // ─── Stripe client ────────────────────────────────────────────────────────────
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || null;
@@ -247,14 +249,16 @@ const KORA_UNSUPPORTED_COUNTRIES = new Set([
  * Callers MUST turn a null result into a COUNTRY_NOT_SUPPORTED error before
  * any debit — never silently fall through to stripePayout().
  *
- * @returns {'kora'|'stripe_connect'|null} null means "no safe provider" —
- *   the caller MUST fail the request with a clear message.
+ * @returns {'kora'|'stripe_connect'|'lightspark'|null} null means "no safe
+ *   provider" — the caller MUST fail the request with a clear message.
+ *   Unknown providers must never fall through to Kora.
  */
 function payoutRouter(country) {
   if (!country) return null;
   const iso2 = country.trim().toUpperCase();
   if (KORA_COUNTRIES.has(iso2)) return 'kora';
   if (isCountryStripeConnectApproved(iso2)) return 'stripe_connect';
+  if (isGridSandboxCountry(iso2)) return 'lightspark';
   return null;
 }
 
@@ -333,6 +337,9 @@ const COUNTRY_NAME_TO_ISO2 = {
   'sierra leone': 'SL', liberia: 'LR', gambia: 'GM', mauritania: 'MR', djibouti: 'DJ',
   eritrea: 'ER', somalia: 'SO',
   'united states': 'US', 'united kingdom': 'GB', 'great britain': 'GB',
+  germany: 'DE', france: 'FR', netherlands: 'NL', ireland: 'IE', spain: 'ES',
+  italy: 'IT', austria: 'AT', belgium: 'BE', portugal: 'PT', finland: 'FI',
+  sweden: 'SE', denmark: 'DK', luxembourg: 'LU',
 };
 
 /**
@@ -376,6 +383,9 @@ function resolveWithdrawalCountry({ country, userRegion, currency }) {
   // neighbours without a real per-country signal.
   const byCurrency = KORA_CURRENCY_TO_COUNTRY[(currency || '').toUpperCase()];
   if (byCurrency) return byCurrency;
+  const ccy = (currency || '').toUpperCase();
+  if (ccy === 'USD' && isGridSandboxCountry('US')) return 'US';
+  if (ccy === 'GBP' && isGridSandboxCountry('GB')) return 'GB';
   return null;
 }
 
@@ -461,7 +471,7 @@ async function resolveKoraMobileMoneyAccount({ mobileMoneyCode, phoneNumber, cur
  * Unknown provider ids throw a definitive pre-HTTP rejection so funds can be
  * refunded safely and Kora is never contacted by accident.
  *
- * @param {'kora'|'stripe'|'stripe_connect'|string|null} provider
+ * @param {'kora'|'stripe'|'stripe_connect'|'lightspark'|string|null} provider
  * @param {object} w
  * @param {object} logger
  */
@@ -474,6 +484,9 @@ async function dispatchToProvider(provider, w, logger) {
   }
   if (provider === 'kora') {
     return koraPayout(w, logger);
+  }
+  if (provider === 'lightspark') {
+    return lightsparkPayout(w, logger);
   }
   const err = new Error(
     `No payout executor for provider ${provider || 'none'} — refusing to dispatch`
@@ -500,6 +513,9 @@ function isPayoutProviderReady(country) {
     // dispatch time — same two-layer pattern as Kora (secret key present vs.
     // corridor/method support checked deeper in koraPayout()).
     return isStripeConnectEnabled();
+  }
+  if (provider === 'lightspark') {
+    return isGridSandboxConfigured();
   }
   // provider === null — no explicit, verified corridor for this country
   // (unsupported country, or a real corridor Stripe/Kora hasn't approved
@@ -1366,6 +1382,10 @@ async function executePayout(withdrawalId, logger, withBalanceMutex) {
           if (wRef) {
             wRef.payoutReference = result.reference;
             wRef.payoutProvider  = result.provider;
+            if (result.gridCustomerId) wRef.gridCustomerId = result.gridCustomerId;
+            if (result.gridExternalAccountId) wRef.gridExternalAccountId = result.gridExternalAccountId;
+            if (result.gridQuoteId) wRef.gridQuoteId = result.gridQuoteId;
+            if (result.gridTransactionId) wRef.gridTransactionId = result.gridTransactionId;
             saveAppState(dbRef);
           }
         } catch (refErr) {
@@ -1397,6 +1417,12 @@ async function executePayout(withdrawalId, logger, withBalanceMutex) {
         if (wForRef && !wForRef.payoutReference) {
           wForRef.payoutReference = result.reference;
           wForRef.payoutProvider  = result.provider;
+        }
+        if (wForRef) {
+          if (result.gridCustomerId) wForRef.gridCustomerId = result.gridCustomerId;
+          if (result.gridExternalAccountId) wForRef.gridExternalAccountId = result.gridExternalAccountId;
+          if (result.gridQuoteId) wForRef.gridQuoteId = result.gridQuoteId;
+          if (result.gridTransactionId) wForRef.gridTransactionId = result.gridTransactionId;
         }
         markWithdrawalPaid(dbSuccess, withdrawalId, result.reference, result.provider);
         const pgResult = await persistWithdrawalById(dbSuccess, withdrawalId, 'processing');
@@ -1699,6 +1725,7 @@ module.exports = {
   isPayoutProviderReady,
   dispatchToProvider,
   executePayout,
+  queryLightsparkStatus,
   // Shared Kora credential/verification helpers — used by index.js (webhook route)
   // and adminWithdrawals.js (reconcile) so the key-resolution logic lives in one place.
   getKoraSecretKey,

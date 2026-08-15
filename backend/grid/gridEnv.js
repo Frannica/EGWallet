@@ -20,6 +20,13 @@ const GRID_ENV_KEYS = [
   'GRID_API_BASE_URL',
 ];
 
+/** Sandbox US/UK/EU bank corridors. Kora's eight African countries are never included. */
+const DEFAULT_GRID_SANDBOX_COUNTRIES = [
+  'US', 'GB', 'DE', 'FR', 'NL', 'IE', 'ES', 'IT', 'AT', 'BE', 'PT', 'FI', 'SE', 'DK', 'LU',
+];
+
+const KORA_RESERVED_COUNTRIES = new Set(['NG', 'KE', 'ZA', 'GH', 'CI', 'CM', 'EG', 'TZ']);
+
 function readTrimmed(name) {
   const raw = process.env[name];
   return typeof raw === 'string' ? raw.trim() : '';
@@ -111,12 +118,47 @@ function getGridBasicAuth() {
   };
 }
 
+function getGridSandboxCountries() {
+  const raw = readTrimmed('GRID_SANDBOX_COUNTRIES');
+  const source = raw
+    ? raw.split(',').map((c) => c.trim().toUpperCase()).filter(Boolean)
+    : DEFAULT_GRID_SANDBOX_COUNTRIES;
+  return new Set(source.filter((c) => !KORA_RESERVED_COUNTRIES.has(c)));
+}
+
+function isGridSandboxCountry(country) {
+  if (!isGridSandboxConfigured()) return false;
+  const iso2 = (country || '').trim().toUpperCase();
+  if (!iso2 || KORA_RESERVED_COUNTRIES.has(iso2)) return false;
+  return getGridSandboxCountries().has(iso2);
+}
+
+/**
+ * Optional dashboard PEM. Phase 4 webhook verify uses this; it is not required
+ * to boot. Never log the returned value.
+ */
+function getGridWebhookPublicKey() {
+  const raw = readTrimmed('GRID_WEBHOOK_PUBLIC_KEY');
+  if (!raw) return null;
+  return raw.replace(/\\n/g, '\n');
+}
+
+function isGridWebhookPublicKeyConfigured() {
+  const key = getGridWebhookPublicKey();
+  return !!(key && key.includes('BEGIN PUBLIC KEY'));
+}
+
 module.exports = {
   OFFICIAL_GRID_API_BASE_URL,
   ALLOWED_GRID_ENVIRONMENT,
+  DEFAULT_GRID_SANDBOX_COUNTRIES,
   validateGridEnvironment,
   isGridSandboxConfigured,
   assertGridEnvOrExit,
   anyGridEnvVarSet,
   getGridBasicAuth,
+  getGridSandboxCountries,
+  isGridSandboxCountry,
+  getGridWebhookPublicKey,
+  isGridWebhookPublicKeyConfigured,
 };

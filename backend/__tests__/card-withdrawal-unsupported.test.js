@@ -41,7 +41,7 @@ test('backend returns CARD_WITHDRAWAL_UNSUPPORTED before any hold for debit/cred
   // Scope ordering checks to the POST /withdrawals handler body.
   const start = indexSource.indexOf("app.post('/withdrawals'");
   assert.ok(start > 0, 'POST /withdrawals handler must exist');
-  const handler = indexSource.slice(start, start + 12000);
+  const handler = indexSource.slice(start, start + 20000);
   const rejectIdx = handler.indexOf('CARD_WITHDRAWAL_UNSUPPORTED');
   const holdIdx = handler.indexOf('await withBalanceMutex(async () => {');
   const createIdx = handler.indexOf('createWithdrawal(db, req.user.userId');
