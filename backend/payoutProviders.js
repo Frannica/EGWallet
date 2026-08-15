@@ -457,6 +457,33 @@ async function resolveKoraMobileMoneyAccount({ mobileMoneyCode, phoneNumber, cur
 }
 
 /**
+ * Dispatches a claimed withdrawal to exactly one known payout executor.
+ * Unknown provider ids throw a definitive pre-HTTP rejection so funds can be
+ * refunded safely and Kora is never contacted by accident.
+ *
+ * @param {'kora'|'stripe'|'stripe_connect'|string|null} provider
+ * @param {object} w
+ * @param {object} logger
+ */
+async function dispatchToProvider(provider, w, logger) {
+  if (provider === 'stripe') {
+    return stripePayout(w, logger);
+  }
+  if (provider === 'stripe_connect') {
+    return stripeConnectPayout(w, logger);
+  }
+  if (provider === 'kora') {
+    return koraPayout(w, logger);
+  }
+  const err = new Error(
+    `No payout executor for provider ${provider || 'none'} — refusing to dispatch`
+  );
+  err._definitiveRejection = true;
+  err.providerContacted = false;
+  throw err;
+}
+
+/**
  * Returns true when the payout provider for `country` is configured and can
  * disburse real funds.  Used by POST /withdrawals to reject requests before
  * funds enter holdBalance when no provider is available.
@@ -1066,7 +1093,7 @@ async function executePayout(withdrawalId, logger, withBalanceMutex) {
   // up-front (see index.js), so this should be unreachable for new
   // withdrawals. Guards against any legacy/edge-case record with an
   // unsupported country string reaching dispatch and being silently treated
-  // as a Kora payout (see attemptPayout's stripe/else branch below).
+  // as a Kora payout (see dispatchToProvider — unknown providers throw).
   if (!provider) {
     logger.error('[executePayout] No payout provider available for country — marking failed for refund', {
       withdrawalId, country: w.country,
@@ -1195,23 +1222,11 @@ async function executePayout(withdrawalId, logger, withBalanceMutex) {
       payoutDispatchRef: wSnapshot.payoutDispatchRef });
 
     // Provider HTTP call outside the mutex.
-    // NOTE: `provider` above is payoutRouter(w.country), which never returns
-    // 'stripe' anymore — every country without an explicit Kora/Stripe Connect
-    // corridor now returns null and is rejected before a withdrawal record can
-    // even be created (see the COUNTRY_NOT_SUPPORTED check in POST
-    // /withdrawals). This branch is therefore unreachable in normal operation;
-    // stripePayout() itself is left in place (rather than deleted) purely so
-    // existing regression tests asserting "no provider was removed" keep
-    // passing, and as a defensive no-op if a legacy pre-lockdown record is
-    // ever replayed through this code path.
-    let result;
-    if (provider === 'stripe') {
-      result = await stripePayout(wSnapshot, logger);
-    } else if (provider === 'stripe_connect') {
-      result = await stripeConnectPayout(wSnapshot, logger);
-    } else {
-      result = await koraPayout(wSnapshot, logger);
-    }
+    // Fail-closed: only the explicit known providers may be contacted.
+    // An unknown / future provider id must NEVER fall through to koraPayout.
+    // The legacy 'stripe' executor remains for replay of pre-lockdown records
+    // only — payoutRouter() never returns 'stripe' for new routing decisions.
+    const result = await dispatchToProvider(provider, wSnapshot, logger);
     return result;
   }
 
@@ -1682,6 +1697,7 @@ async function executePayout(withdrawalId, logger, withBalanceMutex) {
 module.exports = {
   payoutRouter,
   isPayoutProviderReady,
+  dispatchToProvider,
   executePayout,
   // Shared Kora credential/verification helpers — used by index.js (webhook route)
   // and adminWithdrawals.js (reconcile) so the key-resolution logic lives in one place.
@@ -1717,6 +1733,7 @@ module.exports = {
   // Exposed for unit testing only — not part of the runtime execution path used by index.js.
   _test: {
     getKoraSecretKey, getKoraPublicKey, getKoraEncryptionKey, encryptKoraPayload,
-    verifyKoraWebhookSignature, toKoraAmount, koraPayout, KORA_UNSUPPORTED_COUNTRIES,
+    verifyKoraWebhookSignature, toKoraAmount, koraPayout, dispatchToProvider,
+    KORA_UNSUPPORTED_COUNTRIES,
   },
 };

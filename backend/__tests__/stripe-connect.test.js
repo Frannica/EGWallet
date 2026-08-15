@@ -276,5 +276,6 @@ test('/health surfaces Stripe Connect readiness as booleans only (no keys, no ac
 
 test('executePayout routes stripe_connect withdrawals to stripeConnectPayout', () => {
   const payoutSource = fs.readFileSync(path.join(__dirname, '..', 'payoutProviders.js'), 'utf8');
-  assert.match(payoutSource, /provider === 'stripe_connect'[\s\S]{0,80}stripeConnectPayout\(wSnapshot, logger\)/);
+  assert.match(payoutSource, /dispatchToProvider\(provider, wSnapshot, logger\)/);
+  assert.match(payoutSource, /provider === 'stripe_connect'[\s\S]{0,80}stripeConnectPayout\(w, logger\)/);
 });

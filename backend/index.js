@@ -98,6 +98,14 @@ const {
   listKoraBanks, listKoraMobileMoneyOperators, resolveKoraBankAccount, resolveKoraMobileMoneyAccount,
 } = require('./payoutProviders');
 const {
+  assertGridEnvOrExit,
+  isGridSandboxConfigured,
+} = require('./grid/gridEnv');
+const {
+  probeGridConnectivity,
+  getGridHealthFlags,
+} = require('./grid/gridClient');
+const {
   validateKoraWithdrawalPreHold,
   getMobileMoneyOperators: getMobileMoneyOperatorsForApp,
 } = require('./koraCorridorRules');
@@ -216,6 +224,8 @@ if (!process.env.PORT || isNaN(PORT) || PORT <= 0) {
   process.exit(1);
 }
 const NODE_ENV = process.env.NODE_ENV || 'development';
+// Always reject Lightspark Grid Production, including in development.
+assertGridEnvOrExit();
 if (ALLOW_DEMO_DEPOSITS && NODE_ENV === 'production' && !stripeClient) {
   console.warn('[Stripe] ALLOW_DEMO_DEPOSITS=true — demo deposit intents enabled in production (closed testing only)');
 }
@@ -447,6 +457,22 @@ logger.add(new winston.transports.Console({
   )
 }));
 setPushLogger(logger);
+
+if (isGridSandboxConfigured()) {
+  probeGridConnectivity()
+    .then((result) => {
+      logger.info('[Grid] Sandbox connectivity check', {
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        reason: result.reason,
+      });
+    })
+    .catch((err) => {
+      logger.warn('[Grid] Sandbox connectivity check failed', {
+        error: err && err.message ? err.message : 'unknown',
+      });
+    });
+}
 
 // Global crash handlers — catch anything that could silently kill the process
 process.on('uncaughtException', (err) => {
@@ -3015,6 +3041,8 @@ app.get('/health', (req, res) => {
     // until Stripe explicitly approves EGWallet's business model for Connect.
     stripeConnectEnabled: isStripeConnectEnabled(),
     stripeConnectWebhookConfigured: !!process.env.STRIPE_CONNECT_WEBHOOK_SECRET,
+    // Booleans only — never Grid credentials, webhook PEMs, or response bodies.
+    ...getGridHealthFlags(),
     push: getPushProviderReadiness(),
   };
   res.status(200).json(healthStatus);
