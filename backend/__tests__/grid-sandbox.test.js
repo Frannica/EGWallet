@@ -310,16 +310,10 @@ test('duplicate Grid webhooks are acknowledged and not processed twice', async (
   }
 });
 
-test('incoming Grid payments are acknowledged and never treated as EGWallet deposits', async () => {
-  const logs = [];
-  const result = await processGridWebhookEvent(
-    { id: 'wh_in', type: 'INCOMING_PAYMENT.COMPLETED', data: { id: 'Transaction:abc-1', amount: 5000 } },
-    { info: (msg) => logs.push(msg), warn() {}, error() {} }
-  );
-  assert.equal(result.handled, true);
-  assert.match(logs.join('\n'), /Incoming payment ignored for ledger/);
-  assert.match(webhookSource, /Incoming payments never credit EGWallet/);
+test('incoming Grid payments do not use the Stripe deposit rail', async () => {
+  assert.match(webhookSource, /Stripe deposits stay on/);
   assert.doesNotMatch(webhookSource, /markWithdrawalPaid\(db, withdrawalId, transactionId, 'stripe'\)/);
+  assert.match(webhookSource, /applyIncomingPayment/);
 });
 
 test('lightsparkPayout funds sandbox, transfer-out, and stays off Kora/Stripe', async () => {

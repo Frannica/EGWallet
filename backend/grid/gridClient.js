@@ -316,6 +316,15 @@ async function listDiscoveries(params, options = {}) {
   });
 }
 
+async function sendOfficialTestWebhook(options = {}) {
+  return gridRequest({
+    method: 'POST',
+    path: '/webhooks/test',
+    axiosImpl: options.axiosImpl,
+    timeout: options.timeout || 30_000,
+  });
+}
+
 module.exports = {
   isAllowedPath,
   gridRequest,
@@ -340,4 +349,5 @@ module.exports = {
   createTransferOut,
   getTransaction,
   listDiscoveries,
+  sendOfficialTestWebhook,
 };

@@ -2812,7 +2812,8 @@ app.post('/webhooks/stripe-connect',
 // exact raw body, verified with GRID_WEBHOOK_PUBLIC_KEY (PEM). The endpoint
 // exists before the public key is configured so the Railway URL can be
 // registered in the Lightspark dashboard first; verification then returns 503
-// until the PEM is set. Incoming payments never credit EGWallet wallets.
+// until the PEM is set. Incoming COMPLETED events credit the mapped wallet;
+// Stripe deposits remain on stripe_intent_id.
 app.post('/webhooks/grid',
   express.raw({ type: 'application/json' }),
   async (req, res) => {

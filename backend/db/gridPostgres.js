@@ -87,6 +87,23 @@ async function listGridInternalAccounts(userId) {
   return result.rows;
 }
 
+async function getGridInternalAccountByGridId(gridInternalAccountId) {
+  const result = await pool.query(
+    `SELECT user_id, grid_customer_id, grid_internal_account_id, currency, status
+       FROM grid_internal_accounts WHERE grid_internal_account_id = $1 LIMIT 1`,
+    [gridInternalAccountId]
+  );
+  return result.rows[0] || null;
+}
+
+async function findWalletIdForUser(userId) {
+  const result = await pool.query(
+    `SELECT id FROM wallets WHERE user_id = $1 ORDER BY created_at ASC LIMIT 1`,
+    [userId]
+  );
+  return result.rows[0] ? result.rows[0].id : null;
+}
+
 async function upsertGridExternalAccount(row) {
   const result = await pool.query(
     `INSERT INTO grid_external_accounts (
@@ -221,6 +238,8 @@ module.exports = {
   updateGridCustomerStatus,
   upsertGridInternalAccount,
   listGridInternalAccounts,
+  getGridInternalAccountByGridId,
+  findWalletIdForUser,
   upsertGridExternalAccount,
   listGridExternalAccounts,
   getGridExternalAccountByGridId,

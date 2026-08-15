@@ -63,6 +63,7 @@ backend/db.json
 backend/db.json.bak
 backend/db.json.corrupt.*
 backend/db.json.tmp
+backend/db/backups/
 
 # Runtime logs - may contain sensitive request data
 backend/logs/*.log

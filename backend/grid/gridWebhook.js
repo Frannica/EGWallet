@@ -17,6 +17,7 @@ const gridDb = require('../db/gridPostgres');
 const { markWithdrawalPaid, markWithdrawalFailed } = require('../withdrawalEngine');
 const { loadAppState, saveAppState } = require('../db/appStateStore');
 const { commitWithdrawalStateUpdate } = require('../db/withdrawalsPostgres');
+const { applyIncomingPayment } = require('./gridIncomingCredit');
 
 function parseSignatureHeader(header) {
   if (!header || typeof header !== 'string') return null;
@@ -156,23 +157,24 @@ async function applyAccountEvent(type, data, logger) {
 }
 
 /**
- * Process a verified webhook body. Incoming payments never credit EGWallet
- * wallets — Stripe remains the deposit rail.
+ * Process a verified webhook body. Incoming COMPLETED events credit the
+ * mapped EGWallet wallet via the atomic ledger. Stripe deposits stay on
+ * stripe_intent_id and are never written by this path.
  */
-async function processGridWebhookEvent(body, logger, withBalanceMutex) {
+async function processGridWebhookEvent(body, logger, withBalanceMutex, injected) {
   const type = webhookEventType(body);
   const data = body && body.data ? body.data : {};
 
   if (type === 'TEST') {
-    return { handled: true, type };
+    return { handled: true, type, credited: false, reason: 'test' };
   }
   if (type.startsWith('OUTGOING_PAYMENT.')) {
     await applyOutgoingPayment(type, data, logger, withBalanceMutex);
     return { handled: true, type };
   }
   if (type.startsWith('INCOMING_PAYMENT.')) {
-    logger.info('[webhook/grid] Incoming payment ignored for ledger (Stripe remains deposit rail)', { type });
-    return { handled: true, type };
+    const incoming = await applyIncomingPayment(type, data, logger, withBalanceMutex, injected);
+    return { handled: true, type, credited: !!incoming.credited, reason: incoming.reason };
   }
   if (type.startsWith('CUSTOMER.') || type.startsWith('VERIFICATION.')) {
     await applyCustomerEvent(type, data, logger);
@@ -200,6 +202,9 @@ async function handleGridWebhook({ rawBody, signatureHeader, parsedBody, logger,
 
   const reserved = await gridDb.reserveGridWebhookEvent({ webhookId: eventId, eventType });
   if (!reserved) {
+    if (eventType.startsWith('INCOMING_PAYMENT.') || eventType.startsWith('OUTGOING_PAYMENT.')) {
+      await processGridWebhookEvent(parsedBody, logger, withBalanceMutex);
+    }
     return { status: 200, body: { received: true, duplicate: true } };
   }
 
