@@ -71,7 +71,7 @@ async function phaseApi(result) {
     region: 'US',
     currencies: ['USD'],
     fullName: 'EGWallet Sandbox Verify',
-    email: `grid.sandbox.verify.${platformCustomerId.slice(0, 8)}@example.test`,
+    email: `egwallet.sandbox.verify.${platformCustomerId.slice(0, 8)}@mailinator.com`,
     birthDate: '1990-01-15',
     address: {
       line1: '1 Synthetic Way',
@@ -157,7 +157,7 @@ async function phasePersist(result) {
       `INSERT INTO users (id, email, password_hash, region, role, preferred_currency, created_at)
        VALUES ($1, $2, $3, 'US', 'individual', 'USD', NOW())
        ON CONFLICT (id) DO NOTHING`,
-      [userId, `grid.sandbox.verify.${String(userId).slice(0, 8)}@example.test`, passwordHash]
+      [userId, `egwallet.sandbox.verify.${String(userId).slice(0, 8)}@mailinator.com`, passwordHash]
     );
     await client.query(
       `INSERT INTO wallets (id, user_id, type, created_at)
