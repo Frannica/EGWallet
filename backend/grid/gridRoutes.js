@@ -232,7 +232,7 @@ function createGridRouter(authMiddleware) {
     if (!isGridSandboxConfigured()) {
       return res.status(503).json({ error: 'Lightspark Grid sandbox is not configured', errorCode: 'GRID_NOT_CONFIGURED' });
     }
-    const { source, destination, lockedCurrencySide, lockedCurrencyAmount, description } = req.body || {};
+    const { source, destination, lockedCurrencySide, lockedCurrencyAmount, description, purposeOfPayment, senderCustomerInfo } = req.body || {};
     if (!source || !destination || !lockedCurrencySide || !lockedCurrencyAmount) {
       return res.status(400).json({ error: 'source, destination, lockedCurrencySide, and lockedCurrencyAmount are required' });
     }
@@ -242,6 +242,8 @@ function createGridRouter(authMiddleware) {
       lockedCurrencySide,
       lockedCurrencyAmount,
       description,
+      purposeOfPayment: purposeOfPayment || 'GOODS_OR_SERVICES',
+      senderCustomerInfo: senderCustomerInfo || { PURPOSE_OF_PAYMENT: purposeOfPayment || 'GOODS_OR_SERVICES' },
     }, {
       idempotencyKey: req.headers['idempotency-key'] || `egw-quote-${req.user.userId}-${uuidv4()}`,
     });

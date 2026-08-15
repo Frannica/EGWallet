@@ -212,12 +212,14 @@ test('USD/EUR/GBP external-account bodies match official Grid account types', ()
 
   const eur = buildExternalAccountBody({
     customerId: 'Customer:a12dcbd6-dced-4ec4-b756-3c3a9ea3d123',
-    withdrawal: { iban: 'DE89370400440532013000', accountHolderName: 'Ada Lovelace' },
+    withdrawal: { iban: 'DE89370400440532013000', accountHolderName: 'Ada Lovelace', country: 'DE', swiftBic: 'DEUTDEFF' },
     currency: 'EUR',
     userId: 'user-1',
   });
   assert.equal(eur.accountInfo.accountType, 'EUR_ACCOUNT');
   assert.equal(eur.accountInfo.iban, 'DE89370400440532013000');
+  assert.equal(eur.accountInfo.swiftCode, 'DEUTDEFF');
+  assert.equal(eur.accountInfo.beneficiary.countryOfResidence, 'DE');
 
   const gbp = buildExternalAccountBody({
     customerId: 'Customer:a12dcbd6-dced-4ec4-b756-3c3a9ea3d123',

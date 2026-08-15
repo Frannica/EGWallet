@@ -67,11 +67,16 @@ function buildExternalAccountBody({ customerId, withdrawal, currency, userId }) 
       beneficiary,
     };
   } else if (code === 'EUR') {
+    const country = String(withdrawal.country || '').trim().toUpperCase();
     accountInfo = {
       accountType: 'EUR_ACCOUNT',
       iban,
+      swiftCode: decryptPII(withdrawal.swiftBic) || undefined,
       bankName: bankName || undefined,
-      beneficiary,
+      beneficiary: {
+        ...beneficiary,
+        countryOfResidence: country || undefined,
+      },
     };
   } else if (code === 'GBP') {
     accountInfo = {
@@ -240,6 +245,8 @@ async function lightsparkPayout(w, logger, options = {}) {
         lockedCurrencySide: 'SENDING',
         lockedCurrencyAmount: amount,
         description: `EGWallet withdrawal ${w.id}`,
+        purposeOfPayment: 'GOODS_OR_SERVICES',
+        senderCustomerInfo: { PURPOSE_OF_PAYMENT: 'GOODS_OR_SERVICES' },
       },
       { idempotencyKey: `egw-quote-${w.id}`, axiosImpl: options.axiosImpl }
     );
