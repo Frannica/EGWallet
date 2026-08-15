@@ -297,6 +297,8 @@ test('Grid client allowlists official 2025-10-13 paths and rejects invented ones
   assert.equal(isAllowedPath('POST', '/customers/external-accounts'), true);
   assert.equal(isAllowedPath('POST', '/quotes'), true);
   assert.equal(isAllowedPath('POST', '/transfer-out'), true);
+  assert.equal(isAllowedPath('POST', '/webhooks/test'), true);
+  assert.equal(isAllowedPath('POST', '/sandbox/webhooks/test'), true);
   assert.equal(isAllowedPath('POST', '/transfer-in'), false);
   assert.equal(isAllowedPath('DELETE', '/customers'), false);
   assert.doesNotMatch(gridClientSource, /\/transfer-in/);

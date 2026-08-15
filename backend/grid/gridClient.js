@@ -70,6 +70,7 @@ function isAllowedPath(method, path) {
     if (path === '/quotes') return true;
     if (path === '/transfer-out') return true;
     if (path === '/sandbox/webhooks/test') return true;
+    if (path === '/webhooks/test') return true;
     if (/^\/customers\/Customer:[A-Za-z0-9-]+\/kyc-link$/.test(path)) return true;
     if (/^\/quotes\/Quote:[A-Za-z0-9-]+\/execute$/.test(path)) return true;
     if (/^\/sandbox\/internal-accounts\/InternalAccount:[A-Za-z0-9-]+\/fund$/.test(path)) return true;
